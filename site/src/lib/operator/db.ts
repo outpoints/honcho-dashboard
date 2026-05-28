@@ -654,6 +654,82 @@ export async function dbReasoningTasks(
   }
 }
 
+/**
+ * Webhook delivery stats from the `queue` table (task_type='webhook'). Honcho's
+ * REST API exposes webhook *endpoints* (url only) but no delivery history; the
+ * deliver/fail records and event types live in the queue.
+ */
+export interface WebhookStatsResult {
+  available: boolean;
+  reason?: string;
+  total?: number;
+  delivered?: number;
+  failed?: number;
+  last_delivery?: string | null;
+  byEvent?: { event_type: string; n: number }[];
+  recent?: { id: string; event_type: string; status: "delivered" | "failed"; created_at: string }[];
+}
+
+export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsResult> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "queue"))) {
+      return { available: false, reason: "queue table not found in this Honcho schema" };
+    }
+    const qWs = await pickColumn(p, "queue", ["workspace_name", "workspace_id"]);
+    if (!qWs || !(await columnExists(p, "queue", "task_type"))) {
+      return { available: false, reason: "queue table missing workspace/task_type columns" };
+    }
+    const hasError = await columnExists(p, "queue", "error");
+    const hasProcessed = await columnExists(p, "queue", "processed");
+    const errorCol = hasError ? "error" : "NULL::text";
+    const processedCol = hasProcessed ? "processed" : "true";
+    const filter = `${qWs} = $1 AND task_type = 'webhook'`;
+
+    const [agg, byEvent, recent] = await Promise.all([
+      p.query<{ total: string; delivered: string; failed: string; last: string | null }>(
+        `SELECT count(*)::bigint AS total,
+                count(*) FILTER (WHERE ${errorCol} IS NULL AND ${processedCol})::bigint AS delivered,
+                count(*) FILTER (WHERE ${errorCol} IS NOT NULL)::bigint AS failed,
+                max(created_at)::text AS last
+           FROM queue WHERE ${filter}`,
+        [workspaceId],
+      ),
+      p.query<{ event_type: string; n: string }>(
+        `SELECT coalesce(payload->>'event_type', '(unknown)') AS event_type, count(*)::bigint AS n
+           FROM queue WHERE ${filter} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`,
+        [workspaceId],
+      ),
+      p.query<{ id: string; event_type: string; error: string | null; created_at: string }>(
+        `SELECT id::text AS id,
+                coalesce(payload->>'event_type', '(unknown)') AS event_type,
+                ${errorCol} AS error,
+                created_at::text AS created_at
+           FROM queue WHERE ${filter} ORDER BY id DESC LIMIT 15`,
+        [workspaceId],
+      ),
+    ]);
+
+    return {
+      available: true,
+      total: Number(agg.rows[0]?.total ?? 0),
+      delivered: Number(agg.rows[0]?.delivered ?? 0),
+      failed: Number(agg.rows[0]?.failed ?? 0),
+      last_delivery: agg.rows[0]?.last ?? null,
+      byEvent: byEvent.rows.map((r) => ({ event_type: r.event_type, n: Number(r.n) })),
+      recent: recent.rows.map((r) => ({
+        id: r.id,
+        event_type: r.event_type,
+        status: r.error ? "failed" : "delivered",
+        created_at: r.created_at,
+      })),
+    };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */
