@@ -1,0 +1,20 @@
+/* TEAM */
+
+  Original dashboard design: nodaylight
+  Live reference: https://honcho-dashboard-gamma.vercel.app/
+
+/* THANKS */
+
+  Honcho team — for the self-hosted memory server and the official
+    @honcho-ai/sdk this dashboard is built on top of.
+    https://honcho.dev
+
+/* STACK */
+
+  Framework:   Next.js 16 (App Router, React 19, TypeScript strict)
+  SDK:         @honcho-ai/sdk
+  Styling:     Tailwind CSS v4 with custom @theme tokens
+  Animation:   Framer Motion
+  Icons:       Lucide React
+  Fonts:       JetBrains Mono + VT323 (next/font/google)
+  Postgres:    pg (read-only, operator/db module only)

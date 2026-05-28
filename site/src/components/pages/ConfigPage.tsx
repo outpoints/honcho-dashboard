@@ -4,137 +4,145 @@ import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Field, TextInput, Toggle } from "@/components/atoms";
-import { Select } from "@/components/Select";
+import { Button, Field, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
-import { ENV_VARS, FEATURE_FLAGS } from "@/lib/data";
+import { honcho } from "@/lib/honcho/client";
+import { useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
+import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
+
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok"; detail: string }
+  | { kind: "err"; detail: string };
+
+type EditorMode = { kind: "new" } | { kind: "edit"; id: string };
 
 export function ConfigPage() {
-  const { push } = useToast();
-  const [flags, setFlags] = useState(FEATURE_FLAGS);
+  const { instances, activeId, setActive, upsert, remove } = useHonchoInstances();
+  const [mode, setMode] = useState<EditorMode | null>(null);
+
+  const effectiveMode: EditorMode =
+    mode ?? (activeId ? { kind: "edit", id: activeId } : { kind: "new" });
+
+  const editing =
+    effectiveMode.kind === "edit"
+      ? instances.find((i) => i.id === effectiveMode.id) ?? null
+      : null;
+
+  const editorKey =
+    effectiveMode.kind === "edit" ? `edit:${effectiveMode.id}` : "new";
+
+  const startNew = () => setMode({ kind: "new" });
+  const handleSelect = (id: string) => {
+    setActive(id);
+    setMode({ kind: "edit", id });
+    invalidate("");
+  };
+
   return (
     <div className="space-y-3">
-      <PageHeader title="CONFIG" subtitle="instance configuration and settings" />
+      <PageHeader
+        title="CONFIG"
+        subtitle="self-hosted honcho instances and dashboard settings"
+        actions={<Button icon="plus" onClick={startNew}>NEW_INSTANCE</Button>}
+      />
 
       <div className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-8 space-y-3">
-          <Panel title="LLM_CONFIGURATION">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="LLM_PROVIDER">
-                <Select
-                  value="OpenAI"
-                  onChange={(v) => push({ type: "success", message: `LLM provider set to ${v}` })}
-                  options={[
-                    { value: "OpenAI", label: "OpenAI" },
-                    { value: "Anthropic", label: "Anthropic" },
-                    { value: "Google Gemini", label: "Google Gemini" },
-                  ]}
-                />
-              </Field>
-              <Field label="LLM_MODEL">
-                <TextInput defaultValue="gpt-5.4" />
-              </Field>
-            </div>
-            <p className="mt-3 text-[10px] text-text-muted">&gt; The LLM provider and model used for reasoning tasks. Custom models trained for logical reasoning are recommended.</p>
+          <Panel title={editing ? "EDIT_INSTANCE" : "NEW_INSTANCE"}>
+            <InstanceEditor
+              key={editorKey}
+              editing={editing}
+              upsert={upsert}
+              setActive={setActive}
+              onSaved={(id) => setMode({ kind: "edit", id })}
+              onRemove={(id) => {
+                const inst = instances.find((i) => i.id === id);
+                if (!inst) return;
+                if (instances.length === 1) return;
+                remove(id);
+                setMode(activeId && activeId !== id ? { kind: "edit", id: activeId } : { kind: "new" });
+              }}
+              canRemove={!!editing && instances.length > 1}
+            />
           </Panel>
 
-          <Panel title="REASONING_CONFIGURATION">
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <Field label="REASONING_WORKERS" hint="Number of concurrent background workers">
-                <TextInput defaultValue="4" />
-              </Field>
-              <Field label="BATCH_THRESHOLD (TOKENS)" hint="Token threshold before batch processing">
-                <TextInput defaultValue="1000" />
-              </Field>
-            </div>
-            <Field label="MAX_CONTEXT_TOKENS" hint="Maximum tokens for context retrieval">
-              <TextInput defaultValue="4000" />
-            </Field>
-          </Panel>
-
-          <Panel title="DATABASE_CONFIGURATION">
-            <Field label="POSTGRES_URL" hint="PostgreSQL connection string (requires restart)">
-              <TextInput defaultValue="postgresql://localhost:5432/honcho" />
-            </Field>
-          </Panel>
-
-          <Panel title="FEATURE_FLAGS">
-            <div className="space-y-2">
-              {flags.map((f) => (
-                <div key={f.key} className="flex items-start justify-between gap-3 p-3 bg-void/40 border border-border">
-                  <div>
-                    <div className="text-xs text-text-primary">{f.key}</div>
-                    <div className="text-[10px] text-text-muted">{f.description}</div>
-                  </div>
-                  <Toggle
-                    checked={f.enabled}
-                    onChange={(next) => {
-                      setFlags((curr) => curr.map((x) => (x.key === f.key ? { ...x, enabled: next } : x)));
-                      push({ type: "success", message: `${f.key} ${next ? "enabled" : "disabled"}` });
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+          <Panel title="INSTANCES">
+            {instances.length === 0 ? (
+              <div className="text-xs text-text-muted py-4">No instances yet. Add one above.</div>
+            ) : (
+              <div className="space-y-1">
+                {instances.map((inst) => {
+                  const isActive = inst.id === activeId;
+                  const isEditing = editing?.id === inst.id;
+                  return (
+                    <button
+                      key={inst.id}
+                      onClick={() => handleSelect(inst.id)}
+                      className={
+                        "w-full flex items-center justify-between gap-2 px-2 py-2 text-left border transition-colors " +
+                        (isEditing
+                          ? "border-accent/60 bg-accent/5"
+                          : "border-border hover:border-border-light")
+                      }
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs flex items-center gap-2">
+                          <span className="text-text-primary truncate">{inst.name}</span>
+                          {isActive ? (
+                            <span className="text-[9px] text-accent uppercase tracking-wider">active</span>
+                          ) : null}
+                        </div>
+                        <div className="text-[10px] text-text-muted truncate font-mono">{inst.baseUrl}</div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {inst.token ? <Icon name="key" size={11} className="text-text-muted" /> : null}
+                        <Icon name="chevron-right" size={12} className="text-text-muted" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </Panel>
         </div>
 
         <div className="col-span-12 lg:col-span-4 space-y-3">
-          <Panel title="CURRENT_CONFIG">
-            <div className="space-y-1.5 text-xs">
-              {[
-                ["version", "v3.0.5"],
-                ["provider", "openai"],
-                ["model", "gpt-5.4"],
-                ["workers", "4"],
-                ["batch", "1000t"],
-                ["max_context", "4000t"],
-                ["webhooks", "ON"],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between py-1.5 border-b border-border last:border-0">
-                  <span className="text-text-muted">{k}</span>
-                  <span className="text-accent">{v}</span>
+          <Panel title="ACTIVE_INSTANCE">
+            {(() => {
+              const a = instances.find((i) => i.id === activeId);
+              if (!a) return <div className="text-xs text-text-muted">No active instance.</div>;
+              const rows: [string, string][] = [
+                ["name", a.name],
+                ["base_url", a.baseUrl],
+                ["auth", a.token ? "Bearer token" : "none"],
+              ];
+              return (
+                <div className="space-y-1.5 text-xs">
+                  {rows.map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-2 py-1.5 border-b border-border last:border-0">
+                      <span className="text-text-muted">{k}</span>
+                      <span className="text-accent truncate font-mono">{v}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </Panel>
 
-          <Panel title="CONFIG_HIERARCHY">
-            <div className="text-xs space-y-1">
-              <p className="text-text-muted text-[10px] mb-2">Configuration cascades hierarchically:</p>
-              <div className="text-accent">1. Instance (global defaults)</div>
-              <div className="text-accent ml-3">└ 2. Workspace (overrides instance)</div>
-              <div className="text-accent ml-6">└ 3. Session (overrides workspace)</div>
-              <div className="text-accent ml-9">└ 4. Message (overrides session)</div>
-            </div>
-            <p className="mt-3 text-[10px] text-text-muted">Peer <span className="text-accent">observe_me</span> overrides workspace defaults but not session/message config.</p>
-            <div className="mt-3">
-              <div className="text-[10px] text-text-muted mb-1">Config schema (workspace/session):</div>
-              <pre className="px-2 py-2 bg-void border border-border text-[10px] text-text-primary overflow-x-auto leading-snug">{`{
-  "reasoning": { "enabled": bool },
-  "peer_card": { "use": bool, "create": bool },
-  "summary": {
-    "enabled": bool,
-    "messages_per_short_summary": int,
-    "messages_per_long_summary": int
-  },
-  "dream": { "enabled": bool }
-}`}</pre>
-            </div>
-          </Panel>
-
-          <Panel title="ENVIRONMENT">
-            <div className="space-y-1 text-[11px]">
-              {ENV_VARS.map((v) => (
-                <div key={v.key} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-void/40 border border-border">
-                  <span className="text-accent font-mono truncate">{v.key}</span>
-                  <span className="text-text-primary font-mono truncate" title={v.value}>{v.value}</span>
-                </div>
-              ))}
-              <div className="pt-2 mt-2 border-t border-border flex items-center gap-1 text-[10px] text-text-muted">
-                <Icon name="external-link" size={10} /> see CONFIG_VALIDATION in DIAGNOSTICS
-              </div>
+          <Panel title="NOTES">
+            <div className="text-[11px] text-text-muted space-y-2 leading-relaxed">
+              <p>
+                Instances are stored in <span className="text-accent">localStorage</span> — no
+                server-side persistence. Tokens never leave this browser.
+              </p>
+              <p>
+                The Honcho server config (LLM providers, workers, DB) is set via environment
+                variables on the server, not from this dashboard. See{" "}
+                <span className="text-accent">#/diagnostics</span> for runtime validation.
+              </p>
             </div>
           </Panel>
         </div>
@@ -142,5 +150,134 @@ export function ConfigPage() {
 
       <StatusBar />
     </div>
+  );
+}
+
+function InstanceEditor({
+  editing,
+  upsert,
+  setActive,
+  onSaved,
+  onRemove,
+  canRemove,
+}: {
+  editing: HonchoInstance | null;
+  upsert: (i: HonchoInstance) => void;
+  setActive: (id: string) => void;
+  onSaved: (id: string) => void;
+  onRemove: (id: string) => void;
+  canRemove: boolean;
+}) {
+  const { push } = useToast();
+  const [name, setName] = useState(editing?.name ?? "");
+  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "http://localhost:8000");
+  const [token, setToken] = useState(editing?.token ?? "");
+  const [test, setTest] = useState<TestState>({ kind: "idle" });
+
+  const handleSave = () => {
+    const trimmedUrl = baseUrl.trim().replace(/\/+$/, "");
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      push({ type: "error", message: "Name is required" });
+      return;
+    }
+    if (!/^https?:\/\//.test(trimmedUrl)) {
+      push({ type: "error", message: "Base URL must start with http:// or https://" });
+      return;
+    }
+    const id = editing?.id ?? `inst_${Date.now().toString(36)}`;
+    const next: HonchoInstance = {
+      id,
+      name: trimmedName,
+      baseUrl: trimmedUrl,
+      token: token.trim() || undefined,
+    };
+    upsert(next);
+    setActive(id);
+    invalidate("");
+    onSaved(id);
+    push({ type: "success", message: `Saved instance ${trimmedName}` });
+  };
+
+  const handleTest = async () => {
+    const trimmedUrl = baseUrl.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(trimmedUrl)) {
+      setTest({ kind: "err", detail: "Base URL must start with http:// or https://" });
+      return;
+    }
+    setTest({ kind: "testing" });
+    try {
+      const opts = { baseUrl: trimmedUrl, token: token.trim() || undefined };
+      const health = await honcho.health(opts);
+      const ws = await honcho.workspaces.list(opts, { size: 1 });
+      setTest({
+        kind: "ok",
+        detail: `health=${health.status} · workspaces=${ws.total}`,
+      });
+    } catch (err) {
+      setTest({ kind: "err", detail: formatApiError(err) });
+    }
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="NAME" hint="A label for this Honcho instance, e.g. local, prod">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="local" />
+        </Field>
+        <Field label="BASE_URL" hint="Root URL of the Honcho server (no trailing slash)">
+          <TextInput
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="http://localhost:8000"
+          />
+        </Field>
+      </div>
+      <div className="mt-3">
+        <Field label="BEARER_TOKEN" hint="Leave blank if the server has AUTH_USE_AUTH=false">
+          <TextInput
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="(optional)"
+            type="password"
+          />
+        </Field>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <Button variant="primary" onClick={handleSave}>{editing ? "SAVE" : "CREATE"}</Button>
+        <Button variant="secondary" onClick={handleTest} disabled={test.kind === "testing"}>
+          {test.kind === "testing" ? "TESTING…" : "TEST_CONNECTION"}
+        </Button>
+        {canRemove && editing ? (
+          <Button variant="ghost" onClick={() => onRemove(editing.id)}>REMOVE</Button>
+        ) : null}
+      </div>
+
+      {test.kind !== "idle" ? (
+        <div
+          className={
+            "mt-3 px-2 py-1.5 border text-[11px] flex items-center gap-2 " +
+            (test.kind === "ok"
+              ? "border-accent/40 bg-accent/10 text-accent"
+              : test.kind === "err"
+                ? "border-red-500/40 bg-red-500/10 text-red-400"
+                : "border-border bg-border/30 text-text-muted")
+          }
+        >
+          <Icon
+            name={test.kind === "ok" ? "check" : test.kind === "err" ? "x-circle" : "loader"}
+            size={12}
+          />
+          <span className="truncate">
+            {test.kind === "testing"
+              ? "Contacting Honcho…"
+              : test.kind === "ok"
+                ? `Connected — ${test.detail}`
+                : test.detail}
+          </span>
+        </div>
+      ) : null}
+    </>
   );
 }

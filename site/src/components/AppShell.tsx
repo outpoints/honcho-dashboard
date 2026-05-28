@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
@@ -42,28 +42,32 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
 
 function readHashRoute(): RouteKey {
   if (typeof window === "undefined") return "overview";
-  const raw = window.location.hash.replace(/^#\/?/, "");
+  const raw = window.location.hash.replace(/^#\/?/, "").split(/[?&]/)[0];
   return (NAV_ITEMS.find((n) => n.key === raw)?.key as RouteKey) || "overview";
 }
 
+function subscribeHash(notify: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("hashchange", notify);
+  return () => window.removeEventListener("hashchange", notify);
+}
+
+const SERVER_HASH: RouteKey = "overview";
+
 export function AppShell() {
-  const [current, setCurrent] = useState<RouteKey>("overview");
+  const current = useSyncExternalStore<RouteKey>(
+    subscribeHash,
+    readHashRoute,
+    () => SERVER_HASH,
+  );
   const [menuOpen, setMenuOpen] = useState(false);
 
-  useEffect(() => {
-    setCurrent(readHashRoute());
-    const onHash = () => setCurrent(readHashRoute());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  const onNavigate = (key: RouteKey) => {
-    setCurrent(key);
+  const onNavigate = useCallback((key: RouteKey) => {
     if (typeof window !== "undefined") {
       window.location.hash = `#/${key}`;
     }
     setMenuOpen(false);
-  };
+  }, []);
 
   const Page = RENDER[current] ?? OverviewPage;
 

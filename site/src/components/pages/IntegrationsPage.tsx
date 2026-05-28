@@ -1,308 +1,181 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
-import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Tabs } from "@/components/atoms";
-import { Icon } from "@/components/icons";
-import { INTEGRATIONS, QUICK_LINKS, SELF_HOSTED_REQUIREMENTS } from "@/lib/data";
-import type { AgentKey } from "@/types/honcho";
-import { cn } from "@/lib/utils";
+import { Button, PillTabs } from "@/components/atoms";
+import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import { useToast } from "@/components/toast";
 
-const AGENT_LOGOS: Record<string, string | null> = {
-  hermes: "/images/hermes_pixel_logo-BV9A8ejn.png",
-  openclaw: "/images/openclaw_pixel_logo-DsyNa2AE.png",
-  "claude-code": "/images/claude_pixel_logo-BzK2MwSh.png",
-  mcp: null,
-};
-
-function AgentAvatar({ agentKey, themeText, large = false }: { agentKey: string; themeText: string; large?: boolean }) {
-  const logo = AGENT_LOGOS[agentKey];
-  const size = large ? 80 : 24;
-  if (logo) {
-    return (
-      <Image
-        src={logo}
-        alt={agentKey}
-        width={size}
-        height={size}
-        className="object-contain pixelated relative z-10"
-        style={{ imageRendering: "pixelated" }}
-      />
-    );
-  }
-  return <Icon name="layers" className={themeText} size={large ? 28 : 14} />;
-}
-
-type SubTab = "overview" | "tools" | "setup" | "self-hosted";
-
-const THEME: Record<string, { bg: string; border: string; text: string }> = {
-  blue: { bg: "bg-blue-500/10", border: "border-blue-400/50", text: "text-blue-400" },
-  red: { bg: "bg-red-500/10", border: "border-red-400/50", text: "text-red-400" },
-  orange: { bg: "bg-orange-400/10", border: "border-orange-400/50", text: "text-orange-400" },
-};
+type Snippet = "curl" | "python" | "typescript" | "mcp";
 
 export function IntegrationsPage() {
-  const [agentKey, setAgentKey] = useState<AgentKey>("hermes");
-  const [tab, setTab] = useState<SubTab>("overview");
-  const agent = INTEGRATIONS.find((a) => a.key === agentKey)!;
-  const theme = THEME[agent.themeColor] || THEME.blue;
+  const apiOpts = useActiveHonchoOptions();
+  const { workspaceId } = useActiveWorkspace();
+  const { push } = useToast();
+  const [tab, setTab] = useState<Snippet>("curl");
+
+  const base = apiOpts?.baseUrl ?? "http://localhost:8000";
+  const ws = workspaceId ?? "default";
+  const token = apiOpts?.token;
+
+  const copy = (text: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      push({ type: "success", message: "Copied to clipboard" });
+    }
+  };
+
+  const snippet = renderSnippet(tab, base, ws, token);
 
   return (
     <div className="space-y-3">
-      <PageHeader title="INTEGRATIONS" subtitle={undefined} />
-      <Panel title="INTEGRATIONS">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            {INTEGRATIONS.map((a) => {
-              const t = THEME[a.themeColor] || THEME.blue;
-              const active = a.key === agentKey;
-              return (
-                <button
-                  key={a.key}
-                  onClick={() => { setAgentKey(a.key); setTab("overview"); }}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 border transition-colors duration-150 text-xs",
-                    active ? `${t.border} ${t.bg} ${t.text}` : "border-border text-text-muted hover:border-border-light",
-                  )}
-                >
-                  {AGENT_LOGOS[a.key] ? (
-                    <Image src={AGENT_LOGOS[a.key]!} alt={a.key} width={16} height={16} className="object-contain" style={{ imageRendering: "pixelated" }} />
-                  ) : (
-                    <Icon name="layers" size={14} />
-                  )}
-                  {a.name.replace(" Agent", "")}
-                </button>
-              );
-            })}
+      <PageHeader
+        title="INTEGRATIONS"
+        subtitle="point any client at your live Honcho instance"
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Card label="base_url" value={base} mono />
+        <Card label="workspace" value={ws} mono />
+        <Card label="auth" value={token ? "Bearer token" : "none"} />
+      </div>
+
+      <Panel title="QUICK_START">
+        <div className="space-y-3">
+          <PillTabs
+            items={[
+              { key: "curl", label: "CURL" },
+              { key: "python", label: "PYTHON" },
+              { key: "typescript", label: "TYPESCRIPT" },
+              { key: "mcp", label: "MCP" },
+            ]}
+            current={tab}
+            onChange={(k) => setTab(k as Snippet)}
+          />
+          <div className="relative">
+            <pre className="bg-void border border-border px-3 py-3 text-[11px] text-text-primary overflow-x-auto leading-relaxed">
+              {snippet}
+            </pre>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute top-2 right-2"
+              onClick={() => copy(snippet)}
+            >
+              COPY
+            </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-void border border-border px-3 py-1.5 text-xs">
-              <Icon name="search" size={12} className="text-text-muted" />
-              <input placeholder="Search integrations..." className="bg-transparent text-xs outline-none placeholder:text-text-muted" />
-            </div>
-            <Button variant="outline" icon="external-link">DOCS</Button>
-          </div>
-        </div>
-
-        <motion.div
-          key={agentKey}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className={cn("mt-3 p-3 flex items-start gap-4 border", theme.border, theme.bg)}
-        >
-          <div className={cn("w-20 h-20 border-2 flex items-center justify-center shrink-0 relative overflow-hidden", theme.border)}>
-            <AgentAvatar agentKey={agent.key} themeText={theme.text} large />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-pixel text-xl tracking-wider">{agent.name}</h2>
-              <Chip tone="muted">{agent.role}</Chip>
-              <a className="ml-auto text-text-muted hover:text-text-primary"><Icon name="code" size={14} /></a>
-            </div>
-            <p className="mt-1 text-xs text-text-muted">{agent.description}</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {agent.features.map((f) => (
-                <span key={f} className="text-[10px] px-2 py-0.5 bg-border text-text-primary">{f}</span>
-              ))}
-            </div>
-          </div>
-        </motion.div>
-
-        <Tabs<SubTab>
-          className="mt-3"
-          items={[
-            { key: "overview", label: "OVERVIEW", icon: "book" },
-            { key: "tools", label: "TOOLS", icon: "sparkles" },
-            { key: "setup", label: "SETUP", icon: "settings" },
-            { key: "self-hosted", label: "SELF-HOSTED", icon: "server" },
-          ]}
-          current={tab}
-          onChange={setTab}
-        />
-
-        <div className="mt-3 relative">
-        <AnimatePresence mode="wait">
-        <motion.div key={`${agentKey}-${tab}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
-          {tab === "overview" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <Section icon="message-square" title="PURPOSE">{agent.purpose}</Section>
-                <Section icon="git-branch" title="WHERE HONCHO FITS">{agent.whereHonchoFits}</Section>
-              </div>
-              <div className="space-y-3">
-                <Section icon="layers" title="MCP COMPATIBILITY">{agent.mcpCompatibility}</Section>
-                <div>
-                  <SectionTitle icon="settings" title="CONFIGURATION" />
-                  <div className="space-y-1 mt-2 text-[11px]">
-                    {agent.configuration.map((c) => (
-                      <div key={c.key} className="flex items-center gap-2">
-                        <span className="text-accent">{c.key}</span>
-                        <span className="text-text-muted">→</span>
-                        <span className="text-text-primary">{c.value}</span>
-                      </div>
-                    ))}
-                    <button className="mt-2 text-[10px] text-accent hover:underline">+1 more options →</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "tools" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {agent.tools.map((t) => (
-                <div key={t.name} className="flex items-center gap-3 p-3 border border-border bg-void/40">
-                  <div className={cn("w-9 h-9 border flex items-center justify-center shrink-0", t.type === "llm" ? "border-purple-400/40 text-purple-400 bg-purple-400/5" : "border-yellow-400/40 text-yellow-400 bg-yellow-400/5")}>
-                    <Icon name={t.type === "llm" ? "brain" : "zap"} size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-text-primary">{t.name}</span>
-                      {t.type === "llm" ? <Chip tone="purple">LLM</Chip> : null}
-                    </div>
-                    <p className="text-[10px] text-text-muted">{t.description}</p>
-                  </div>
-                </div>
-              ))}
-              <div className="col-span-full flex items-center gap-4 mt-2 text-[10px] text-text-muted">
-                <span className="flex items-center gap-1"><Icon name="zap" size={10} className="text-yellow-400" /> Fast (no LLM)</span>
-                <span className="flex items-center gap-1"><Icon name="brain" size={10} className="text-purple-400" /> LLM-powered</span>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "setup" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <SectionTitle icon="terminal" title="SETUP STEPS" />
-                <ol className="mt-2 space-y-2 text-[11px]">
-                  {agent.setupSteps.map((s, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <span className="w-6 h-6 border border-border text-accent flex items-center justify-center shrink-0">{i + 1}</span>
-                      <span className="text-text-primary">{s}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-              <div>
-                <SectionTitle icon="settings" title="CONFIGURATION OPTIONS" />
-                <div className="mt-2 space-y-2">
-                  {agent.configOptions.map((o) => (
-                    <div key={o.key} className="grid grid-cols-3 gap-3 px-3 py-2 bg-void/40 border border-border text-[11px]">
-                      <span className="text-accent">{o.key}</span>
-                      <span className="text-text-primary">{o.current}</span>
-                      <span className="text-text-muted">{o.options}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "self-hosted" ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <ReqTile icon="server" label="ENDPOINT" value={agent.selfHosted.endpoint} highlight />
-                <ReqTile icon="key" label="AUTH" value={agent.selfHosted.auth} />
-                <ReqTile icon="plug" label="PROTOCOL" value={agent.selfHosted.protocol} />
-                <ReqTile icon="key" label="API KEY" value={agent.selfHosted.apiKey} />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <SectionTitle icon="check" title="SETUP NOTES" />
-                  <ul className="mt-2 space-y-1 text-[11px]">
-                    {agent.selfHosted.setupNotes.map((n, i) => (
-                      <li key={i} className="flex items-start gap-2"><Icon name="check" size={10} className="text-accent mt-0.5" /> <span className="text-text-muted">{n}</span></li>
-                    ))}
-                  </ul>
-                  <SectionTitle icon="warning" title="CAVEATS" className="mt-4 text-yellow-400" />
-                  <ul className="mt-2 space-y-1 text-[11px]">
-                    {agent.selfHosted.caveats.map((c, i) => (
-                      <li key={i} className="flex items-start gap-2 text-text-muted"><span className="text-yellow-400">•</span> {c}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between">
-                    <SectionTitle icon="code" title="CONFIG EXAMPLE" />
-                    <button className="text-[10px] text-text-muted hover:text-text-primary flex items-center gap-1"><Icon name="copy" size={10} /> Copy</button>
-                  </div>
-                  <pre className="mt-2 p-3 bg-void border border-border text-[11px] text-text-primary overflow-x-auto leading-relaxed">{agent.selfHosted.configExample}</pre>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </motion.div>
-        </AnimatePresence>
         </div>
       </Panel>
 
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-8">
-          <Panel title="SELF_HOSTED_REQUIREMENTS">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {SELF_HOSTED_REQUIREMENTS.map((r) => (
-                <div key={r.name} className="p-3 bg-void/40 border border-border">
-                  <div className="flex items-center gap-2 mb-1 text-xs">
-                    <Icon name={r.icon as "server" | "brain" | "database" | "key"} size={14} className="text-text-muted" />
-                    <span className="text-text-primary">{r.name}</span>
-                  </div>
-                  <p className="text-[10px] text-text-muted">{r.detail}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
+      <Panel title="API_REFERENCE">
+        <div className="text-[11px] space-y-2">
+          <Row k="OpenAPI spec" v={<a href={`${base}/openapi.json`} target="_blank" rel="noreferrer" className="text-accent underline decoration-dotted">{base}/openapi.json</a>} />
+          <Row k="Interactive docs" v={<a href={`${base}/docs`} target="_blank" rel="noreferrer" className="text-accent underline decoration-dotted">{base}/docs</a>} />
+          <Row k="Health" v={<a href={`${base}/health`} target="_blank" rel="noreferrer" className="text-accent underline decoration-dotted">{base}/health</a>} />
         </div>
-        <div className="col-span-12 lg:col-span-4">
-          <Panel title="QUICK_LINKS">
-            <div className="space-y-2">
-              {QUICK_LINKS.map((l) => (
-                <a key={l} className="flex items-center justify-between px-3 py-2 bg-void/40 border border-border hover:border-accent text-xs cursor-pointer">
-                  <span className="text-accent">{l}</span>
-                  <Icon name="external-link" size={12} className="text-text-muted" />
-                </a>
-              ))}
-            </div>
-          </Panel>
+      </Panel>
+
+      <Panel title="NOTE">
+        <div className="text-[11px] text-text-muted leading-relaxed">
+          The Hermes / OpenClaw / Claude Code / MCP marketing copy from the original UI was static
+          content, not data from your Honcho instance. It&apos;s been replaced with snippets generated
+          from your actual <span className="text-accent">active instance</span> and{" "}
+          <span className="text-accent">active workspace</span>, so what you copy will work against
+          this server.
         </div>
-      </div>
+      </Panel>
 
       <StatusBar />
     </div>
   );
 }
 
-function Section({ icon, title, children }: { icon: "message-square" | "git-branch" | "layers"; title: string; children: React.ReactNode }) {
+function Card({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div>
-      <SectionTitle icon={icon} title={title} />
-      <p className="text-[12px] text-text-primary mt-1 leading-relaxed">{children}</p>
+    <div className="bg-surface border border-border p-3">
+      <div className="text-[10px] text-text-muted uppercase tracking-wider">&gt; {label}</div>
+      <div className={`mt-1 text-sm truncate text-text-primary ${mono ? "font-mono" : ""}`}>{value}</div>
     </div>
   );
 }
 
-function SectionTitle({ icon, title, className }: { icon: string; title: string; className?: string }) {
+function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className={cn("flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-text-muted", className)}>
-      <Icon name={icon as "message-square" | "git-branch" | "layers" | "settings" | "check" | "warning" | "code" | "terminal"} size={12} />
-      {title}
+    <div className="flex justify-between gap-2 py-1.5 border-b border-border last:border-0">
+      <span className="text-text-muted">{k}</span>
+      <span className="truncate text-right">{v}</span>
     </div>
   );
 }
 
-function ReqTile({ icon, label, value, highlight = false }: { icon: "server" | "key" | "plug"; label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className={cn("p-3 border bg-void/40", highlight ? "border-accent border-l-2" : "border-border")}>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-text-muted mb-1">
-        <Icon name={icon} size={11} />
-        {label}
-      </div>
-      <div className="text-xs text-text-primary break-all">{value}</div>
-    </div>
-  );
+function renderSnippet(kind: Snippet, base: string, ws: string, token?: string): string {
+  const auth = token ? ` -H "Authorization: Bearer ${token}"` : "";
+  switch (kind) {
+    case "curl":
+      return `# list workspaces
+curl -X POST ${base}/v3/workspaces/list${auth} \\
+  -H "Content-Type: application/json" -d '{}'
+
+# chat with a peer (memory-augmented)
+curl -X POST ${base}/v3/workspaces/${ws}/peers/PEER_ID/chat${auth} \\
+  -H "Content-Type: application/json" \\
+  -d '{"queries": "what do you remember about Alice?"}'`;
+    case "python":
+      return `import httpx
+
+client = httpx.Client(
+    base_url="${base}",${token ? `\n    headers={"Authorization": "Bearer ${token}"},` : ""}
+)
+
+# list peers in workspace
+r = client.post("/v3/workspaces/${ws}/peers/list", json={})
+print(r.json())
+
+# chat with a peer
+r = client.post(
+    "/v3/workspaces/${ws}/peers/PEER_ID/chat",
+    json={"queries": "what do you remember about Alice?"},
+)
+print(r.json()["content"])`;
+    case "typescript":
+      return `const BASE = "${base}";
+const WS = "${ws}";${token ? `\nconst TOKEN = "${token}";` : ""}
+
+const headers = {
+  "Content-Type": "application/json",${token ? '\n  "Authorization": `Bearer ${TOKEN}`,' : ""}
+};
+
+// list peers
+const peers = await fetch(\`\${BASE}/v3/workspaces/\${WS}/peers/list\`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({}),
+}).then((r) => r.json());
+
+// chat with a peer
+const reply = await fetch(\`\${BASE}/v3/workspaces/\${WS}/peers/PEER_ID/chat\`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ queries: "what do you remember about Alice?" }),
+}).then((r) => r.json());`;
+    case "mcp":
+      return `{
+  "mcpServers": {
+    "honcho": {
+      "url": "${base}/mcp",
+      "headers": {${token ? `\n        "Authorization": "Bearer ${token}",` : ""}
+        "X-Honcho-User-Name": "your-name",
+        "X-Honcho-Assistant-Name": "Assistant"
+      }
+    }
+  }
+}
+
+# Note: Honcho's optional MCP server lives at /mcp and is configured
+# server-side. If this returns 404 your instance does not have the
+# MCP server enabled.`;
+  }
 }

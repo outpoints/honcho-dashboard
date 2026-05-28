@@ -1,0 +1,78 @@
+# Honcho Self-Hosted Dashboard
+#
+# Quick start:
+#   cp .env.example .env        # then fill in your Honcho URL + (optional) DB URL
+#   docker compose up --build -d
+#   open http://localhost:3000
+#
+# All values come from the sibling `.env` file. See `.env.example` for the
+# full list and what each one enables.
+
+services:
+  dashboard:
+    build:
+      context: ./site
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are inlined into the browser bundle at build time —
+        # they cannot be changed by `-e` flags or a `docker compose up` env override.
+        # If you change HONCHO_BASE_URL after the first build, re-run with `--build`.
+        NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_HONCHO_TOKEN: ${HONCHO_TOKEN:-}
+    image: honcho-selfhosted-dashboard:latest
+    container_name: honcho-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+
+    environment:
+      # ---- Same-origin proxy (server-side, runtime) ----
+      # Default upstream when the browser doesn't pin a specific instance via
+      # X-Honcho-Base-Url. Must match (or be a subset of) the allowlist below.
+      NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
+
+      # Comma-separated allowlist of upstream Honcho origins the proxy will
+      # forward to. **Required** — the proxy fails closed if this is empty.
+      # The single fallback above is implicitly added if not already present.
+      HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
+
+      # ---- Operator modules (server-side, runtime, all optional) ----
+      # Read-only Postgres DSN — point at the SAME database Honcho uses.
+      # Enables: throughput chart, 52-week heatmap, db size, pgvector status,
+      # top-tables table, PostgreSQL diagnostic probe. Honcho is never written to.
+      HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}
+
+      # Path to a Honcho log file inside the container. Mount the real file
+      # via the volumes block below. Enables: log tail panel on Diagnostics.
+      HONCHO_LOG_FILE: ${HONCHO_LOG_FILE:-}
+
+      # ISO-8601 timestamp of when the Honcho process started. When set, the
+      # Instance page reports a Honcho uptime alongside the dashboard's own.
+      HONCHO_RUNTIME_START_TS: ${HONCHO_RUNTIME_START_TS:-}
+
+      # Extra env keys to expose on operator/config (comma-separated). The
+      # standard set is always included; secrets are automatically redacted.
+      HONCHO_OPERATOR_CONFIG_KEYS: ${HONCHO_OPERATOR_CONFIG_KEYS:-}
+
+    # Uncomment if you set HONCHO_LOG_FILE above. The left-hand path is the
+    # log on your host; the right-hand path must match HONCHO_LOG_FILE exactly.
+    # volumes:
+    #   - /var/log/honcho/honcho.log:/honcho.log:ro
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/operator/runtime"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # If you run Honcho as a sibling Compose service, uncomment to share its
+    # network so the dashboard can reach `http://honcho:8000` by name.
+    # depends_on:
+    #   - honcho
+    # networks:
+    #   - honcho-net
+
+# networks:
+#   honcho-net:
+#     external: true

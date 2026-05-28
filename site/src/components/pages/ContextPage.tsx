@@ -1,169 +1,156 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Field } from "@/components/atoms";
+import { Button, Field, PillTabs } from "@/components/atoms";
 import { Select } from "@/components/Select";
-import { Icon } from "@/components/icons";
-import { CONTEXT_LAYERS } from "@/lib/data";
-import { cn } from "@/lib/utils";
+import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { getSdk } from "@/lib/honcho/sdk";
+import {
+  toApiPeer,
+  toApiPeerContext,
+  toApiSession,
+  toApiSessionContext,
+} from "@/lib/honcho/adapters";
+import type { ApiPeer, ApiSession } from "@/lib/honcho/types";
 
-const LAYER_TONE: Record<string, string> = {
-  peer_card: "bg-blue-400 text-blue-400 border-blue-400/40",
-  conclusions: "bg-purple-400 text-purple-400 border-purple-400/40",
-  summaries: "bg-cyan-400 text-cyan-400 border-cyan-400/40",
-  messages: "bg-text-muted text-text-muted border-border-light",
-};
+type Mode = "peer" | "session";
 
-const ICONS: Record<string, "user" | "brain" | "book" | "message-square"> = {
-  peer_card: "user",
-  conclusions: "brain",
-  summaries: "book",
-  messages: "message-square",
-};
+function readSubjectFromHash(): { mode: Mode; id: string } | null {
+  if (typeof window === "undefined") return null;
+  const peer = window.location.hash.match(/[?&]peer=([^&]+)/);
+  const session = window.location.hash.match(/[?&]session=([^&]+)/);
+  if (peer) return { mode: "peer", id: decodeURIComponent(peer[1]) };
+  if (session) return { mode: "session", id: decodeURIComponent(session[1]) };
+  return null;
+}
 
 export function ContextPage() {
-  const [tokenLimit, setTokenLimit] = useState(4000);
-  const [layers, setLayers] = useState(CONTEXT_LAYERS);
-  const total = useMemo(() => layers.filter((l) => l.enabled).reduce((s, l) => s + l.tokens, 0), [layers]);
-  const overLimit = total > tokenLimit;
+  const apiOpts = useActiveHonchoOptions();
+  const { workspaceId } = useActiveWorkspace();
+  const [mode, setMode] = useState<Mode>("peer");
+  const [subjectId, setSubjectId] = useState<string | null>(null);
+  const [payload, setPayload] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const initial = readSubjectFromHash();
+    if (initial) {
+      setMode(initial.mode);
+      setSubjectId(initial.id);
+    }
+  }, []);
+
+  const peers = useHonchoQuery<{ items: ApiPeer[]; total: number }>(
+    workspaceId ? `sdk/workspaces/${workspaceId}/peers/list?ctx` : null,
+    async (o) => {
+      const page = await getSdk(o, workspaceId!).peers({ size: 100 });
+      return { items: page.items.map((p) => toApiPeer(p)), total: page.total };
+    },
+  );
+  const sessions = useHonchoQuery<{ items: ApiSession[]; total: number }>(
+    workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list?ctx` : null,
+    async (o) => {
+      const page = await getSdk(o, workspaceId!).sessions({ size: 100 });
+      return { items: page.items.map((s) => toApiSession(s)), total: page.total };
+    },
+  );
+
+  const fetchContext = async () => {
+    if (!apiOpts || !workspaceId || !subjectId) return;
+    setBusy(true);
+    setError(null);
+    setPayload(null);
+    try {
+      const sdk = getSdk(apiOpts, workspaceId);
+      if (mode === "peer") {
+        const peer = await sdk.peer(subjectId);
+        const ctx = await peer.context();
+        setPayload(toApiPeerContext(ctx));
+      } else {
+        const ses = await sdk.session(subjectId);
+        const ctx = await ses.context();
+        setPayload(toApiSessionContext(ctx));
+      }
+    } catch (err) {
+      setError(formatApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const options =
+    mode === "peer" ? peers.data?.items ?? [] : sessions.data?.items ?? [];
 
   return (
     <div className="space-y-3">
       <PageHeader
         title="CONTEXT"
-        subtitle="assemble LLM-ready context from peer representations, conclusions, summaries, and messages"
+        subtitle={workspaceId ? `view computed context in ${workspaceId}` : "select a workspace"}
         actions={
-          <div className="flex items-center gap-2 text-xs">
-            <Icon name="layers" size={12} className="text-text-muted" />
-            <span className={cn("font-pixel text-lg", overLimit ? "text-red-400" : "text-accent")}>{total.toLocaleString()}</span>
-            <span className="text-text-muted">/ {tokenLimit.toLocaleString()} tokens</span>
-          </div>
+          <Button onClick={fetchContext} disabled={!subjectId || busy}>
+            {busy ? "FETCHING…" : "FETCH_CONTEXT"}
+          </Button>
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-        <Field label="SESSION">
-          <Select value="all_sessions" onChange={() => undefined} options={[{ value: "all_sessions", label: "all sessions" }]} />
-        </Field>
-        <Field label="PEER">
-          <Select value="all_peers" onChange={() => undefined} options={[{ value: "all_peers", label: "all peers" }]} />
-        </Field>
-        <Field label="TOKEN_LIMIT" hint={<span className="tabular-nums">{tokenLimit}</span>}>
-          <input
-            type="range"
-            min={500}
-            max={10000}
-            step={250}
-            value={tokenLimit}
-            onChange={(e) => setTokenLimit(parseInt(e.target.value))}
-            className="w-full accent-accent"
+      <Panel title="SUBJECT">
+        <div className="space-y-3">
+          <PillTabs
+            items={[
+              { key: "peer", label: "PEER" },
+              { key: "session", label: "SESSION" },
+            ]}
+            current={mode}
+            onChange={(m) => {
+              setMode(m as Mode);
+              setSubjectId(null);
+              setPayload(null);
+              setError(null);
+            }}
           />
-        </Field>
-        <Button variant="primary" icon="sparkles" className="self-end">GENERATE_CONTEXT</Button>
-      </div>
-
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-7 space-y-3">
-          <Panel title="CONTEXT_LAYERS">
-            <div className="space-y-3">
-              {layers.map((layer) => {
-                const tones = LAYER_TONE[layer.id].split(" ");
-                const bg = tones[0];
-                const text = tones[1];
-                const border = tones[2];
-                return (
-                  <div key={layer.id} className={cn("p-3 border bg-void/30", border)}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon name={ICONS[layer.id]} className={text} size={14} />
-                      <span className={cn("text-sm uppercase tracking-wider", text)}>{layer.label}</span>
-                      <span className="text-[10px] text-text-muted">({layer.id})</span>
-                      <span className="ml-auto text-[10px] text-text-muted">{layer.tokens.toLocaleString()} tokens · {layer.items} items</span>
-                      <button onClick={() => setLayers((curr) => curr.map((l) => l.id === layer.id ? { ...l, enabled: !l.enabled } : l))} className={cn("ml-2 w-7 h-5 border flex items-center justify-center", layer.enabled ? "border-accent text-accent" : "border-border text-text-muted")}><Icon name="eye" size={10} /></button>
-                    </div>
-                    <div className="relative h-2 bg-border mb-2">
-                      <div className={cn("absolute inset-y-0 left-0", bg)} style={{ width: `${Math.min(100, (layer.tokens / 3000) * 100)}%`, opacity: layer.enabled ? 0.7 : 0.2 }} />
-                    </div>
-                    <p className="text-[11px] text-text-muted">{layer.description}</p>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-4 pt-3 border-t border-border">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-text-muted uppercase tracking-wider">total_enabled</span>
-                <span className={overLimit ? "text-red-400" : "text-accent"}>
-                  {total.toLocaleString()} / {tokenLimit.toLocaleString()} tokens
-                </span>
-              </div>
-              <div className="relative h-1 bg-border mt-1.5">
-                <div className={cn("absolute inset-y-0 left-0", overLimit ? "bg-red-500" : "bg-accent")} style={{ width: `${Math.min(100, (total / tokenLimit) * 100)}%` }} />
-              </div>
-              {overLimit ? (
-                <p className="mt-2 text-[10px] text-yellow-400 flex items-center gap-1">
-                  <Icon name="warning" size={10} /> exceeds token limit — lower-priority layers will be truncated
-                </p>
-              ) : null}
-            </div>
-          </Panel>
+          <Field label={mode === "peer" ? "PEER_ID" : "SESSION_ID"}>
+            <Select
+              value={subjectId ?? ""}
+              onChange={(v) => setSubjectId(v || null)}
+              options={options.map((item) => ({ value: item.id, label: item.id }))}
+              disabled={!workspaceId || options.length === 0}
+              placeholder={options.length === 0 ? "(no items)" : `select a ${mode}…`}
+            />
+          </Field>
         </div>
+      </Panel>
 
-        <div className="col-span-12 lg:col-span-5 space-y-3">
-          <Panel title="CONTEXT_PREVIEW">
-            <div className="flex flex-col items-center justify-center py-12 gap-2">
-              <Icon name="eye" className="text-text-muted" size={28} />
-              <p className="text-sm text-text-muted">No context generated yet</p>
-              <p className="text-[10px] text-text-muted">Select session &amp; peer, then click GENERATE_CONTEXT</p>
-            </div>
-          </Panel>
-
-          <Panel title="HOW_CONTEXT_WORKS">
-            <div className="space-y-2 text-[11px]">
-              <Line code="PCD" label="Peer cards cache basic biographical info about a peer — name, traits, preferences" />
-              <Line code="CON" label="Conclusions are derived through formal logic reasoning — deductive, inductive, abductive" />
-              <Line code="SUM" label="Summaries compress conversation history into digestible overviews" />
-              <Line code="MSG" label="Messages provide recent conversational context for continuity" />
-              <p className="text-text-muted leading-snug pt-2 border-t border-border">
-                Layers are assembled in priority order: peer_card → conclusions → summaries → messages. If total tokens exceed the limit, lower-priority layers are truncated first.
-              </p>
-            </div>
-          </Panel>
-
-          <Panel title="LAYER_STATS">
-            <div className="space-y-1.5 text-[11px]">
-              {layers.map((l) => (
-                <div key={l.id} className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className={cn("w-2 h-2", LAYER_TONE[l.id].split(" ")[0])} />
-                    <span className="text-text-muted">{l.id}</span>
-                  </span>
-                  <span className="text-text-primary tabular-nums">{l.tokens.toLocaleString()} tok / {l.items} items</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      </div>
+      {error ? (
+        <Panel title="ERROR" status="processing">
+          <div className="text-xs text-red-400">{error}</div>
+        </Panel>
+      ) : payload ? (
+        <Panel title={mode === "peer" ? "PEER_CONTEXT" : "SESSION_CONTEXT"}>
+          <pre className="text-[11px] text-text-primary whitespace-pre-wrap break-words leading-relaxed">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </Panel>
+      ) : (
+        <Panel title="API_NOTE">
+          <div className="text-[11px] text-text-muted leading-relaxed">
+            Calls{" "}
+            <span className="text-accent">
+              {mode === "peer"
+                ? "GET /v3/workspaces/{ws}/peers/{id}/context"
+                : "GET /v3/workspaces/{ws}/sessions/{id}/context"}
+            </span>
+            . Returns the computed peer card, representation, recent messages, and any session
+            summary — whatever the server has assembled for this subject.
+          </div>
+        </Panel>
+      )}
 
       <StatusBar />
-    </div>
-  );
-}
-
-function Line({ code, label }: { code: string; label: string }) {
-  const tone = code === "PCD" ? "blue" : code === "CON" ? "purple" : code === "SUM" ? "cyan" : "muted";
-  const cls: Record<string, string> = {
-    blue: "bg-blue-400/10 text-blue-400 border-blue-400/40",
-    purple: "bg-purple-400/10 text-purple-400 border-purple-400/40",
-    cyan: "bg-cyan-400/10 text-cyan-400 border-cyan-400/40",
-    muted: "bg-border text-text-muted border-border-light",
-  };
-  return (
-    <div className="flex items-start gap-2">
-      <span className={cn("px-1.5 py-0.5 text-[9px] uppercase tracking-wider border", cls[tone])}>{code}</span>
-      <p className="text-text-muted leading-snug flex-1">{label}</p>
     </div>
   );
 }

@@ -78,6 +78,7 @@ export function genSeries(tf: Timeframe): ThroughputPoint[] {
 interface Props {
   timeframe: Timeframe;
   visible: { reads: boolean; writes: boolean; deletes: boolean };
+  data?: ThroughputPoint[];
 }
 
 interface Hovered {
@@ -87,8 +88,11 @@ interface Hovered {
   index: number;
 }
 
-export function ThroughputChart({ timeframe, visible }: Props) {
-  const targetSeries = useMemo(() => genSeries(timeframe), [timeframe]);
+export function ThroughputChart({ timeframe, visible, data: externalData }: Props) {
+  const targetSeries = useMemo(
+    () => (externalData && externalData.length > 0 ? externalData : genSeries(timeframe)),
+    [externalData, timeframe],
+  );
   const [data, setData] = useState<ThroughputPoint[]>(targetSeries);
   const [hovered, setHovered] = useState<Hovered | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);

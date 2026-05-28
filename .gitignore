@@ -1,0 +1,15 @@
+# Repo-root ignores. Site-specific ignores live in site/.gitignore.
+
+# Local environment for docker compose (committed example is .env.example).
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp

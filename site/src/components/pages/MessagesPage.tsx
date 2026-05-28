@@ -1,122 +1,163 @@
 "use client";
 
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useSyncExternalStore, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Chip } from "@/components/atoms";
-import { Select } from "@/components/Select";
+import { Button, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
-import { MESSAGES } from "@/lib/data";
+import { Select } from "@/components/Select";
+import { SkeletonRowList } from "@/components/Skeleton";
+import { useActiveWorkspace } from "@/lib/honcho/config";
+import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { getSdk } from "@/lib/honcho/sdk";
+import { toApiMessage, toApiSession } from "@/lib/honcho/adapters";
+import type { ApiMessage, ApiSession } from "@/lib/honcho/types";
 import { cn } from "@/lib/utils";
 
+function readSessionFromHash(): string | null {
+  if (typeof window === "undefined") return null;
+  const m = window.location.hash.match(/[?&]session=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function subscribeHash(notify: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("hashchange", notify);
+  return () => window.removeEventListener("hashchange", notify);
+}
+
 export function MessagesPage() {
-  const [query, setQuery] = useState("");
+  const { workspaceId } = useActiveWorkspace();
+  const hashSessionId = useSyncExternalStore(subscribeHash, readSessionFromHash, () => null);
+  const [override, setOverride] = useState<string | null>(null);
+
+  const sessionsKey = workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list/picker` : null;
+  const sessions = useHonchoQuery<{ items: ApiSession[]; total: number }>(sessionsKey, async (o) => {
+    const page = await getSdk(o, workspaceId!).sessions({ size: 100 });
+    return { items: page.items.map((s) => toApiSession(s)), total: page.total };
+  });
+
+  const fallbackSessionId = sessions.data?.items?.[0]?.id ?? null;
+  const sessionId = override ?? hashSessionId ?? fallbackSessionId;
+
+  const messagesKey =
+    workspaceId && sessionId ? `sdk/workspaces/${workspaceId}/sessions/${sessionId}/messages/list` : null;
+  const messages = useHonchoQuery<{ items: ApiMessage[]; total: number }>(messagesKey, async (o) => {
+    const ses = await getSdk(o, workspaceId!).session(sessionId!);
+    const page = await ses.messages({ size: 100 });
+    return { items: page.items.map((m) => toApiMessage(m)), total: page.total };
+  });
+
   return (
     <div className="space-y-3">
-      <PageHeader title="MESSAGES" subtitle="view and create messages within sessions" />
+      <PageHeader
+        title="MESSAGES"
+        subtitle={
+          workspaceId && sessionId
+            ? `${workspaceId} / ${sessionId}`
+            : workspaceId
+              ? "pick a session"
+              : "select a workspace"
+        }
+        actions={
+          sessionId ? (
+            <RefreshButton label="REFRESH" onClick={() => messages.refetch()} />
+          ) : (
+            <Button variant="ghost" icon="refresh" disabled>REFRESH</Button>
+          )
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-void border border-border px-3 py-2">
-          <Icon name="search" className="text-text-muted" size={12} />
-          <input
-            placeholder="search message content..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="bg-transparent text-xs flex-1 outline-none placeholder:text-text-muted"
-          />
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-text-muted">session:</span>
-          <Select
-            value="all_sessions"
-            onChange={() => undefined}
-            options={[
-              { value: "all_sessions", label: "all sessions" },
-              { value: "sess_7f3a2b01", label: "sess_7f3a2b01" },
-              { value: "sess_8e4c1d02", label: "sess_8e4c1d02" },
-            ]}
-            className="min-w-[150px]"
-          />
-          <Icon name="filter" size={10} className="text-text-muted" />
-          <Select
-            value="all_reasoning"
-            onChange={() => undefined}
-            options={[
-              { value: "all_reasoning", label: "all reasoning" },
-              { value: "pending", label: "pending" },
-              { value: "processing", label: "processing" },
-              { value: "completed", label: "completed" },
-              { value: "skipped", label: "skipped" },
-            ]}
-            className="min-w-[150px]"
-          />
-        </div>
-      </div>
+      <Panel title="SESSION">
+        {!workspaceId ? (
+          <div className="text-xs text-text-muted py-4">Select a workspace in the sidebar.</div>
+        ) : sessions.isLoading ? (
+          <div className="text-xs text-text-muted py-4">Loading sessions…</div>
+        ) : sessions.error ? (
+          <div className="text-xs text-red-400">{formatApiError(sessions.error)}</div>
+        ) : (sessions.data?.items ?? []).length === 0 ? (
+          <div className="text-xs text-text-muted py-4">No sessions in this workspace.</div>
+        ) : (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              className="min-w-[260px] flex-1"
+              value={sessionId ?? ""}
+              onChange={(id) => {
+                setOverride(id || null);
+                window.location.hash = id ? `#/messages?session=${encodeURIComponent(id)}` : "#/messages";
+              }}
+              options={(sessions.data?.items ?? []).map((s) => ({
+                value: s.id,
+                label: s.id,
+              }))}
+              placeholder="select a session…"
+            />
+            <span className="text-[10px] text-text-muted">
+              {messages.isLoading
+                ? "loading…"
+                : messages.data
+                  ? `${messages.data.total} messages`
+                  : ""}
+            </span>
+          </div>
+        )}
+      </Panel>
 
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-8">
-          <Panel title="MESSAGE_STREAM" bodyClassName="p-0">
-            <div className="max-h-[600px] overflow-y-auto">
-              {MESSAGES.filter((m) => !query || m.body.toLowerCase().includes(query.toLowerCase())).map((m, i) => (
+      {!sessionId ? null : messages.error ? (
+        <Panel title="ERROR" status="processing">
+          <div className="text-xs text-red-400">{formatApiError(messages.error)}</div>
+        </Panel>
+      ) : messages.isLoading ? (
+        <Panel title="MESSAGES">
+          <SkeletonRowList count={6} />
+        </Panel>
+      ) : (messages.data?.items ?? []).length === 0 ? (
+        <Panel title="NO_MESSAGES"><div className="text-xs text-text-muted py-4">This session has no messages.</div></Panel>
+      ) : (
+        <Panel title="MESSAGES">
+          <div className="space-y-2">
+            <AnimatePresence initial={false}>
+              {(messages.data?.items ?? []).map((m) => (
                 <motion.div
                   key={m.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.04, duration: 0.2 }}
-                  className={cn("flex gap-3 px-3 py-3 border-b border-border hover:bg-border/20 transition-colors duration-150", m.peerType === "user" ? "border-l-2 border-l-blue-400/60" : "border-l-2 border-l-purple-400/60")}
+                  layout
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.15 }}
                 >
-                  <div className={cn("w-8 h-8 border flex items-center justify-center shrink-0", m.peerType === "user" ? "border-blue-400/40 text-blue-400 bg-blue-400/5" : "border-purple-400/40 text-purple-400 bg-purple-400/5")}>
-                    <Icon name={m.peerType === "user" ? "user" : "bot"} size={12} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-[10px] mb-1">
-                      <span className="text-text-primary text-xs">{m.peer}</span>
-                      <span className="text-text-muted">in {m.session}</span>
-                      <span className="flex items-center gap-1 text-text-muted"><Icon name="clock" size={10} /> {m.timestamp}</span>
-                    </div>
-                    <p className="text-sm text-text-primary leading-relaxed break-words">{m.body}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[10px]">
-                      <Chip tone={m.status === "completed" ? "accent" : m.status === "skipped" ? "muted" : "yellow"} icon={m.status === "completed" ? "check" : m.status === "skipped" ? "x" : "loader"}>
-                        {m.status}
-                      </Chip>
-                      <span className="text-text-muted">{m.tokens} tokens</span>
-                      <span className="text-text-muted">#{m.id}</span>
-                    </div>
-                  </div>
+                  <MessageRow message={m} />
                 </motion.div>
               ))}
-            </div>
-          </Panel>
-        </div>
-
-        <div className="col-span-12 lg:col-span-4 space-y-3">
-          <Panel title="COMPOSE_MESSAGE">
-            <div className="flex flex-col items-center justify-center py-12 gap-2">
-              <Icon name="message-square" className="text-text-muted" size={24} />
-              <p className="text-xs text-text-muted text-center">Select a session to compose messages</p>
-            </div>
-          </Panel>
-          <Panel title="MESSAGE_STATS">
-            <div className="space-y-2 text-xs">
-              {[
-                ["total_displayed", "6", "primary"],
-                ["pending_reasoning", "0", "primary"],
-                ["processing", "1", "accent"],
-                ["completed", "2", "primary"],
-              ].map(([k, v, tone]) => (
-                <div key={k} className="flex justify-between py-1.5 border-b border-border last:border-0">
-                  <span className="text-text-muted">{k}</span>
-                  <span className={cn("text-text-primary tabular-nums", tone === "accent" && "text-accent")}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      </div>
+            </AnimatePresence>
+          </div>
+        </Panel>
+      )}
 
       <StatusBar />
+    </div>
+  );
+}
+
+function MessageRow({ message }: { message: ApiMessage }) {
+  return (
+    <div className="bg-void/40 border border-border p-3 text-xs">
+      <div className="flex items-center justify-between gap-2 mb-2 text-[10px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon name="user" size={11} className="text-accent" />
+          <span className="font-mono text-accent truncate">{message.peer_id}</span>
+        </div>
+        <div className="flex items-center gap-2 text-text-muted shrink-0">
+          <span>{message.token_count} tok</span>
+          <span>·</span>
+          <span>{new Date(message.created_at).toLocaleString()}</span>
+        </div>
+      </div>
+      <div className={cn("whitespace-pre-wrap break-words leading-relaxed text-text-primary")}>
+        {message.content}
+      </div>
+      <div className="mt-2 text-[9px] text-text-muted font-mono">id: {message.id}</div>
     </div>
   );
 }

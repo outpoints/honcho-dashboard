@@ -15,6 +15,7 @@ export interface SelectProps<T extends string = string> {
   onChange: (value: T) => void;
   options: SelectOption<T>[];
   placeholder?: string;
+  disabled?: boolean;
   className?: string;
   triggerClassName?: string;
   panelClassName?: string;
@@ -42,6 +43,7 @@ export function Select<T extends string = string>({
   onChange,
   options,
   placeholder,
+  disabled,
   className,
   triggerClassName,
   panelClassName,
@@ -70,34 +72,42 @@ export function Select<T extends string = string>({
   }, [open]);
 
   const current = options.find((o) => o.value === value);
+  const effectiveOpen = open && !disabled;
 
   return (
     <div ref={ref} className={cn("relative", className)}>
       <motion.button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        whileTap={{ scale: 0.98 }}
+        onClick={() => !disabled && setOpen((o) => !o)}
+        disabled={disabled}
+        whileTap={disabled ? undefined : { scale: 0.98 }}
         className={cn(
-          "w-full bg-void border border-border px-3 py-2 text-sm text-text-primary outline-none focus:border-accent transition-colors duration-150 flex items-center justify-between gap-2",
+          "w-full bg-void border border-border px-3 py-2 text-xs text-text-primary outline-none focus:border-accent transition-colors duration-150 flex items-center justify-between gap-2 font-mono",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
           triggerClassName,
         )}
         aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-expanded={effectiveOpen}
       >
-        <span className={cn(!current && placeholder ? "text-text-muted" : "")}>
+        <span
+          className={cn(
+            "truncate text-left",
+            !current && placeholder ? "text-text-muted" : "",
+          )}
+        >
           {current?.label ?? placeholder ?? "Select..."}
         </span>
         <motion.span
-          animate={{ rotate: open ? 180 : 0 }}
+          animate={{ rotate: effectiveOpen ? 180 : 0 }}
           transition={{ type: "spring", stiffness: 400, damping: 22 }}
-          className="flex items-center"
+          className="flex items-center shrink-0"
         >
           <Icon name="chevron-down" size={12} className="text-text-muted" />
         </motion.span>
       </motion.button>
 
       <AnimatePresence>
-        {open ? (
+        {effectiveOpen ? (
           <motion.div
             role="listbox"
             variants={panelVariants}
@@ -106,7 +116,7 @@ export function Select<T extends string = string>({
             exit="exit"
             style={{ transformOrigin: "top", minWidth: "max(100%, max-content)" }}
             className={cn(
-              "absolute z-50 left-0 mt-1 bg-surface border border-border shadow-lg shadow-black/40",
+              "absolute z-50 left-0 mt-1 bg-surface border border-border shadow-lg shadow-black/40 max-h-[320px] overflow-y-auto",
               panelClassName,
             )}
           >
@@ -126,11 +136,16 @@ export function Select<T extends string = string>({
                   whileHover={{ x: 3, backgroundColor: "rgba(26, 26, 26, 0.6)" }}
                   transition={{ type: "spring", stiffness: 500, damping: 28 }}
                   className={cn(
-                    "w-full text-left px-3 py-2 text-sm whitespace-nowrap",
+                    "w-full text-left px-3 py-2 text-xs whitespace-nowrap font-mono flex items-center gap-2",
                     selected ? "text-accent bg-accent/10" : "text-text-primary",
                   )}
                 >
-                  {o.label}
+                  {selected ? (
+                    <Icon name="check" size={11} className="text-accent shrink-0" />
+                  ) : (
+                    <span className="w-[11px] shrink-0" aria-hidden />
+                  )}
+                  <span className="truncate">{o.label}</span>
                 </motion.button>
               );
             })}
