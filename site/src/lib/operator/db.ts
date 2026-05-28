@@ -503,6 +503,157 @@ export async function dbRecentMessages(
   }
 }
 
+/**
+ * Per-task reasoning records from the `queue` table. Honcho's REST API only
+ * exposes aggregate work-unit counters via /queue/status; the individual task
+ * list (the deriver's representation/summary/dream/webhook jobs) lives here.
+ */
+export type ReasoningTaskStatus = "queued" | "completed" | "failed";
+
+export interface ReasoningTaskRow {
+  id: string;
+  task_type: string;
+  peer: string | null;
+  session_id: string;
+  status: ReasoningTaskStatus;
+  error: string | null;
+  created_at: string;
+  token_count: number;
+}
+
+export interface ReasoningTasksResult {
+  available: boolean;
+  reason?: string;
+  tasks?: ReasoningTaskRow[];
+  counts?: { queued: number; completed: number; failed: number; total: number; tokens_pending: number };
+  byType?: { type: string; n: number }[];
+  config?: Record<string, unknown> | null;
+}
+
+export async function dbReasoningTasks(
+  workspaceId: string,
+  opts: { status?: string; taskType?: string; limit?: number } = {},
+): Promise<ReasoningTasksResult> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "queue"))) {
+      return { available: false, reason: "queue table not found in this Honcho schema" };
+    }
+    const qWs = await pickColumn(p, "queue", ["workspace_name", "workspace_id"]);
+    if (!qWs) return { available: false, reason: "queue table missing workspace column" };
+    const hasError = await columnExists(p, "queue", "error");
+    const hasProcessed = await columnExists(p, "queue", "processed");
+    const hasMsgId = await columnExists(p, "queue", "message_id");
+    const canJoinTokens =
+      hasMsgId && (await tableExists(p, "messages")) && (await columnExists(p, "messages", "token_count"));
+    const join = canJoinTokens ? "LEFT JOIN messages m ON m.id = q.message_id" : "";
+    const tokExpr = canJoinTokens ? "coalesce(m.token_count, 0)" : "0";
+    const processedCol = hasProcessed ? "q.processed" : "false";
+    const errorCol = hasError ? "q.error" : "NULL::text";
+
+    // Aggregate counters (full workspace, unfiltered).
+    const countsQ = p.query<{
+      queued: string;
+      completed: string;
+      failed: string;
+      total: string;
+      tokens_pending: string;
+    }>(
+      `SELECT
+         count(*) FILTER (WHERE NOT ${processedCol} AND ${errorCol} IS NULL)::bigint AS queued,
+         count(*) FILTER (WHERE ${processedCol} AND ${errorCol} IS NULL)::bigint AS completed,
+         count(*) FILTER (WHERE ${errorCol} IS NOT NULL)::bigint AS failed,
+         count(*)::bigint AS total,
+         ${
+           canJoinTokens
+             ? `coalesce(sum(m.token_count) FILTER (WHERE NOT q.processed AND ${errorCol} IS NULL), 0)::bigint`
+             : "0::bigint"
+         } AS tokens_pending
+       FROM queue q ${join}
+       WHERE q.${qWs} = $1`,
+      [workspaceId],
+    );
+
+    const byTypeQ = p.query<{ type: string; n: string }>(
+      `SELECT task_type AS type, count(*)::bigint AS n
+         FROM queue WHERE ${qWs} = $1 GROUP BY 1 ORDER BY 2 DESC`,
+      [workspaceId],
+    );
+
+    const configQ = p.query<{ cfg: Record<string, unknown> | null }>(
+      `SELECT payload->'configuration' AS cfg
+         FROM queue WHERE ${qWs} = $1 AND payload ? 'configuration'
+        ORDER BY id DESC LIMIT 1`,
+      [workspaceId],
+    );
+
+    // Filtered task list.
+    const conds = [`q.${qWs} = $1`];
+    const params: string[] = [workspaceId];
+    if (opts.status === "queued") conds.push(`NOT ${processedCol} AND ${errorCol} IS NULL`);
+    else if (opts.status === "completed") conds.push(`${processedCol} AND ${errorCol} IS NULL`);
+    else if (opts.status === "failed") conds.push(`${errorCol} IS NOT NULL`);
+    else if (opts.status === "processing") conds.push("1 = 0"); // not represented in the table
+    if (opts.taskType && opts.taskType !== "all") {
+      params.push(opts.taskType);
+      conds.push(`q.task_type = $${params.length}`);
+    }
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 300);
+    const tasksQ = p.query<{
+      id: string;
+      task_type: string;
+      peer: string | null;
+      session_id: string;
+      processed: boolean;
+      error: string | null;
+      created_at: string;
+      token_count: string;
+    }>(
+      `SELECT q.id::text AS id,
+              q.task_type,
+              coalesce(q.payload->>'observed', q.payload->'observers'->>0) AS peer,
+              coalesce(q.payload->>'session_name', q.session_id::text) AS session_id,
+              ${processedCol} AS processed,
+              ${errorCol} AS error,
+              q.created_at::text AS created_at,
+              ${tokExpr} AS token_count
+         FROM queue q ${join}
+        WHERE ${conds.join(" AND ")}
+        ORDER BY q.id DESC
+        LIMIT ${limit}`,
+      params,
+    );
+
+    const [counts, byType, config, tasks] = await Promise.all([countsQ, byTypeQ, configQ, tasksQ]);
+
+    return {
+      available: true,
+      counts: {
+        queued: Number(counts.rows[0]?.queued ?? 0),
+        completed: Number(counts.rows[0]?.completed ?? 0),
+        failed: Number(counts.rows[0]?.failed ?? 0),
+        total: Number(counts.rows[0]?.total ?? 0),
+        tokens_pending: Number(counts.rows[0]?.tokens_pending ?? 0),
+      },
+      byType: byType.rows.map((r) => ({ type: r.type, n: Number(r.n) })),
+      config: config.rows[0]?.cfg ?? null,
+      tasks: tasks.rows.map((r) => ({
+        id: r.id,
+        task_type: r.task_type,
+        peer: r.peer,
+        session_id: r.session_id,
+        status: r.error ? "failed" : r.processed ? "completed" : "queued",
+        error: r.error,
+        created_at: r.created_at,
+        token_count: Number(r.token_count),
+      })),
+    };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */

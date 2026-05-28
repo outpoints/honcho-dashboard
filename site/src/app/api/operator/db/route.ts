@@ -6,6 +6,7 @@ import {
   dbConclusionStats,
   dbSessionStats,
   dbRecentMessages,
+  dbReasoningTasks,
 } from "@/lib/operator/db";
 
 export const runtime = "nodejs";
@@ -35,6 +36,14 @@ export async function GET(req: NextRequest) {
     const q = req.nextUrl.searchParams.get("q") ?? undefined;
     const limit = Number(req.nextUrl.searchParams.get("limit") ?? 100);
     return Response.json(await dbRecentMessages(ws, { sessionId, q, limit }));
+  }
+  if (view === "reasoning") {
+    const ws = req.nextUrl.searchParams.get("workspace_id");
+    if (!ws) return Response.json({ available: false, reason: "workspace_id required" });
+    const status = req.nextUrl.searchParams.get("status") ?? undefined;
+    const taskType = req.nextUrl.searchParams.get("task_type") ?? undefined;
+    const limit = Number(req.nextUrl.searchParams.get("limit") ?? 150);
+    return Response.json(await dbReasoningTasks(ws, { status, taskType, limit }));
   }
   return Response.json(await dbStats());
 }
