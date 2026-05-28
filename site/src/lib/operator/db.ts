@@ -730,6 +730,105 @@ export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsR
   }
 }
 
+/**
+ * Per-peer detail: message count, conclusion count, and the peer's top
+ * conclusions (the deriver's typed observations about the peer). Conclusions
+ * live in the `documents` table — `content`, `level` (explicit/deductive/...),
+ * `times_derived` (frequency), `observed` (the peer the conclusion is about).
+ */
+export interface PeerConclusion {
+  id: string;
+  content: string;
+  level: string;
+  times_derived: number;
+  created_at: string;
+}
+
+export interface PeerDetailResult {
+  available: boolean;
+  reason?: string;
+  messages?: number;
+  conclusions?: number;
+  conclusionsList?: PeerConclusion[];
+}
+
+export async function dbPeerDetail(
+  workspaceId: string,
+  peerId: string,
+  limit = 12,
+): Promise<PeerDetailResult> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    const lim = Math.min(Math.max(limit, 1), 50);
+
+    // Message count for this peer.
+    let messages = 0;
+    if (await tableExists(p, "messages")) {
+      const mWs = await pickColumn(p, "messages", ["workspace_name", "workspace_id"]);
+      const mPeer = await pickColumn(p, "messages", ["peer_name", "peer_id"]);
+      if (mWs && mPeer) {
+        const r = await p.query<{ n: string }>(
+          `SELECT count(*)::bigint AS n FROM messages WHERE ${mWs} = $1 AND ${mPeer} = $2`,
+          [workspaceId, peerId],
+        );
+        messages = Number(r.rows[0]?.n ?? 0);
+      }
+    }
+
+    // Conclusions about this peer (documents.observed = peerId).
+    const docTable = await firstExistingTable(p, ["documents", "conclusions"]);
+    let conclusions = 0;
+    let conclusionsList: PeerConclusion[] = [];
+    if (docTable) {
+      const dWs = await pickColumn(p, docTable, ["workspace_name", "workspace_id"]);
+      const dObserved = await pickColumn(p, docTable, ["observed", "observed_id", "observer", "observer_id"]);
+      if (dWs && dObserved) {
+        const hasDeleted = await columnExists(p, docTable, "deleted_at");
+        const hasLevel = await columnExists(p, docTable, "level");
+        const hasTimes = await columnExists(p, docTable, "times_derived");
+        const notDeleted = hasDeleted ? "AND deleted_at IS NULL" : "";
+
+        const cnt = await p.query<{ n: string }>(
+          `SELECT count(*)::bigint AS n FROM ${docTable} WHERE ${dWs} = $1 AND ${dObserved} = $2 ${notDeleted}`,
+          [workspaceId, peerId],
+        );
+        conclusions = Number(cnt.rows[0]?.n ?? 0);
+
+        const list = await p.query<{
+          id: string;
+          content: string;
+          level: string | null;
+          times_derived: string | null;
+          created_at: string;
+        }>(
+          `SELECT id::text AS id,
+                  content,
+                  ${hasLevel ? "level" : "NULL::text"} AS level,
+                  ${hasTimes ? "times_derived" : "1"} AS times_derived,
+                  created_at::text AS created_at
+             FROM ${docTable}
+            WHERE ${dWs} = $1 AND ${dObserved} = $2 ${notDeleted}
+            ORDER BY ${hasTimes ? "times_derived DESC NULLS LAST, " : ""}created_at DESC
+            LIMIT ${lim}`,
+          [workspaceId, peerId],
+        );
+        conclusionsList = list.rows.map((r) => ({
+          id: r.id,
+          content: r.content,
+          level: r.level ?? "",
+          times_derived: Number(r.times_derived ?? 1),
+          created_at: r.created_at,
+        }));
+      }
+    }
+
+    return { available: true, messages, conclusions, conclusionsList };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */

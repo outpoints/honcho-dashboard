@@ -8,6 +8,7 @@ import {
   dbRecentMessages,
   dbReasoningTasks,
   dbWebhookStats,
+  dbPeerDetail,
 } from "@/lib/operator/db";
 
 export const runtime = "nodejs";
@@ -50,6 +51,13 @@ export async function GET(req: NextRequest) {
     const ws = req.nextUrl.searchParams.get("workspace_id");
     if (!ws) return Response.json({ available: false, reason: "workspace_id required" });
     return Response.json(await dbWebhookStats(ws));
+  }
+  if (view === "peer_detail") {
+    const ws = req.nextUrl.searchParams.get("workspace_id");
+    const peer = req.nextUrl.searchParams.get("peer_id");
+    if (!ws || !peer) return Response.json({ available: false, reason: "workspace_id and peer_id required" });
+    const limit = Number(req.nextUrl.searchParams.get("limit") ?? 12);
+    return Response.json(await dbPeerDetail(ws, peer, limit));
   }
   return Response.json(await dbStats());
 }

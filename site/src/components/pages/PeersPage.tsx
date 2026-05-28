@@ -35,6 +35,40 @@ function classifyPeer(p: ApiPeer): TypeFilter {
   return "all"; // unknown → bucket-all
 }
 
+interface PeerConclusion {
+  id: string;
+  content: string;
+  level: string;
+  times_derived: number;
+  created_at: string;
+}
+
+interface PeerDetailResp {
+  available: boolean;
+  reason?: string;
+  messages?: number;
+  conclusions?: number;
+  conclusionsList?: PeerConclusion[];
+}
+
+/** Border + text color for a conclusion `level` (deductive/explicit/...). */
+function levelColors(level: string): { border: string; text: string } {
+  switch (level.toLowerCase()) {
+    case "deductive":
+      return { border: "border-l-blue-400", text: "text-blue-400" };
+    case "inductive":
+      return { border: "border-l-pink-400", text: "text-pink-400" };
+    case "abductive":
+      return { border: "border-l-orange-400", text: "text-orange-400" };
+    case "summary":
+      return { border: "border-l-cyan-400", text: "text-cyan-400" };
+    case "explicit":
+      return { border: "border-l-accent", text: "text-accent" };
+    default:
+      return { border: "border-l-purple-400", text: "text-purple-400" };
+  }
+}
+
 export function PeersPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
@@ -326,9 +360,19 @@ function PeerRow({
   const [details, setDetails] = useState<{
     loading: boolean;
     sessions: number | null;
+    messages: number | null;
+    conclusions: number | null;
+    conclusionsList: PeerConclusion[] | null;
     peerCard: string[] | null;
     error?: string;
-  }>({ loading: false, sessions: null, peerCard: null });
+  }>({
+    loading: false,
+    sessions: null,
+    messages: null,
+    conclusions: null,
+    conclusionsList: null,
+    peerCard: null,
+  });
 
   // Dedupe by peer key and depend ONLY on stable primitives. `useActiveHonchoOptions`
   // returns a fresh object every render, so depending on apiOpts (directly or via a
@@ -353,14 +397,24 @@ function PeerRow({
         try {
           const sdk = getSdk(opts, peer.workspace_id);
           const peerObj = await sdk.peer(peer.id);
-          const [sessionsPage, card] = await Promise.all([
+          const detailUrl =
+            `/api/operator/db?view=peer_detail&workspace_id=${encodeURIComponent(peer.workspace_id)}` +
+            `&peer_id=${encodeURIComponent(peer.id)}`;
+          const [sessionsPage, card, opDetail] = await Promise.all([
             peerObj.sessions({ size: 1 }).catch(() => null),
             peerObj.card().catch(() => null),
+            fetch(detailUrl, { cache: "no-store" })
+              .then((r) => r.json() as Promise<PeerDetailResp>)
+              .catch(() => null),
           ]);
           if (cancelled) return;
+          const od = opDetail?.available ? opDetail : null;
           setDetails({
             loading: false,
             sessions: sessionsPage?.total ?? null,
+            messages: od?.messages ?? null,
+            conclusions: od?.conclusions ?? null,
+            conclusionsList: od?.conclusionsList ?? null,
             peerCard: card ?? [],
           });
         } catch (err) {
@@ -368,6 +422,9 @@ function PeerRow({
           setDetails({
             loading: false,
             sessions: null,
+            messages: null,
+            conclusions: null,
+            conclusionsList: null,
             peerCard: null,
             error: formatApiError(err),
           });
@@ -449,12 +506,13 @@ function PeerRow({
                 {details.loading ? "…" : details.sessions ?? "—"} sessions
               </span>
               <span className="flex items-center gap-1">
-                <Icon name="file-search" size={10} />
-                {details.peerCard ? details.peerCard.length : "—"} card lines
+                <Icon name="message-square" size={10} />
+                {details.loading ? "…" : details.messages != null ? details.messages.toLocaleString() : "—"} msgs
               </span>
               <span className="flex items-center gap-1">
-                <Icon name="clock" size={10} />
-                created {created}
+                <Icon name="brain" size={10} />
+                {details.loading ? "…" : details.conclusions != null ? details.conclusions.toLocaleString() : "—"}{" "}
+                conclusions
               </span>
             </div>
           </div>
@@ -499,6 +557,11 @@ function PeerRow({
                 loading={details.loading && details.peerCard === null}
                 card={details.peerCard}
                 error={details.error}
+              />
+              <ConclusionsSection
+                loading={details.loading && details.conclusionsList === null}
+                conclusions={details.conclusionsList}
+                total={details.conclusions}
               />
               <ObserveMeRow peer={peer} />
               <div className="flex items-center gap-2 flex-wrap pt-1">
@@ -628,6 +691,69 @@ function PeerCardSection({
             </motion.li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function ConclusionsSection({
+  loading,
+  conclusions,
+  total,
+}: {
+  loading: boolean;
+  conclusions: PeerConclusion[] | null;
+  total: number | null;
+}) {
+  const count = total ?? conclusions?.length ?? 0;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon name="brain" size={11} className="text-purple-400" />
+        <span className="text-[10px] text-purple-400 uppercase tracking-wider">conclusions</span>
+        {conclusions ? (
+          <span className="text-[10px] text-text-muted">
+            ({conclusions.length}
+            {count > conclusions.length ? ` of ${count.toLocaleString()}` : ""})
+          </span>
+        ) : null}
+      </div>
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-9 bg-border/40 animate-pulse" />
+          ))}
+        </div>
+      ) : conclusions === null ? (
+        <div className="text-[11px] text-text-muted italic py-1">
+          Conclusions need the operator DB (HONCHO_DATABASE_URL).
+        </div>
+      ) : conclusions.length === 0 ? (
+        <div className="text-[11px] text-text-muted italic py-1">
+          No conclusions derived about this peer yet.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {conclusions.map((c, i) => {
+            const { border, text } = levelColors(c.level);
+            return (
+              <motion.div
+                key={c.id}
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: Math.min(i * 0.03, 0.2), duration: 0.15 }}
+                className={cn("border-l-2 pl-3 py-0.5", border)}
+              >
+                <div className="text-xs text-text-primary leading-snug">{c.content}</div>
+                <div className="flex items-center gap-3 mt-1 text-[9px] text-text-muted tracking-wider">
+                  {c.level ? <span className={cn("uppercase", text)}>{c.level}</span> : null}
+                  <span>freq: {c.times_derived}</span>
+                  <span>{new Date(c.created_at).toLocaleDateString()}</span>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
