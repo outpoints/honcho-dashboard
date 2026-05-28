@@ -376,14 +376,18 @@ function SessionRow({
     error?: string;
   }>({ loading: false, loaded: false, messages: [], hasSummary: false, summary: null });
 
-  // Track which session we've already fetched detail for. Keeping detail.* out
-  // of the effect deps avoids a self-cancellation race: setting loading=true
-  // would otherwise re-run the effect, whose cleanup flips `cancelled` before
-  // the in-flight request resolves.
+  // Dedupe by session key and depend ONLY on stable primitives. `useActiveHonchoOptions`
+  // returns a fresh object every render, so depending on apiOpts re-runs this effect each
+  // render, whose cleanup flips `cancelled` before messages()/summaries() resolve — leaving
+  // the panel stuck on skeletons. Read apiOpts from a ref instead.
   const fetchedRef = useRef<string | null>(null);
+  const apiOptsRef = useRef(apiOpts);
+  apiOptsRef.current = apiOpts;
 
   useEffect(() => {
-    if (!open || !apiOpts) return;
+    if (!open) return;
+    const opts = apiOptsRef.current;
+    if (!opts) return;
     const detailKey = `${session.workspace_id}::${session.id}`;
     if (fetchedRef.current === detailKey) return;
     fetchedRef.current = detailKey;
@@ -393,7 +397,7 @@ function SessionRow({
       setDetail((d) => ({ ...d, loading: true, error: undefined }));
       (async () => {
         try {
-          const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
+          const ses = await getSdk(opts, session.workspace_id).session(session.id);
           const [msgs, summaries] = await Promise.all([
             ses
               .messages({ size: 5, reverse: true })
@@ -421,7 +425,7 @@ function SessionRow({
     return () => {
       cancelled = true;
     };
-  }, [open, apiOpts, session.id, session.workspace_id]);
+  }, [open, session.id, session.workspace_id]);
 
   const peers = stat?.peers ?? [];
   const configKeys = Object.keys(session.configuration ?? {}).length;

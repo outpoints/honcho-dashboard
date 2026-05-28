@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
@@ -317,7 +317,12 @@ function PeerRow({
   navigate: (k: "sessions" | "messages") => void;
 }) {
   const apiOpts = useActiveHonchoOptions();
+  const { push } = useToast();
   const [expanded, setExpanded] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editObserveMe, setEditObserveMe] = useState<boolean | null>(null);
+  const [editMetadata, setEditMetadata] = useState("");
+  const [saving, setSaving] = useState(false);
   const [details, setDetails] = useState<{
     loading: boolean;
     sessions: number | null;
@@ -325,15 +330,28 @@ function PeerRow({
     error?: string;
   }>({ loading: false, sessions: null, peerCard: null });
 
+  // Dedupe by peer key and depend ONLY on stable primitives. `useActiveHonchoOptions`
+  // returns a fresh object every render, so depending on apiOpts (directly or via a
+  // callback) re-runs this effect each render, whose cleanup flips `cancelled` before
+  // card()/sessions() resolve — leaving the card stuck on skeletons. Read it from a ref.
+  const fetchedRef = useRef<string | null>(null);
+  const apiOptsRef = useRef(apiOpts);
+  apiOptsRef.current = apiOpts;
+
   useEffect(() => {
-    if (!apiOpts || !expanded || details.peerCard !== null || details.loading) return;
+    if (!expanded) return;
+    const opts = apiOptsRef.current;
+    if (!opts) return;
+    const detailKey = `${peer.workspace_id}::${peer.id}`;
+    if (fetchedRef.current === detailKey) return;
+    fetchedRef.current = detailKey;
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
       setDetails((d) => ({ ...d, loading: true, error: undefined }));
       (async () => {
         try {
-          const sdk = getSdk(apiOpts, peer.workspace_id);
+          const sdk = getSdk(opts, peer.workspace_id);
           const peerObj = await sdk.peer(peer.id);
           const [sessionsPage, card] = await Promise.all([
             peerObj.sessions({ size: 1 }).catch(() => null),
@@ -359,7 +377,7 @@ function PeerRow({
     return () => {
       cancelled = true;
     };
-  }, [apiOpts, expanded, peer.id, peer.workspace_id, details.peerCard, details.loading]);
+  }, [expanded, peer.id, peer.workspace_id]);
 
   const created = new Date(peer.created_at).toLocaleString();
   const typeChip =
@@ -371,7 +389,44 @@ function PeerRow({
       <Chip tone="muted">PEER</Chip>
     );
 
+  const cfg = (peer.configuration ?? {}) as { observe_me?: boolean; observeMe?: boolean };
+  const currentObserveMe = cfg.observe_me ?? cfg.observeMe ?? null;
+
+  const openEdit = () => {
+    setEditObserveMe(currentObserveMe);
+    setEditMetadata(JSON.stringify(peer.metadata ?? {}, null, 2));
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!apiOpts) return;
+    let parsedMeta: Record<string, unknown>;
+    try {
+      parsedMeta = editMetadata.trim() ? JSON.parse(editMetadata) : {};
+      if (typeof parsedMeta !== "object" || parsedMeta === null || Array.isArray(parsedMeta)) {
+        throw new Error("not an object");
+      }
+    } catch {
+      push({ type: "error", message: "Metadata must be a JSON object" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
+      if (editObserveMe !== null) await peerObj.setConfiguration({ observeMe: editObserveMe });
+      await peerObj.setMetadata(parsedMeta);
+      push({ type: "success", message: `Peer ${peer.id} updated` });
+      setEditOpen(false);
+      onAction();
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
+    <>
     <motion.div
       whileHover={{ borderColor: "rgba(60, 130, 247, 0.35)" }}
       transition={{ duration: 0.15 }}
@@ -411,8 +466,9 @@ function PeerRow({
           </div>
           <button
             className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
-            title="Edit metadata"
-            onClick={() => onAction()}
+            title="Edit peer (type + metadata)"
+            aria-label="Edit peer"
+            onClick={openEdit}
           >
             <Icon name="settings" size={12} />
           </button>
@@ -478,6 +534,46 @@ function PeerRow({
         ) : null}
       </AnimatePresence>
     </motion.div>
+
+    <Modal
+      title="EDIT_PEER"
+      open={editOpen}
+      onClose={() => setEditOpen(false)}
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => setEditOpen(false)} disabled={saving}>
+            CANCEL
+          </Button>
+          <Button variant="primary" onClick={saveEdit} disabled={saving}>
+            {saving ? "SAVING…" : "SAVE"}
+          </Button>
+        </>
+      }
+    >
+      <div className="text-[11px] text-text-muted mb-3">
+        editing <span className="text-accent font-mono">{peer.id}</span> @{peer.workspace_id}
+      </div>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-[10px] uppercase tracking-wider text-text-muted">type:</span>
+        <ToggleButton active={editObserveMe === true} onClick={() => setEditObserveMe(true)}>
+          USER (observe_me)
+        </ToggleButton>
+        <ToggleButton active={editObserveMe === false} onClick={() => setEditObserveMe(false)}>
+          AGENT
+        </ToggleButton>
+        {editObserveMe === null ? <span className="text-[10px] text-text-muted">(unset)</span> : null}
+      </div>
+      <Field label="METADATA (JSON)" hint="Stored on the peer. Must be a JSON object.">
+        <textarea
+          value={editMetadata}
+          onChange={(e) => setEditMetadata(e.target.value)}
+          rows={6}
+          spellCheck={false}
+          className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
+        />
+      </Field>
+    </Modal>
+    </>
   );
 }
 
