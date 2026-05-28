@@ -13,3 +13,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Session handoff notes — local only, never committed.
+HANDOFF.md
+HANDOFF_PROMPT.md

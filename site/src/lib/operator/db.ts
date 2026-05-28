@@ -304,7 +304,133 @@ export async function dbConclusionStats(workspaceId?: string): Promise<{
   }
 }
 
+/**
+ * Per-session activity stats sourced directly from the `messages` table (and
+ * `session_peers` for membership). One batched query per workspace — far
+ * cheaper than N SDK round-trips when a workspace has hundreds of sessions.
+ * Honcho's REST list endpoint only returns id/is_active/created_at, so the
+ * message/token/peer counts the dashboard renders come from here.
+ */
+export interface SessionStatRow {
+  session_id: string;
+  workspace_id: string;
+  message_count: number;
+  token_sum: number;
+  last_message_at: string | null;
+  peers: string[];
+}
+
+export async function dbSessionStats(workspaceId?: string): Promise<{
+  available: boolean;
+  reason?: string;
+  sessions?: Record<string, SessionStatRow>;
+}> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "messages"))) {
+      return { available: false, reason: "messages table not found in this Honcho schema" };
+    }
+    // Schema-adaptive: current Honcho uses *_name join columns, older builds
+    // used *_id. Resolve whichever exists before composing the query.
+    const msgSession = await pickColumn(p, "messages", ["session_name", "session_id"]);
+    const msgWs = await pickColumn(p, "messages", ["workspace_name", "workspace_id"]);
+    const msgPeer = await pickColumn(p, "messages", ["peer_name", "peer_id"]);
+    if (!msgSession || !msgWs) {
+      return { available: false, reason: "messages table missing expected session/workspace columns" };
+    }
+    const hasToken = await columnExists(p, "messages", "token_count");
+
+    const where = workspaceId ? `WHERE ${msgWs} = $1` : "";
+    const params = workspaceId ? [workspaceId] : [];
+    const agg = await p.query<{
+      session_id: string;
+      workspace_id: string;
+      message_count: string;
+      token_sum: string;
+      last_message_at: string | null;
+      peers: string[] | null;
+    }>(
+      `SELECT ${msgSession} AS session_id,
+              ${msgWs} AS workspace_id,
+              count(*)::bigint AS message_count,
+              ${hasToken ? "coalesce(sum(token_count), 0)::bigint" : "0::bigint"} AS token_sum,
+              max(created_at)::text AS last_message_at,
+              ${msgPeer ? `array_remove(array_agg(DISTINCT ${msgPeer}), NULL)` : "ARRAY[]::text[]"} AS peers
+         FROM messages
+         ${where}
+        GROUP BY 1, 2`,
+      params,
+    );
+
+    const sessions: Record<string, SessionStatRow> = {};
+    for (const row of agg.rows) {
+      const key = `${row.workspace_id}::${row.session_id}`;
+      sessions[key] = {
+        session_id: row.session_id,
+        workspace_id: row.workspace_id,
+        message_count: Number(row.message_count),
+        token_sum: Number(row.token_sum),
+        last_message_at: row.last_message_at,
+        peers: row.peers ?? [],
+      };
+    }
+
+    // Merge in canonical session membership (a peer can belong to a session
+    // without having posted a message). Union with message-derived peers.
+    if (await tableExists(p, "session_peers")) {
+      const spSession = await pickColumn(p, "session_peers", ["session_name", "session_id"]);
+      const spWs = await pickColumn(p, "session_peers", ["workspace_name", "workspace_id"]);
+      const spPeer = await pickColumn(p, "session_peers", ["peer_name", "peer_id"]);
+      const hasLeftAt = await columnExists(p, "session_peers", "left_at");
+      if (spSession && spWs && spPeer) {
+        const memWhere = workspaceId ? `${spWs} = $1` : "";
+        const leftClause = hasLeftAt ? "left_at IS NULL" : "";
+        const clauses = [memWhere, leftClause].filter(Boolean).join(" AND ");
+        const mem = await p.query<{ session_id: string; workspace_id: string; peers: string[] | null }>(
+          `SELECT ${spSession} AS session_id,
+                  ${spWs} AS workspace_id,
+                  array_remove(array_agg(DISTINCT ${spPeer}), NULL) AS peers
+             FROM session_peers
+             ${clauses ? `WHERE ${clauses}` : ""}
+            GROUP BY 1, 2`,
+          workspaceId ? [workspaceId] : [],
+        );
+        for (const row of mem.rows) {
+          const key = `${row.workspace_id}::${row.session_id}`;
+          const peers = row.peers ?? [];
+          const existing = sessions[key];
+          if (existing) {
+            existing.peers = Array.from(new Set([...peers, ...existing.peers]));
+          } else {
+            sessions[key] = {
+              session_id: row.session_id,
+              workspace_id: row.workspace_id,
+              message_count: 0,
+              token_sum: 0,
+              last_message_at: null,
+              peers,
+            };
+          }
+        }
+      }
+    }
+
+    return { available: true, sessions };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
+
+/** Return the first column from `candidates` that exists on `table`, else null. */
+async function pickColumn(p: Pool, table: string, candidates: string[]): Promise<string | null> {
+  for (const c of candidates) {
+    if (await columnExists(p, table, c)) return c;
+  }
+  return null;
+}
 
 async function columnExists(p: Pool, table: string, column: string): Promise<boolean> {
   const key = `${table}.${column}`;

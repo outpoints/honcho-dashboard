@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { dbStats, dbThroughput, dbHeatmap, dbConclusionStats } from "@/lib/operator/db";
+import { dbStats, dbThroughput, dbHeatmap, dbConclusionStats, dbSessionStats } from "@/lib/operator/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +16,10 @@ export async function GET(req: NextRequest) {
   if (view === "conclusions") {
     const ws = req.nextUrl.searchParams.get("workspace_id") ?? undefined;
     return Response.json(await dbConclusionStats(ws));
+  }
+  if (view === "sessions") {
+    const ws = req.nextUrl.searchParams.get("workspace_id") ?? undefined;
+    return Response.json(await dbSessionStats(ws));
   }
   return Response.json(await dbStats());
 }
