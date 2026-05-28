@@ -37,6 +37,23 @@ interface HeatmapResp {
   cells?: { day: string; n: number }[];
 }
 
+interface SessionStatsResp {
+  available: boolean;
+  sessions?: Record<
+    string,
+    { session_id: string; workspace_id: string; message_count: number; last_message_at: string | null; peers: string[] }
+  >;
+}
+
+const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function deriveSessionStatus(active: boolean, lastMessageAt: string | null): "active" | "idle" | "archived" {
+  if (!active) return "archived";
+  const t = lastMessageAt ? Date.parse(lastMessageAt) : NaN;
+  if (!Number.isNaN(t) && Date.now() - t < ACTIVE_WINDOW_MS) return "active";
+  return "idle";
+}
+
 interface DbStatsResp {
   available: boolean;
   reason?: string;
@@ -100,6 +117,9 @@ export function OverviewPage() {
   const heatmap = useOperatorQuery<HeatmapResp>("/api/operator/db?view=heatmap", {
     refreshInterval: 60000,
   });
+  const sessionStats = useOperatorQuery<SessionStatsResp>(
+    workspaceId ? `/api/operator/db?view=sessions&workspace_id=${encodeURIComponent(workspaceId)}` : null,
+  );
   const dbStats = useOperatorQuery<DbStatsResp>("/api/operator/db", { refreshInterval: 30000 });
 
   const aggLoading = !workspaceId
@@ -267,6 +287,12 @@ export function OverviewPage() {
                     </span>
                   </span>
                   <span>
+                    avg:{" "}
+                    <span className="text-text-primary">
+                      {(heatmap.data.cells.reduce((s, c) => s + c.n, 0) / (52 * 7)).toFixed(1)}
+                    </span>
+                  </span>
+                  <span>
                     peak:{" "}
                     <span className="text-text-primary">
                       {heatmap.data.cells.reduce((m, c) => Math.max(m, c.n), 0)}
@@ -276,7 +302,23 @@ export function OverviewPage() {
               ) : null}
             </div>
             {heatmap.data?.available && heatmap.data.cells ? (
-              <Heatmap cells={heatmap.data.cells} />
+              <>
+                <Heatmap cells={heatmap.data.cells} />
+                <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+                  <div className="flex items-center gap-1 text-[9px] text-text-muted">
+                    less
+                    {[0.15, 0.35, 0.55, 0.75, 1].map((a, i) => (
+                      <span
+                        key={i}
+                        className="w-2.5 h-2.5"
+                        style={{ backgroundColor: `rgba(60, 130, 247, ${a})` }}
+                      />
+                    ))}
+                    more
+                  </div>
+                  <span className="text-[9px] text-text-muted">52 weeks · 7 days</span>
+                </div>
+              </>
             ) : (
               <div className="border border-border bg-void/40 p-6 text-center text-xs text-text-muted">
                 {heatmap.isLoading
@@ -299,26 +341,47 @@ export function OverviewPage() {
               <div className="text-xs text-text-muted py-4">No sessions.</div>
             ) : (
               <div className="space-y-2">
-                {(sessions.data?.items ?? []).map((s, i) => (
-                  <motion.button
-                    key={s.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.3 + i * 0.03, duration: 0.2 }}
-                    onClick={() => navigate("sessions")}
-                    className="w-full flex items-center justify-between px-2 py-1.5 bg-void/50 border border-border text-left"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs text-accent truncate font-mono">{s.id}</div>
-                      <div className="text-[10px] text-text-muted truncate">
-                        {new Date(s.created_at).toLocaleString()}
+                {(sessions.data?.items ?? []).map((s, i) => {
+                  const stat = sessionStats.data?.available
+                    ? sessionStats.data.sessions?.[`${s.workspace_id}::${s.id}`]
+                    : undefined;
+                  const status = deriveSessionStatus(s.is_active, stat?.last_message_at ?? null);
+                  return (
+                    <motion.button
+                      key={s.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3 + i * 0.03, duration: 0.2 }}
+                      whileHover={{ borderColor: "rgba(60, 130, 247, 0.5)", x: 2 }}
+                      onClick={() => navigate("sessions")}
+                      className="w-full flex items-center justify-between px-2 py-1.5 bg-void/50 border border-border text-left transition-colors duration-150"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-accent truncate font-mono">{s.id}</div>
+                        <div className="text-[10px] text-text-muted truncate">
+                          {stat?.peers?.length
+                            ? stat.peers.join(", ")
+                            : new Date(s.created_at).toLocaleDateString()}
+                        </div>
                       </div>
-                    </div>
-                    <div className={cn("text-[10px] ml-2 shrink-0", s.is_active ? "text-accent" : "text-text-muted")}>
-                      {s.is_active ? "active" : "inactive"}
-                    </div>
-                  </motion.button>
-                ))}
+                      <div className="text-right ml-2 shrink-0">
+                        <div className="text-[10px] text-text-muted">{stat ? `${stat.message_count} msgs` : "—"}</div>
+                        <div
+                          className={cn(
+                            "text-[10px]",
+                            status === "active"
+                              ? "text-accent"
+                              : status === "idle"
+                                ? "text-yellow-400"
+                                : "text-text-muted",
+                          )}
+                        >
+                          {status}
+                        </div>
+                      </div>
+                    </motion.button>
+                  );
+                })}
                 <Button variant="ghost" className="w-full" onClick={() => navigate("sessions")}>
                   VIEW_ALL_SESSIONS
                 </Button>
