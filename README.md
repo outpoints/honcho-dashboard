@@ -129,6 +129,37 @@ Hash-based router inside `AppShell`: `#/overview`, `#/workspaces`, `#/peers`, `#
 `#/messages`, `#/reasoning`, `#/context`, `#/webhooks`, `#/instance`, `#/diagnostics`,
 `#/integrations`, `#/config`.
 
+## Known quirks
+
+- **Peer rows query the DB per row on expand.** Each peer card lazy-loads its
+  message count, conclusion count, and conclusion list with one
+  `operator/db` query when the row expands — and peer rows default to expanded.
+  This is fine for the typical workspace (a handful of peers), but a workspace
+  with hundreds of peers will issue that many queries on load. If you point the
+  dashboard at such a workspace, switch to a batched page-level query
+  (`GROUP BY` peer) like `dbSessionStats` does.
+- **Operator panels degrade without a DB connection.** Metrics Honcho's REST
+  API doesn't expose — throughput chart, 52-week heatmap, db size/uptime,
+  per-session message/token counts, per-task reasoning records, webhook
+  delivery history, and per-peer message/conclusion stats — come from the
+  read-only `HONCHO_DATABASE_URL` operator layer. Without it those panels show
+  an "operator DB unavailable" state; everything backed by the SDK still works.
+- **`conclusions` is not a physical table.** Honcho's REST `conclusions`
+  resource is stored in the `documents` table; conclusion *type* is the `level`
+  column (`explicit` / `deductive` / `inductive` / `abductive`) and *frequency*
+  is `times_derived`. Operator queries probe `documents` (falling back to
+  `conclusions`) and adapt to `*_name` vs `*_id` join columns across Honcho
+  versions.
+- **Messages have no per-message status.** The original mock UI showed
+  `completed` / `skipped` / `processing` chips per message; live Honcho messages
+  carry no such field, so the Messages/Sessions views show token counts instead.
+  Per-task reasoning status lives in the `queue` table and is surfaced on the
+  Reasoning page.
+- **Some original controls map to features Honcho doesn't expose.** Session
+  *archive*, webhook *per-event filters* / per-endpoint failure counts, and the
+  reasoning *pause / process-all* buttons have no public API, so they were
+  dropped rather than faked. Webhook endpoints are registered by URL only.
+
 ## Credits
 
 - **Original dashboard design** by **nodaylight** (Discord) — the visual
