@@ -422,6 +422,87 @@ export async function dbSessionStats(workspaceId?: string): Promise<{
   }
 }
 
+/**
+ * Recent messages across a workspace (optionally narrowed to one session or a
+ * content search). Mirrors main's cross-session MESSAGE_STREAM — the SDK only
+ * lists messages per-session, so the workspace-wide view comes from here.
+ */
+export interface RecentMessageRow {
+  id: string;
+  peer_id: string;
+  session_id: string;
+  content: string;
+  token_count: number;
+  created_at: string;
+}
+
+export async function dbRecentMessages(
+  workspaceId: string,
+  opts: { sessionId?: string; q?: string; limit?: number } = {},
+): Promise<{ available: boolean; reason?: string; messages?: RecentMessageRow[] }> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "messages"))) {
+      return { available: false, reason: "messages table not found in this Honcho schema" };
+    }
+    const msgWs = await pickColumn(p, "messages", ["workspace_name", "workspace_id"]);
+    const msgSession = await pickColumn(p, "messages", ["session_name", "session_id"]);
+    const msgPeer = await pickColumn(p, "messages", ["peer_name", "peer_id"]);
+    const msgId = await pickColumn(p, "messages", ["public_id", "id"]);
+    if (!msgWs || !msgSession || !msgPeer || !msgId) {
+      return { available: false, reason: "messages table missing expected columns" };
+    }
+    const hasToken = await columnExists(p, "messages", "token_count");
+
+    const where = [`${msgWs} = $1`];
+    const params: string[] = [workspaceId];
+    if (opts.sessionId) {
+      params.push(opts.sessionId);
+      where.push(`${msgSession} = $${params.length}`);
+    }
+    if (opts.q && opts.q.trim()) {
+      params.push(`%${opts.q.trim()}%`);
+      where.push(`content ILIKE $${params.length}`);
+    }
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
+
+    const r = await p.query<{
+      id: string;
+      peer_id: string;
+      session_id: string;
+      content: string;
+      token_count: string;
+      created_at: string;
+    }>(
+      `SELECT ${msgId}::text AS id,
+              ${msgPeer} AS peer_id,
+              ${msgSession} AS session_id,
+              content,
+              ${hasToken ? "coalesce(token_count, 0)" : "0"} AS token_count,
+              created_at::text AS created_at
+         FROM messages
+        WHERE ${where.join(" AND ")}
+        ORDER BY created_at DESC
+        LIMIT ${limit}`,
+      params,
+    );
+    return {
+      available: true,
+      messages: r.rows.map((row) => ({
+        id: row.id,
+        peer_id: row.peer_id,
+        session_id: row.session_id,
+        content: row.content,
+        token_count: Number(row.token_count),
+        created_at: row.created_at,
+      })),
+    };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */
