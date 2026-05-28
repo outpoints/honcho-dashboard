@@ -5,6 +5,10 @@ Tailwind CSS v4, Framer Motion, and the official [`@honcho-ai/sdk`](https://www.
 
 The Next.js app lives in [`site/`](./site).
 
+![Honcho Self-Hosted Dashboard — overview](docs/dashboard.png)
+
+> Screenshot shows the live dashboard with workspace/peer/session identifiers replaced by generic demo values.
+
 ## Architecture
 
 Three layers, each with a single job:
