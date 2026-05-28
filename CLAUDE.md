@@ -1,4 +1,4 @@
-# CLAUDE.md — honcho-selfhosted-dashboard
+# CLAUDE.md — honcho-dashboard
 
 ## North star
 

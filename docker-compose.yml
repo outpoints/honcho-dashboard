@@ -19,7 +19,7 @@ services:
         # If you change HONCHO_BASE_URL after the first build, re-run with `--build`.
         NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
         NEXT_PUBLIC_HONCHO_TOKEN: ${HONCHO_TOKEN:-}
-    image: honcho-selfhosted-dashboard:latest
+    image: honcho-dashboard:latest
     container_name: honcho-dashboard
     restart: unless-stopped
     ports:

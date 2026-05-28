@@ -1,5 +1,5 @@
 {
-  "name": "honcho-selfhosted-dashboard",
+  "name": "honcho-dashboard",
   "version": "0.1.0",
   "private": true,
   "description": "Self-hosted Honcho dashboard — Next.js + Tailwind v4 + Framer Motion",
