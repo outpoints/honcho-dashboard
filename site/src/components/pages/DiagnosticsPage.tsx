@@ -210,8 +210,7 @@ function ProbeList({ probes, loading }: { probes: Probe[]; loading?: boolean }) 
             initial={{ opacity: 0, x: -6 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.04, duration: 0.2 }}
-            whileHover={{ borderColor: "rgba(60, 130, 247, 0.4)" }}
-            className="flex items-start gap-3 p-3 bg-void/40 border border-border transition-colors"
+            className="flex items-start gap-3 p-3 bg-void/40 border border-border transition-colors hover:border-accent/40"
           >
             <motion.div
               animate={

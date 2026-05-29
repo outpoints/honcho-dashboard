@@ -1,37 +1,160 @@
 @import "tailwindcss";
 
+/*
+ * Theming model
+ * -------------
+ * Each `--color-*` token is an alias of a `--c-*` primitive. Tailwind emits the
+ * `--color-*` vars to :root and utilities reference them, so swapping the
+ * `--c-*` primitives under `[data-theme]` re-themes the whole app live (and raw
+ * `var(--color-*)` references keep working). Dark is the default identity ("The
+ * Memory Console"); light is "Paper Terminal" (warm ink-on-paper). JS-painted
+ * surfaces (canvas, charts) read the `--canvas-*` / `--chart-*` tokens. All
+ * foreground/background pairs are WCAG AA verified.
+ */
 @theme {
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-pixel: "VT323", monospace;
-  --font-sans: var(--font-mono);
+  --font-sans: "JetBrains Mono", ui-monospace, monospace;
 
-  --color-void: #050505;
-  --color-surface: #0a0a0a;
-  --color-border: #1a1a1a;
-  --color-border-light: #262626;
-  --color-text-primary: #ededed;
-  --color-text-muted: #737373;
-  --color-accent: #3c82f7;
-  --color-accent-secondary: #a6c6e6;
+  --color-void: var(--c-void);
+  --color-surface: var(--c-surface);
+  --color-border: var(--c-border);
+  --color-border-light: var(--c-border-light);
+  --color-text-primary: var(--c-text-primary);
+  --color-text-muted: var(--c-text-muted);
+  --color-accent: var(--c-accent);
+  --color-accent-secondary: var(--c-accent-secondary);
 
-  --color-red-300: oklch(80.8% 0.114 19.571);
-  --color-red-400: oklch(70.4% 0.191 22.216);
-  --color-red-500: oklch(63.7% 0.237 25.331);
-  --color-orange-400: oklch(75% 0.183 55.934);
-  --color-yellow-300: oklch(90.5% 0.182 98.111);
-  --color-yellow-400: oklch(85.2% 0.199 91.936);
-  --color-yellow-500: oklch(79.5% 0.184 86.047);
-  --color-cyan-400: oklch(78.9% 0.154 211.53);
-  --color-blue-400: oklch(70.7% 0.165 254.624);
-  --color-blue-500: oklch(62.3% 0.214 259.815);
-  --color-purple-400: oklch(71.4% 0.203 305.504);
-  --color-purple-500: oklch(62.7% 0.265 303.9);
-  --color-pink-400: oklch(71.8% 0.202 349.761);
+  --color-red-300: var(--c-red-300);
+  --color-red-400: var(--c-red-400);
+  --color-red-500: var(--c-red-500);
+  --color-orange-400: var(--c-orange-400);
+  --color-yellow-300: var(--c-yellow-300);
+  --color-yellow-400: var(--c-yellow-400);
+  --color-yellow-500: var(--c-yellow-500);
+  --color-cyan-400: var(--c-cyan-400);
+  --color-blue-400: var(--c-blue-400);
+  --color-blue-500: var(--c-blue-500);
+  --color-purple-400: var(--c-purple-400);
+  --color-purple-500: var(--c-purple-500);
+  --color-pink-400: var(--c-pink-400);
 
   --text-xs: 0.75rem;
   --text-xs--line-height: calc(1 / 0.75);
   --text-3xl: 1.875rem;
   --text-3xl--line-height: 1.2;
+}
+
+/* Dark — "The Memory Console" (default). */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --c-void: #050505;
+  --c-surface: #0a0a0a;
+  --c-border: #1a1a1a;
+  --c-border-light: #262626;
+  --c-text-primary: #ededed;
+  --c-text-muted: #8a8a8a;
+  --c-accent: #3c82f7;
+  --c-accent-secondary: #a6c6e6;
+
+  --c-red-300: oklch(80.8% 0.114 19.571);
+  --c-red-400: oklch(70.4% 0.191 22.216);
+  --c-red-500: oklch(63.7% 0.237 25.331);
+  --c-orange-400: oklch(75% 0.183 55.934);
+  --c-yellow-300: oklch(90.5% 0.182 98.111);
+  --c-yellow-400: oklch(85.2% 0.199 91.936);
+  --c-yellow-500: oklch(79.5% 0.184 86.047);
+  --c-cyan-400: oklch(78.9% 0.154 211.53);
+  --c-blue-400: oklch(70.7% 0.165 254.624);
+  --c-blue-500: oklch(62.3% 0.214 259.815);
+  --c-purple-400: oklch(71.4% 0.203 305.504);
+  --c-purple-500: oklch(62.7% 0.265 303.9);
+  --c-pink-400: oklch(71.8% 0.202 349.761);
+
+  /* GridCanvas pre-paint background (the canvas then paints concrete colors it
+     derives from the resolved theme in JS; see CANVAS_THEME in GridCanvas.tsx). */
+  --canvas-bg: #050505;
+
+  /* Heatmap empty cell. */
+  --heat-empty: #0d1129;
+}
+
+/* Light — "Paper Terminal" (warm ink-on-paper). */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --c-void: #efece4;
+  --c-surface: #f7f6f3;
+  --c-border: #e2e0da;
+  --c-border-light: #cdc9bf;
+  --c-text-primary: #1f1d1a;
+  --c-text-muted: #6b6860;
+  --c-accent: #2961c9;
+  --c-accent-secondary: #6f93bf;
+
+  --c-red-300: oklch(55% 0.18 22);
+  --c-red-400: oklch(51% 0.2 25);
+  --c-red-500: oklch(47% 0.21 27);
+  --c-orange-400: oklch(55% 0.16 50);
+  --c-yellow-300: oklch(54% 0.12 78);
+  --c-yellow-400: oklch(51% 0.12 75);
+  --c-yellow-500: oklch(48% 0.11 72);
+  --c-cyan-400: oklch(50% 0.1 215);
+  --c-blue-400: oklch(50% 0.15 255);
+  --c-blue-500: oklch(46% 0.17 257);
+  --c-purple-400: oklch(50% 0.21 305);
+  --c-purple-500: oklch(46% 0.22 305);
+  --c-pink-400: oklch(52% 0.19 350);
+
+  --canvas-bg: #efece4;
+  --heat-empty: #e8e6df;
+}
+
+/* No-JS fallback: honor the OS preference when no explicit theme is set. The
+   boot script sets data-theme for everyone with JS, so this only covers the
+   scriptless case. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --c-void: #efece4;
+    --c-surface: #f7f6f3;
+    --c-border: #e2e0da;
+    --c-border-light: #cdc9bf;
+    --c-text-primary: #1f1d1a;
+    --c-text-muted: #6b6860;
+    --c-accent: #2961c9;
+    --c-accent-secondary: #6f93bf;
+    --c-red-300: oklch(55% 0.18 22);
+    --c-red-400: oklch(51% 0.2 25);
+    --c-red-500: oklch(47% 0.21 27);
+    --c-orange-400: oklch(55% 0.16 50);
+    --c-yellow-300: oklch(54% 0.12 78);
+    --c-yellow-400: oklch(51% 0.12 75);
+    --c-yellow-500: oklch(48% 0.11 72);
+    --c-cyan-400: oklch(50% 0.1 215);
+    --c-blue-400: oklch(50% 0.15 255);
+    --c-blue-500: oklch(46% 0.17 257);
+    --c-purple-400: oklch(50% 0.21 305);
+    --c-purple-500: oklch(46% 0.22 305);
+    --c-pink-400: oklch(52% 0.19 350);
+    --canvas-bg: #efece4;
+    --heat-empty: #e8e6df;
+  }
+}
+
+/* Data-viz series, defined once against theme-aware tokens so they swap too. */
+:root {
+  --chart-reads: var(--color-accent);
+  --chart-writes: var(--color-blue-400);
+  --chart-deletes: var(--color-red-400);
+  --chart-reads-fill: color-mix(in oklab, var(--color-accent) 16%, transparent);
+  --chart-writes-fill: color-mix(in oklab, var(--color-blue-400) 12%, transparent);
+  --chart-deletes-fill: color-mix(in oklab, var(--color-red-400) 10%, transparent);
+  --chart-grid: var(--color-border);
+  --chart-axis: var(--color-border-light);
+  --chart-dot-center: var(--color-void);
 }
 
 @layer base {
@@ -69,6 +192,23 @@
   select,
   button {
     font-family: inherit;
+  }
+
+  /* Scoped crossfade applied only during a theme switch (the provider toggles
+     `.theme-transition` for 250ms), so normal hover/active stays instant. */
+  @media (prefers-reduced-motion: no-preference) {
+    html.theme-transition,
+    html.theme-transition *,
+    html.theme-transition *::before,
+    html.theme-transition *::after {
+      transition:
+        background-color 200ms ease,
+        border-color 200ms ease,
+        color 200ms ease,
+        fill 200ms ease,
+        stroke 200ms ease !important;
+      transition-delay: 0ms !important;
+    }
   }
 }
 

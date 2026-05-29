@@ -291,8 +291,7 @@ export function SessionsPage() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 100, transition: { duration: 0.2 } }}
                 transition={{ delay: Math.min(i * 0.03, 0.25), duration: 0.2 }}
-                whileHover={{ borderColor: "rgba(60, 130, 247, 0.5)" }}
-                className="bg-surface border border-border transition-colors duration-150"
+                className="bg-surface border border-border transition-colors duration-150 hover:border-accent/50"
               >
                 <SessionRow
                   session={d.session}

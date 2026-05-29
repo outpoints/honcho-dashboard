@@ -53,13 +53,9 @@ export function Panel({
           {actions ? <div className="mr-2 flex items-center gap-1">{actions}</div> : null}
           <span className="text-text-muted text-xs select-none" aria-hidden>─</span>
           <span className="text-text-muted text-xs select-none" aria-hidden>□</span>
-          <motion.span
-            className="text-text-muted text-xs select-none cursor-pointer"
-            whileHover={{ color: "#3C82F7" }}
-            transition={{ duration: 0.15 }}
-          >
+          <span className="text-text-muted text-xs select-none cursor-pointer hover:text-accent transition-colors duration-150">
             ×
-          </motion.span>
+          </span>
         </div>
       </div>
       <div className={cn("p-3", bodyClassName)}>{children}</div>

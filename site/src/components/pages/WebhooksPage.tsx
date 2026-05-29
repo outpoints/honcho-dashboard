@@ -173,8 +173,7 @@ export function WebhooksPage() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 100, transition: { duration: 0.2 } }}
                     transition={{ delay: Math.min(i * 0.04, 0.2), duration: 0.2 }}
-                    whileHover={{ borderColor: "rgba(60, 130, 247, 0.5)" }}
-                    className="flex items-center gap-3 px-3 py-3 bg-void/40 border border-border transition-colors duration-150"
+                    className="flex items-center gap-3 px-3 py-3 bg-void/40 border border-border transition-colors duration-150 hover:border-accent/50"
                   >
                     <Icon name="check" size={14} className="text-accent shrink-0" />
                     <div className="min-w-0 flex-1">

@@ -130,8 +130,10 @@ export function StatTile({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay, ease: EASE }}
-      whileHover={{ borderColor: "rgba(60, 130, 247, 0.3)" }}
-      className={cn("bg-surface border border-border p-3 group", className)}
+      className={cn(
+        "bg-surface border border-border p-3 group transition-colors duration-150 hover:border-accent/30",
+        className,
+      )}
     >
       <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
         &gt; {label}

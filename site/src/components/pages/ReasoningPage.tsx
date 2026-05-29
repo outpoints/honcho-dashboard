@@ -244,15 +244,11 @@ export function ReasoningPage() {
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: 100, transition: { duration: 0.2 } }}
                           transition={{ delay: Math.min(i * 0.03, 0.3), duration: 0.2 }}
-                          whileHover={{
-                            borderColor:
-                              t.status === "failed"
-                                ? "rgba(248, 113, 113, 0.6)"
-                                : "rgba(60, 130, 247, 0.5)",
-                          }}
                           className={cn(
                             "flex items-center gap-3 px-3 py-2 border bg-void/40 transition-colors duration-150",
-                            t.status === "failed" ? "border-red-500/40 bg-red-500/5" : "border-border",
+                            t.status === "failed"
+                              ? "border-red-500/40 bg-red-500/5 hover:border-red-400/60"
+                              : "border-border hover:border-accent/50",
                           )}
                         >
                           <span className="shrink-0">

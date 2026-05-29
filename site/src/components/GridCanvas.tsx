@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useResolvedTheme } from "@/lib/theme";
 
 // Constants matched from the original site's compiled bundle.
 const CELL = 20;
@@ -19,9 +20,34 @@ const TRAIL_FADE_OUT_START = 300;
 const TRAIL_MOUSE_THROTTLE = 30;
 const TRAIL_NEIGHBOR_PROB = 0.3;
 
-const COLOR_BG = "#050505";
-const COLOR_GRID = "#111111";
-const COLOR_DOT = "#1A1A1A";
+// Canvas needs concrete color strings (it can't use CSS var()), and reading
+// computed `--canvas-*` tokens on theme change races the provider's data-theme
+// write (child effect fires before parent), so the canvas would lag one theme
+// behind. Keying off the resolved theme value directly is race-free and matches
+// the `--canvas-*` tokens in globals.css.
+interface CanvasColors {
+  bg: string;
+  grid: string;
+  dot: string;
+  accent: string; // "r, g, b"
+  trail: string; // "r, g, b"
+}
+const CANVAS_THEME: Record<"light" | "dark", CanvasColors> = {
+  dark: {
+    bg: "#050505",
+    grid: "#111111",
+    dot: "#1a1a1a",
+    accent: "60, 130, 247",
+    trail: "166, 198, 230",
+  },
+  light: {
+    bg: "#efece4",
+    grid: "#e4e1d9",
+    dot: "#d7d3c8",
+    accent: "41, 97, 201",
+    trail: "111, 147, 191",
+  },
+};
 
 interface Burst {
   cells: { x: number; y: number }[];
@@ -39,7 +65,12 @@ interface TrailCell {
 }
 
 export function GridCanvas() {
+  const resolvedTheme = useResolvedTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const colorsRef = useRef<CanvasColors>(CANVAS_THEME[resolvedTheme]);
+  const refreshColorsRef = useRef<((theme: "light" | "dark") => void) | null>(
+    null,
+  );
   const burstsRef = useRef<Burst[]>([]);
   const trailRef = useRef<TrailCell[]>([]);
   const occupiedRef = useRef<Set<string>>(new Set());
@@ -74,6 +105,14 @@ export function GridCanvas() {
     let bgDirty = true;
     let lastW = 0;
     let lastH = 0;
+
+    // Called by the theme effect with the new resolved theme: swap the cached
+    // colors and repaint the background immediately.
+    refreshColorsRef.current = (theme) => {
+      colorsRef.current = CANVAS_THEME[theme];
+      bgDirty = true;
+      if (document.visibilityState === "visible") drawBackground();
+    };
 
     const clearIdle = () => {
       if (idleTimeoutRef.current !== null) {
@@ -164,9 +203,9 @@ export function GridCanvas() {
       bgDirty = false;
       const w = window.innerWidth;
       const h = window.innerHeight;
-      offCtx.fillStyle = COLOR_BG;
+      offCtx.fillStyle = colorsRef.current.bg;
       offCtx.fillRect(0, 0, w, h);
-      offCtx.strokeStyle = COLOR_GRID;
+      offCtx.strokeStyle = colorsRef.current.grid;
       offCtx.lineWidth = 1;
       offCtx.beginPath();
       for (let x = 0; x <= w; x += CELL) {
@@ -178,7 +217,7 @@ export function GridCanvas() {
         offCtx.lineTo(w, y + 0.5);
       }
       offCtx.stroke();
-      offCtx.fillStyle = COLOR_DOT;
+      offCtx.fillStyle = colorsRef.current.dot;
       for (let x = 0; x <= w; x += DOT_SPACING) {
         for (let y = 0; y <= h; y += DOT_SPACING) {
           offCtx.beginPath();
@@ -214,7 +253,7 @@ export function GridCanvas() {
         }
         if (b.opacity > 0) {
           const alphaBase = b.shade === 0 ? 0.08 : 0.15;
-          ctx.fillStyle = `rgba(60, 130, 247, ${(alphaBase * b.opacity).toFixed(4)})`;
+          ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(alphaBase * b.opacity).toFixed(4)})`;
           for (const c of b.cells) ctx.fillRect(c.x, c.y, CELL, CELL);
         }
       }
@@ -238,9 +277,9 @@ export function GridCanvas() {
           : 1;
         const alpha = fadeIn * fadeOut;
         if (alpha > 0) {
-          ctx.fillStyle = `rgba(60, 130, 247, ${(0.18 * alpha).toFixed(4)})`;
+          ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(0.18 * alpha).toFixed(4)})`;
           ctx.fillRect(c.x, c.y, CELL, CELL);
-          ctx.fillStyle = `rgba(166, 198, 230, ${(0.08 * alpha).toFixed(4)})`;
+          ctx.fillStyle = `rgba(${colorsRef.current.trail}, ${(0.08 * alpha).toFixed(4)})`;
           ctx.fillRect(c.x + 2, c.y + 2, CELL - 4, CELL - 4);
         }
       }
@@ -352,14 +391,20 @@ export function GridCanvas() {
       window.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseleave", onMouseLeave);
       document.removeEventListener("visibilitychange", onVisibility);
+      refreshColorsRef.current = null;
     };
   }, []);
+
+  // Repaint the canvas background when the theme switches.
+  useEffect(() => {
+    refreshColorsRef.current?.(resolvedTheme);
+  }, [resolvedTheme]);
 
   return (
     <canvas
       ref={canvasRef}
       className="fixed inset-0 z-0 pointer-events-none"
-      style={{ backgroundColor: COLOR_BG }}
+      style={{ backgroundColor: "var(--canvas-bg)" }}
     />
   );
 }
