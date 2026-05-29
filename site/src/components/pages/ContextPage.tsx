@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
@@ -16,6 +17,9 @@ import type { ApiPeer, ApiSession, ApiMessage } from "@/lib/honcho/types";
 import { cn } from "@/lib/utils";
 
 type LayerId = "peer_card" | "conclusions" | "summaries" | "messages";
+
+// Match the easing/timing used by Panel + the rest of the app (see DESIGN_GUIDE §8).
+const EASE = [0.25, 0.46, 0.45, 0.94] as const;
 
 const LAYER_TONE: Record<LayerId, string> = {
   peer_card: "bg-blue-400 text-blue-400 border-blue-400/40",
@@ -68,6 +72,9 @@ export function ContextPage() {
   const [layers, setLayers] = useState<Layer[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped on every successful generate so the layer cards + bars re-run their
+  // entrance animation (used as part of their motion keys).
+  const [runId, setRunId] = useState(0);
 
   // Preselect from cross-links (#/context?peer=… / ?session=…).
   useEffect(() => {
@@ -174,6 +181,7 @@ export function ContextPage() {
         }
       });
       setLayers(built);
+      setRunId((r) => r + 1);
     } catch (err) {
       setError(formatApiError(err));
       setLayers(null);
@@ -262,17 +270,41 @@ export function ContextPage() {
       <div className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-7 space-y-3">
           <Panel title="CONTEXT_LAYERS">
-            {!layers ? (
+            {busy ? (
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="p-3 border border-border bg-void/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="h-3 w-3 bg-border/60 animate-pulse" />
+                      <div className="h-3 w-24 bg-border/60 animate-pulse" />
+                      <div className="ml-auto h-3 w-28 bg-border/40 animate-pulse" />
+                    </div>
+                    <div className="h-2 bg-border/40 animate-pulse mb-2" />
+                    <div className="h-2 w-2/3 bg-border/30 animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            ) : !layers ? (
               <div className="text-[11px] text-text-muted py-6 text-center">
                 Select a session and/or peer, then GENERATE_CONTEXT to assemble the layers.
               </div>
             ) : (
               <>
                 <div className="space-y-3">
-                  {layers.map((layer) => {
+                  {layers.map((layer, i) => {
                     const [bg, text, border] = LAYER_TONE[layer.id].split(" ");
+                    const pct = Math.min(100, (layer.tokens / 3000) * 100);
                     return (
-                      <div key={layer.id} className={cn("p-3 border bg-void/30", border)}>
+                      <motion.div
+                        key={`${runId}-${layer.id}`}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.06, duration: 0.25, ease: EASE }}
+                        className={cn(
+                          "p-3 border bg-void/30 hover:bg-void/50 transition-colors duration-150",
+                          border,
+                        )}
+                      >
                         <div className="flex items-center gap-2 mb-2">
                           <Icon name={ICONS[layer.id]} className={text} size={14} />
                           <span className={cn("text-sm uppercase tracking-wider", text)}>{layer.label}</span>
@@ -284,7 +316,7 @@ export function ContextPage() {
                           <button
                             onClick={() => toggle(layer.id)}
                             className={cn(
-                              "ml-2 w-7 h-5 border flex items-center justify-center",
+                              "ml-2 w-7 h-5 border flex items-center justify-center transition-colors duration-150",
                               layer.enabled ? "border-accent text-accent" : "border-border text-text-muted",
                             )}
                             aria-label={`Toggle ${layer.id}`}
@@ -292,17 +324,19 @@ export function ContextPage() {
                             <Icon name="eye" size={10} />
                           </button>
                         </div>
-                        <div className="relative h-2 bg-border mb-2">
-                          <div
+                        <div className="relative h-2 bg-border mb-2 overflow-hidden">
+                          <motion.div
                             className={cn("absolute inset-y-0 left-0", bg)}
-                            style={{
-                              width: `${Math.min(100, (layer.tokens / 3000) * 100)}%`,
-                              opacity: layer.enabled ? 0.7 : 0.2,
+                            initial={{ width: 0, opacity: layer.enabled ? 0.7 : 0.2 }}
+                            animate={{ width: `${pct}%`, opacity: layer.enabled ? 0.7 : 0.2 }}
+                            transition={{
+                              width: { delay: i * 0.06 + 0.12, duration: 0.45, ease: EASE },
+                              opacity: { duration: 0.2, ease: EASE },
                             }}
                           />
                         </div>
                         <p className="text-[11px] text-text-muted">{layer.description}</p>
-                      </div>
+                      </motion.div>
                     );
                   })}
                 </div>
@@ -313,17 +347,26 @@ export function ContextPage() {
                       {total.toLocaleString()} / {tokenLimit.toLocaleString()} tokens
                     </span>
                   </div>
-                  <div className="relative h-1 bg-border mt-1.5">
-                    <div
+                  <div className="relative h-1 bg-border mt-1.5 overflow-hidden">
+                    <motion.div
                       className={cn("absolute inset-y-0 left-0", overLimit ? "bg-red-500" : "bg-accent")}
-                      style={{ width: `${Math.min(100, (total / tokenLimit) * 100)}%` }}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, (total / tokenLimit) * 100)}%` }}
+                      transition={{ duration: 0.4, ease: EASE }}
                     />
                   </div>
                   {overLimit ? (
-                    <p className="mt-2 text-[10px] text-yellow-400 flex items-center gap-1">
+                    // Render conditionally (no AnimatePresence) so a stale "exceeds limit"
+                    // warning can never linger once the total drops back under the limit.
+                    <motion.p
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2, ease: EASE }}
+                      className="mt-2 text-[10px] text-yellow-400 flex items-center gap-1"
+                    >
                       <Icon name="warning" size={10} /> exceeds token limit — lower-priority layers will be
                       truncated
-                    </p>
+                    </motion.p>
                   ) : null}
                 </div>
               </>
@@ -332,35 +375,59 @@ export function ContextPage() {
         </div>
 
         <div className="col-span-12 lg:col-span-5 space-y-3">
-          <Panel title="CONTEXT_PREVIEW" bodyClassName={previewLayers.length ? undefined : "p-0"}>
-            {previewLayers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2">
+          <Panel
+            title="CONTEXT_PREVIEW"
+            delay={0.05}
+            bodyClassName={previewLayers.length || busy ? undefined : "p-0"}
+          >
+            {busy ? (
+              <div className="space-y-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-3 bg-border/40 animate-pulse"
+                    style={{ width: `${90 - (i % 3) * 18}%` }}
+                  />
+                ))}
+              </div>
+            ) : previewLayers.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.25, ease: EASE }}
+                className="flex flex-col items-center justify-center py-12 gap-2"
+              >
                 <Icon name="eye" className="text-text-muted" size={28} />
                 <p className="text-sm text-text-muted">No context generated yet</p>
                 <p className="text-[10px] text-text-muted">
                   Select session &amp; peer, then click GENERATE_CONTEXT
                 </p>
-              </div>
+              </motion.div>
             ) : (
               <div className="max-h-[420px] overflow-y-auto space-y-3">
-                {previewLayers.map((l) => {
+                {previewLayers.map((l, i) => {
                   const [, text] = LAYER_TONE[l.id].split(" ");
                   return (
-                    <div key={l.id}>
+                    <motion.div
+                      key={`${runId}-${l.id}`}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.06, duration: 0.25, ease: EASE }}
+                    >
                       <div className={cn("text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1", text)}>
                         <Icon name={ICONS[l.id]} size={10} /> {l.label}
                       </div>
                       <pre className="text-[11px] text-text-primary whitespace-pre-wrap break-words leading-relaxed">
                         {l.text}
                       </pre>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
             )}
           </Panel>
 
-          <Panel title="HOW_CONTEXT_WORKS">
+          <Panel title="HOW_CONTEXT_WORKS" delay={0.1}>
             <div className="space-y-2 text-[11px]">
               <Line code="PCD" label="Peer cards cache basic biographical info about a peer — name, traits, preferences" />
               <Line code="CON" label="Conclusions are derived from the peer's representation as Honcho observes them" />
@@ -374,10 +441,16 @@ export function ContextPage() {
           </Panel>
 
           {layers ? (
-            <Panel title="LAYER_STATS">
+            <Panel title="LAYER_STATS" delay={0.15}>
               <div className="space-y-1.5 text-[11px]">
-                {layers.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between">
+                {layers.map((l, i) => (
+                  <motion.div
+                    key={`${runId}-${l.id}`}
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.05, duration: 0.2, ease: EASE }}
+                    className="flex items-center justify-between"
+                  >
                     <span className="flex items-center gap-2">
                       <span className={cn("w-2 h-2", LAYER_TONE[l.id].split(" ")[0])} />
                       <span className="text-text-muted">{l.id}</span>
@@ -386,7 +459,7 @@ export function ContextPage() {
                       {l.estimated ? "~" : ""}
                       {l.tokens.toLocaleString()} tok / {l.items} items
                     </span>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </Panel>
