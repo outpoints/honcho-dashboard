@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-28T00:00:00Z",
+  "title": "Design System: Honcho Self-Hosted Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "#3c82f7",
+        "tonalRamp": [
+          "oklch(15% 0.06 259)",
+          "oklch(25% 0.10 259)",
+          "oklch(35% 0.14 259)",
+          "oklch(45% 0.17 259)",
+          "oklch(55% 0.19 259)",
+          "oklch(62% 0.21 259)",
+          "oklch(78% 0.12 259)",
+          "oklch(92% 0.04 259)"
+        ]
+      },
+      "accent-secondary": {
+        "role": "secondary",
+        "displayName": "Faded Sky",
+        "canonical": "#a6c6e6",
+        "tonalRamp": [
+          "oklch(20% 0.03 245)",
+          "oklch(32% 0.04 245)",
+          "oklch(44% 0.05 245)",
+          "oklch(56% 0.06 245)",
+          "oklch(68% 0.06 245)",
+          "oklch(80% 0.05 245)",
+          "oklch(88% 0.04 245)",
+          "oklch(95% 0.02 245)"
+        ]
+      },
+      "void": {
+        "role": "neutral",
+        "displayName": "Void",
+        "canonical": "#050505",
+        "tonalRamp": [
+          "oklch(4% 0 0)",
+          "oklch(8% 0 0)",
+          "oklch(13% 0 0)",
+          "oklch(18% 0 0)",
+          "oklch(30% 0 0)",
+          "oklch(45% 0 0)",
+          "oklch(65% 0 0)",
+          "oklch(85% 0 0)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#0a0a0a",
+        "tonalRamp": [
+          "oklch(8% 0 0)",
+          "oklch(12% 0 0)",
+          "oklch(18% 0 0)",
+          "oklch(26% 0 0)",
+          "oklch(40% 0 0)",
+          "oklch(55% 0 0)",
+          "oklch(78% 0 0)",
+          "oklch(93% 0 0)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "canonical": "#1a1a1a",
+        "tonalRamp": [
+          "oklch(10% 0 0)",
+          "oklch(13% 0 0)",
+          "oklch(18% 0 0)",
+          "oklch(26% 0 0)",
+          "oklch(40% 0 0)",
+          "oklch(55% 0 0)",
+          "oklch(78% 0 0)",
+          "oklch(93% 0 0)"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Text Primary",
+        "canonical": "#ededed",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(28% 0 0)",
+          "oklch(40% 0 0)",
+          "oklch(52% 0 0)",
+          "oklch(64% 0 0)",
+          "oklch(76% 0 0)",
+          "oklch(88% 0 0)",
+          "oklch(94% 0 0)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Text Muted",
+        "canonical": "#737373",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(25% 0 0)",
+          "oklch(35% 0 0)",
+          "oklch(45% 0 0)",
+          "oklch(52% 0 0)",
+          "oklch(65% 0 0)",
+          "oklch(80% 0 0)",
+          "oklch(93% 0 0)"
+        ]
+      },
+      "status-danger": {
+        "role": "tertiary",
+        "displayName": "Danger Red",
+        "canonical": "oklch(70.4% 0.191 22.216)",
+        "tonalRamp": [
+          "oklch(20% 0.08 22)",
+          "oklch(32% 0.12 22)",
+          "oklch(44% 0.16 22)",
+          "oklch(56% 0.19 22)",
+          "oklch(64% 0.20 22)",
+          "oklch(70% 0.19 22)",
+          "oklch(81% 0.11 22)",
+          "oklch(92% 0.04 22)"
+        ]
+      },
+      "status-warn": {
+        "role": "tertiary",
+        "displayName": "Warn Yellow",
+        "canonical": "oklch(85.2% 0.199 91.936)",
+        "tonalRamp": [
+          "oklch(30% 0.08 92)",
+          "oklch(42% 0.11 92)",
+          "oklch(54% 0.14 92)",
+          "oklch(66% 0.17 92)",
+          "oklch(76% 0.19 92)",
+          "oklch(85% 0.20 92)",
+          "oklch(91% 0.14 92)",
+          "oklch(96% 0.06 92)"
+        ]
+      },
+      "status-dream": {
+        "role": "tertiary",
+        "displayName": "Dream Purple",
+        "canonical": "oklch(71.4% 0.203 305.504)",
+        "tonalRamp": [
+          "oklch(22% 0.10 305)",
+          "oklch(34% 0.14 305)",
+          "oklch(46% 0.18 305)",
+          "oklch(58% 0.20 305)",
+          "oklch(65% 0.21 305)",
+          "oklch(71% 0.20 305)",
+          "oklch(82% 0.12 305)",
+          "oklch(92% 0.05 305)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (VT323)", "purpose": "Large stat numerals only (StatTile). Never body or labels." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles in PageHeader. Used sparingly." },
+      "title": { "displayName": "Title", "purpose": "Panel and modal titles inside [ ... ]; section labels." },
+      "body": { "displayName": "Body / UI", "purpose": "Default UI text, values, table cells, input text." },
+      "label": { "displayName": "Label", "purpose": "Uppercase tracked field labels and chips; steps down to 9px on chips." }
+    },
+    "shadows": [
+      { "name": "modal-lift", "value": "0 25px 50px -12px rgba(0,0,0,0.5)", "purpose": "The single sanctioned shadow. Modal card only, to separate it from the blurred backdrop. Everything else is flat." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.25, 0.46, 0.45, 0.94)", "purpose": "Default ease-out for panel/row entrances and most transitions (EASE in source)." },
+      { "name": "duration-tap", "value": "100ms", "purpose": "Button hover/tap scale (1.02 / 0.98)." },
+      { "name": "duration-fast", "value": "150ms", "purpose": "Color transitions, modal backdrop fade." },
+      { "name": "duration-base", "value": "180ms", "purpose": "Modal card enter/exit (fade + scale 0.95 + 10px rise)." },
+      { "name": "duration-entrance", "value": "250ms", "purpose": "Panel / StatTile / row entrance (fade + 10px travel)." },
+      { "name": "spring-pill", "value": "spring(stiffness 500, damping 38)", "purpose": "Sliding active indicator under Tabs / PillTabs (Framer Motion layoutId)." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Accent-outline button that fills on hover. The default create/confirm action.",
+      "html": "<button class=\"ds-btn-primary\">NEW_WORKSPACE</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:32px; padding:0 12px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#3c82f7; background:transparent; border:1px solid #3c82f7; border-radius:0; cursor:pointer; transition:background .15s, color .15s, transform .1s; } .ds-btn-primary:hover { background:#3c82f7; color:#050505; transform:scale(1.02); } .ds-btn-primary:active { transform:scale(0.98); } .ds-btn-primary:focus-visible { outline:2px solid #3c82f7; outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Muted low-emphasis button for cancel / secondary actions.",
+      "html": "<button class=\"ds-btn-secondary\">CANCEL</button>",
+      "css": ".ds-btn-secondary { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:32px; padding:0 12px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#737373; background:transparent; border:1px solid #262626; border-radius:0; cursor:pointer; transition:color .15s, border-color .15s, transform .1s; } .ds-btn-secondary:hover { color:#ededed; border-color:#737373; transform:scale(1.02); } .ds-btn-secondary:active { transform:scale(0.98); } .ds-btn-secondary:focus-visible { outline:2px solid #3c82f7; outline-offset:2px; }"
+    },
+    {
+      "name": "Solid Button",
+      "kind": "button",
+      "refersTo": "button-solid",
+      "description": "Filled accent block for the single highest-emphasis action.",
+      "html": "<button class=\"ds-btn-solid\">SAVE</button>",
+      "css": ".ds-btn-solid { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:32px; padding:0 12px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#050505; background:#3c82f7; border:1px solid #3c82f7; border-radius:0; cursor:pointer; transition:background .15s, transform .1s; } .ds-btn-solid:hover { background:rgba(60,130,247,0.9); transform:scale(1.02); } .ds-btn-solid:active { transform:scale(0.98); } .ds-btn-solid:focus-visible { outline:2px solid #ededed; outline-offset:2px; }"
+    },
+    {
+      "name": "Accent Chip",
+      "kind": "chip",
+      "refersTo": "chip-accent",
+      "description": "Inline status/tag. Tone sets a /10 background, full-strength text, and a /30 border.",
+      "html": "<span class=\"ds-chip-accent\">ACTIVE</span>",
+      "css": ".ds-chip-accent { display:inline-flex; align-items:center; gap:4px; padding:2px 6px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:9px; text-transform:uppercase; letter-spacing:0.05em; color:#3c82f7; background:rgba(60,130,247,0.1); border:1px solid rgba(60,130,247,0.3); border-radius:0; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "Inset text field on Void; border shifts to accent on focus, no glow.",
+      "html": "<input class=\"ds-input-text\" type=\"text\" placeholder=\"workspace_id\" />",
+      "css": ".ds-input-text { box-sizing:border-box; width:100%; padding:8px 12px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; color:#ededed; background:#050505; border:1px solid #1a1a1a; border-radius:0; outline:none; transition:border-color .15s; } .ds-input-text::placeholder { color:#737373; } .ds-input-text:focus { border-color:#3c82f7; }"
+    },
+    {
+      "name": "Checkbox (checked)",
+      "kind": "input",
+      "refersTo": "checkbox-checked",
+      "description": "Square accent-filled checkbox with label and optional hint. Booleans use this, never the Toggle switch.",
+      "html": "<label class=\"ds-check\"><span class=\"ds-check__box\"><svg width=\"11\" height=\"11\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-check__text\">OBSERVE_ME<span class=\"ds-check__hint\">store conclusions about this peer</span></span></label>",
+      "css": ".ds-check { display:inline-flex; gap:10px; align-items:flex-start; font-family:'JetBrains Mono',ui-monospace,monospace; cursor:pointer; user-select:none; } .ds-check__box { margin-top:1px; width:16px; height:16px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; color:#050505; background:#3c82f7; border:1px solid #3c82f7; border-radius:0; } .ds-check__text { display:inline-flex; flex-direction:column; gap:4px; } .ds-check__text { font-size:14px; color:#ededed; } .ds-check__hint { font-size:11px; color:#737373; }"
+    },
+    {
+      "name": "Underline Tabs",
+      "kind": "nav",
+      "refersTo": "tabs",
+      "description": "Underline-style tab row; the active tab is accent with a 1px accent underline.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab ds-tab--active\">MESSAGES</button><button class=\"ds-tab\">SUMMARIES</button><button class=\"ds-tab\">CONTEXT</button></div>",
+      "css": ".ds-tabs { display:flex; gap:4px; border-bottom:1px solid #1a1a1a; } .ds-tab { position:relative; padding:8px 16px; font-family:'JetBrains Mono',ui-monospace,monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#737373; background:none; border:none; cursor:pointer; transition:color .15s; } .ds-tab:hover { color:#ededed; } .ds-tab--active { color:#3c82f7; } .ds-tab--active::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:1px; background:#3c82f7; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The signature section container: flat surface, hairline border, [ TITLE ] header with a status dot and window-chrome glyphs.",
+      "html": "<div class=\"ds-panel\"><div class=\"ds-panel__head\"><div class=\"ds-panel__title\"><span class=\"ds-panel__dot\"></span><span>[ WORKSPACE_CONFIG ]</span></div><div class=\"ds-panel__chrome\"><span>&#9472;</span><span>&#9633;</span><span class=\"ds-panel__close\">&#215;</span></div></div><div class=\"ds-panel__body\">Reasoning runs at the workspace level.</div></div>",
+      "css": ".ds-panel { background:#0a0a0a; border:1px solid #1a1a1a; border-radius:0; font-family:'JetBrains Mono',ui-monospace,monospace; } .ds-panel__head { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #1a1a1a; } .ds-panel__title { display:flex; align-items:center; gap:8px; color:#737373; font-size:12px; } .ds-panel__dot { width:8px; height:8px; background:#3c82f7; } .ds-panel__chrome { display:flex; align-items:center; gap:4px; color:#737373; font-size:12px; user-select:none; } .ds-panel__close { cursor:pointer; transition:color .15s; } .ds-panel__close:hover { color:#3c82f7; } .ds-panel__body { padding:12px; color:#ededed; font-size:12px; }"
+    },
+    {
+      "name": "Modal",
+      "kind": "custom",
+      "refersTo": "modal",
+      "description": "The mandatory popup pattern: bracketed header, body, right-aligned cancel-then-primary footer. The only component carrying a shadow.",
+      "html": "<div class=\"ds-modal\"><div class=\"ds-modal__head\"><div class=\"ds-modal__title\"><span class=\"ds-modal__dot\"></span><span>[ SCHEDULE_DREAM ]</span></div><span class=\"ds-modal__close\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg></span></div><div class=\"ds-modal__body\">Schedule a dream pass for this workspace.</div><div class=\"ds-modal__foot\"><button class=\"ds-btn-secondary\">CANCEL</button><button class=\"ds-btn-primary\">SCHEDULE</button></div></div>",
+      "css": ".ds-modal { width:420px; max-width:100%; background:#0a0a0a; border:1px solid #262626; border-radius:0; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5); font-family:'JetBrains Mono',ui-monospace,monospace; } .ds-modal__head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #1a1a1a; } .ds-modal__title { display:flex; align-items:center; gap:8px; color:#737373; font-size:12px; } .ds-modal__dot { width:8px; height:8px; background:#3c82f7; } .ds-modal__close { color:#737373; cursor:pointer; transition:color .15s; } .ds-modal__close:hover { color:#3c82f7; } .ds-modal__body { padding:16px; color:#ededed; font-size:12px; } .ds-modal__foot { display:flex; align-items:center; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid #1a1a1a; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Memory Console",
+    "overview": "This is an operator's console onto a self-hosted memory server, not a marketing dashboard. Every panel is a readout: a window onto workspaces, peers, sessions, conclusions, runtime, and queue health. The aesthetic borrows from terminals and IDEs - flat surfaces, square corners, hairline borders, monospace everywhere, bracketed window chrome ([ TITLE ] with the dash/square/x controls), and a single blue signal color that means 'live / selected / acting' and nothing else. The mood is confidence and control: the operator should trust the numbers and feel the tool stay out of the way. Density is high and deliberate. Type runs small (12px is the default, dropping to 11/10/9px for chrome and labels) because operators scan tables, counts, and ids, not prose. Color is rationed: the near-black neutral ramp carries almost the entire surface, the blue accent appears only on interactive and live elements, and the semantic palette is reserved strictly for status and type classification. Motion is short and functional. This system explicitly rejects consumer-SaaS gloss (rounded cards, drop shadows, gradients, pastel illustrations, hero-metric tiles) and dishonesty - it shows only what Honcho actually exposes and degrades to an explicit 'unavailable' state rather than faking a metric or a control.",
+    "keyCharacteristics": [
+      "Dark, flat, square, hairline-bordered - terminal/IDE control panel, not a card grid.",
+      "Monospace throughout (JetBrains Mono); small type by default; pixel font (VT323) for big numerals only.",
+      "One blue accent for interactive/live/selected state; everything else is the neutral ramp.",
+      "SCREAMING_SNAKE labels, sentence-case hints; bracketed [ TITLE ] panel chrome.",
+      "Subtle, functional motion; every data view renders loading, empty, and error."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Signal Blue is the only brand color and appears only on interactive, live, or selected elements. It is never decoration. If a screen is mostly blue, something is wrong.", "section": "colors" },
+      { "name": "The Status-Only Palette Rule", "body": "The semantic colors (red / yellow / purple / cyan / blue / pink / orange) are reserved for status and type classification. Never reach for them to add visual interest.", "section": "colors" },
+      { "name": "The No-Raw-Color Rule", "body": "Every color comes from a @theme token (bg-surface, text-accent, border-border). A raw hex, an rgb(), or an off-palette Tailwind class is prohibited.", "section": "colors" },
+      { "name": "The SCREAMING_SNAKE Rule", "body": "Labels, buttons, tab names, panel titles, and field labels are SCREAMING_SNAKE_CASE. Descriptions, hints, and helper text are sentence case, muted, and small. Never mix the two.", "section": "typography" },
+      { "name": "The Small-Type Rule", "body": "UI chrome defaults to text-xs (12px) and steps down via 11/10/9px escape hatches. text-sm and larger are prohibited for chrome; reserve them for headings and values.", "section": "typography" },
+      { "name": "The Bracket Rule", "body": "Panel and modal titles render inside brackets via the component chrome ([ TITLE ]). Pass the bare SCREAMING_SNAKE string; the brackets are added for you.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat. The only shadow in the system is the modal's lift; the only blur is the modal backdrop. Square corners only - rounded-* is prohibited.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do pull every color and font from @theme tokens (bg-surface, text-accent, border-border); keep type small and monospace.",
+      "Do compose new screens from Panel / Modal / ConfirmModal / atoms - reuse the primitives, never build a parallel shell or drop in raw input/button/select.",
+      "Do label in SCREAMING_SNAKE_CASE and write hints in sentence case; wrap popups in Modal with a cancel-then-primary footer and a progress label.",
+      "Do render loading (skeleton bars), empty (a Panel state with an icon + CTA that teaches the interface), and error (a red line pointing at #/config) for every data path.",
+      "Do keep motion subtle and functional - fade + a few px, scale 1.02/0.98 on buttons, reuse EASE [0.25,0.46,0.45,0.94], durations ~0.15-0.25s. Pair each animation with a prefers-reduced-motion alternative.",
+      "Do show only what Honcho actually exposes; degrade operator panels to an explicit 'unavailable' state when the DB isn't wired."
+    ],
+    "donts": [
+      "Don't apply consumer-SaaS gloss: no rounded cards, no drop shadows (the modal's lift is the only exception), no gradients, no pastel illustrations.",
+      "Don't build the hero-metric template (big gradient stat tiles) or identical icon-card grids.",
+      "Don't fake data Honcho doesn't expose - no invented per-message status chips, no fake archive / pause / process-all controls.",
+      "Don't use gradient text, glassmorphism as decoration, or side-stripe accent borders (border-left > 1px as a colored stripe).",
+      "Don't use text-sm+ for chrome, introduce a new font, or use rounded-* anywhere.",
+      "Don't use the Toggle switch (broken - knob/label overlap); booleans use Checkbox.",
+      "Don't use window.prompt/confirm/alert or a hand-rolled fixed inset-0 overlay - use Modal / ConfirmModal / toasts.",
+      "Don't add flourish to any screen still on mock data. Real before pretty."
+    ]
+  }
+}

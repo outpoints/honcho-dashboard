@@ -20,3 +20,6 @@ Thumbs.db
 # Session handoff notes — local only, never committed.
 HANDOFF.md
 HANDOFF_PROMPT.md
+
+# Impeccable live-mode session journals (local runtime state).
+.impeccable/live/sessions/
