@@ -36,7 +36,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
     <aside className="hidden md:sticky md:top-0 md:h-screen md:self-start md:flex shrink-0 bg-surface border-r border-border flex-col w-48 relative z-10">
       <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between gap-3">
-          <button className="flex items-center gap-2 text-left" onClick={() => onNavigate("overview")}>
+          <button className="flex items-center gap-2 text-left" onClick={() => onNavigate("fleet")}>
             <div className="w-6 h-6 flex items-center justify-center overflow-hidden">
               <Image src="/images/honcho-logo.svg" alt="Honcho logo" width={24} height={24} className="w-full h-full object-contain" />
             </div>

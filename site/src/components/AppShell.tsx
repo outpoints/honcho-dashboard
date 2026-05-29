@@ -11,6 +11,7 @@ import type { RouteKey } from "@/types/honcho";
 import { cn } from "@/lib/utils";
 
 import { OverviewPage } from "@/components/pages/OverviewPage";
+import { FleetPage } from "@/components/pages/FleetPage";
 import { WorkspacesPage } from "@/components/pages/WorkspacesPage";
 import { PeersPage } from "@/components/pages/PeersPage";
 import { SessionsPage } from "@/components/pages/SessionsPage";
@@ -27,6 +28,7 @@ import { ToastProvider } from "@/components/toast";
 
 const RENDER: Record<RouteKey, React.ComponentType> = {
   overview: OverviewPage,
+  fleet: FleetPage,
   workspaces: WorkspacesPage,
   peers: PeersPage,
   sessions: SessionsPage,
@@ -41,9 +43,9 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
 };
 
 function readHashRoute(): RouteKey {
-  if (typeof window === "undefined") return "overview";
+  if (typeof window === "undefined") return "fleet";
   const raw = window.location.hash.replace(/^#\/?/, "").split(/[?&]/)[0];
-  return (NAV_ITEMS.find((n) => n.key === raw)?.key as RouteKey) || "overview";
+  return (NAV_ITEMS.find((n) => n.key === raw)?.key as RouteKey) || "fleet";
 }
 
 function subscribeHash(notify: () => void) {
@@ -52,7 +54,7 @@ function subscribeHash(notify: () => void) {
   return () => window.removeEventListener("hashchange", notify);
 }
 
-const SERVER_HASH: RouteKey = "overview";
+const SERVER_HASH: RouteKey = "fleet";
 
 export function AppShell() {
   const current = useSyncExternalStore<RouteKey>(
@@ -69,7 +71,7 @@ export function AppShell() {
     setMenuOpen(false);
   }, []);
 
-  const Page = RENDER[current] ?? OverviewPage;
+  const Page = RENDER[current] ?? FleetPage;
 
   return (
     <NavContext.Provider value={{ navigate: onNavigate, current }}>

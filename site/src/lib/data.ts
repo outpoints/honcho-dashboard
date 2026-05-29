@@ -1,6 +1,7 @@
 import type { NavItem } from "@/types/honcho";
 
 export const NAV_ITEMS: NavItem[] = [
+  { key: "fleet", label: "FLEET", icon: "monitor" },
   { key: "overview", label: "OVERVIEW", icon: "activity" },
   { key: "workspaces", label: "WORKSPACES", icon: "layers" },
   { key: "peers", label: "PEERS", icon: "users" },

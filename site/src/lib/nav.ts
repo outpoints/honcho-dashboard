@@ -12,7 +12,7 @@ const noop = () => undefined;
 
 export const NavContext = createContext<NavContextValue>({
   navigate: noop,
-  current: "overview",
+  current: "fleet",
 });
 
 export function useNav() {

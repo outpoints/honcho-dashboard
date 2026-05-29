@@ -62,7 +62,7 @@ export function Header({ current }: HeaderProps) {
       <header className="h-12 bg-surface border-b border-border flex items-center justify-between px-3 sm:px-4 relative gap-3 z-10">
         <div className="flex items-center gap-2 text-xs">
           <Icon name="terminal" className="text-accent shrink-0" size={14} />
-          <button onClick={() => navigate("overview")} className="text-text-muted hover:text-text-primary transition-colors duration-150">honcho</button>
+          <button onClick={() => navigate("fleet")} className="text-text-muted hover:text-text-primary transition-colors duration-150">honcho</button>
           <span className="text-text-muted">/</span>
           <button onClick={() => navigate("workspaces")} className="text-text-muted hover:text-text-primary transition-colors duration-150">
             {workspaceId ?? "self-hosted"}

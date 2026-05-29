@@ -1,5 +1,6 @@
 export type RouteKey =
   | "overview"
+  | "fleet"
   | "workspaces"
   | "peers"
   | "sessions"
