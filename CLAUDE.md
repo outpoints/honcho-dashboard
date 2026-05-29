@@ -82,7 +82,7 @@ When the checklist closes we are at parity; only then start divergent features.
 - **Real before pretty.** Wire a page to the API before adding new UI flourishes. A working CRUD beats another mock dashboard tile.
 - **Loading / empty / error states are not optional.** Every fetch path renders all three. CLAUDE.md global rules apply: AI-generated code defaults to happy path — audit each new page for failure modes.
 - **Don't delete the mocks.** Keep `src/lib/data.ts` until each page no longer imports from it; remove per-section as you migrate.
-- **Don't break the visual system.** Spacing, panel borders, monospace voice are intentional — see `docs/research/`. Match `atoms.tsx` / `Panel.tsx` rather than inventing new shells.
+- **Follow the design guide.** `site/docs/research/DESIGN_GUIDE.md` is binding for every UI change — read it before touching components. Key rules: reuse `Panel`/`Modal`/atoms (never raw HTML controls or hand-rolled overlays), **all popups use `Modal`/`ConfirmModal` (never `window.prompt/confirm/alert`)**, booleans use `Checkbox` (not the broken `Toggle`), colors/type come from `@theme` tokens only, labels in `SCREAMING_SNAKE` and hints in sentence case. The `site-clone` branch is the canonical design baseline.
 - **Hash router stays put** until parity is done.
 - **Run `npm run check` before reporting a task done.**
 
@@ -99,4 +99,4 @@ When the checklist closes we are at parity; only then start divergent features.
 - `site/src/lib/data.ts` — every mock you need to replace
 - `site/src/types/honcho.ts` — domain types (extend, don't fork)
 - `site/src/components/pages/*` — one file per route; this is where wiring happens
-- `site/docs/research/` — UX behaviors locked down before the rebuild
+- `site/docs/research/DESIGN_GUIDE.md` — **binding** visual-system contract (read before any UI change); `BEHAVIORS / COLOR_AUDIT / DROPDOWN` — per-page + component specs
