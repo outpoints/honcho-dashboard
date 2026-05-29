@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/components/icons";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type { RouteKey } from "@/types/honcho";
 import { useNav } from "@/lib/nav";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
@@ -86,10 +87,11 @@ export function Header({ current }: HeaderProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
           <span className="hidden sm:flex text-[10px] text-text-muted font-mono">
             {apiOpts?.baseUrl ?? "no instance"}
           </span>
+          <ThemeToggle />
         </div>
       </header>
 

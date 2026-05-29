@@ -48,6 +48,8 @@ import {
   Loader2,
   AlertCircle,
   Sun,
+  Moon,
+  Monitor,
   type LucideIcon,
 } from "lucide-react";
 
@@ -101,6 +103,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   loader: Loader2,
   "alert-circle": AlertCircle,
   sun: Sun,
+  moon: Moon,
+  monitor: Monitor,
 };
 
 export interface IconProps {

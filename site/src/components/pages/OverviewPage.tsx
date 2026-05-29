@@ -311,7 +311,9 @@ export function OverviewPage() {
                       <span
                         key={i}
                         className="w-2.5 h-2.5"
-                        style={{ backgroundColor: `rgba(60, 130, 247, ${a})` }}
+                        style={{
+                          backgroundColor: `color-mix(in oklab, var(--color-accent) ${Math.round(a * 100)}%, transparent)`,
+                        }}
                       />
                     ))}
                     more
@@ -352,9 +354,9 @@ export function OverviewPage() {
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.3 + i * 0.03, duration: 0.2 }}
-                      whileHover={{ borderColor: "rgba(60, 130, 247, 0.5)", x: 2 }}
+                      whileHover={{ x: 2 }}
                       onClick={() => navigate("sessions")}
-                      className="w-full flex items-center justify-between px-2 py-1.5 bg-void/50 border border-border text-left transition-colors duration-150"
+                      className="w-full flex items-center justify-between px-2 py-1.5 bg-void/50 border border-border text-left transition-colors duration-150 hover:border-accent/50"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="text-xs text-accent truncate font-mono">{s.id}</div>
@@ -525,9 +527,8 @@ function SmallStat({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
-      whileHover={{ borderColor: "rgba(60, 130, 247, 0.5)" }}
       whileTap={{ scale: 0.98 }}
-      className="bg-surface border border-border p-4 text-left transition-colors duration-150 group"
+      className="bg-surface border border-border p-4 text-left transition-colors duration-150 group hover:border-accent/50"
     >
       <div className="font-pixel text-3xl text-text-primary tracking-wider">{value}</div>
       <div className="text-[10px] text-text-muted uppercase tracking-wider mt-1">{label}</div>
@@ -568,7 +569,10 @@ function Heatmap({ cells }: { cells: { day: string; n: number }[] }) {
             const cell = days[idx];
             const v = cell ? cell.n / peak : 0;
             const alpha = v < 0.01 ? 0 : 0.15 + v * 0.85;
-            const bg = alpha === 0 ? "#0d1129" : `rgba(60, 130, 247, ${alpha.toFixed(2)})`;
+            const bg =
+              alpha === 0
+                ? "var(--heat-empty)"
+                : `color-mix(in oklab, var(--color-accent) ${Math.round(alpha * 100)}%, transparent)`;
             return (
               <motion.span
                 key={d}

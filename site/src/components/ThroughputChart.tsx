@@ -13,10 +13,11 @@ export interface ThroughputPoint {
   latency: number;
 }
 
+// Theme-aware via CSS tokens (defined in globals.css against the active theme).
 export const SERIES_COLORS = {
-  reads: { line: "#3C82F7", fill: "rgba(60, 130, 247, 0.15)" },
-  writes: { line: "#60A5FA", fill: "rgba(96, 165, 250, 0.12)" },
-  deletes: { line: "#F87171", fill: "rgba(248, 113, 113, 0.10)" },
+  reads: { line: "var(--chart-reads)", fill: "var(--chart-reads-fill)" },
+  writes: { line: "var(--chart-writes)", fill: "var(--chart-writes-fill)" },
+  deletes: { line: "var(--chart-deletes)", fill: "var(--chart-deletes-fill)" },
 } as const;
 
 const VARIANCE: Record<Timeframe, number> = { "1H": 1.1, "6H": 2.4, "24H": 3.8, "7D": 5.2 };
@@ -233,14 +234,14 @@ export function ThroughputChart({ timeframe, visible, data: externalData }: Prop
               y1={yy}
               x2={W - P.right}
               y2={yy}
-              stroke="#1A1A1A"
+              style={{ stroke: "var(--chart-grid)" }}
               strokeWidth="1"
               strokeDasharray={r === 0.5 ? "none" : "2,4"}
               opacity={r === 0.5 ? 0.6 : 0.3}
             />
           );
         })}
-        <line x1={P.left} y1={H - P.bottom} x2={W - P.right} y2={H - P.bottom} stroke="#262626" strokeWidth="1" />
+        <line x1={P.left} y1={H - P.bottom} x2={W - P.right} y2={H - P.bottom} style={{ stroke: "var(--chart-axis)" }} strokeWidth="1" />
 
         <AnimatePresence mode="sync">
           {series.map((s) =>
@@ -252,7 +253,7 @@ export function ThroughputChart({ timeframe, visible, data: externalData }: Prop
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.22 }}
                 d={buildArea(s.key)}
-                fill={SERIES_COLORS[s.key].fill}
+                style={{ fill: SERIES_COLORS[s.key].fill }}
               />
             ) : null,
           )}
@@ -268,8 +269,7 @@ export function ThroughputChart({ timeframe, visible, data: externalData }: Prop
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.22 }}
                 d={buildLine(s.key)}
-                fill="none"
-                stroke={SERIES_COLORS[s.key].line}
+                style={{ fill: "none", stroke: SERIES_COLORS[s.key].line }}
                 strokeWidth={s.key === "reads" ? 2 : 1.5}
                 strokeLinecap="square"
                 filter={s.key === "reads" ? "url(#glowAccent)" : undefined}
@@ -299,19 +299,19 @@ export function ThroughputChart({ timeframe, visible, data: externalData }: Prop
                     y1={P.top}
                     x2={cx}
                     y2={H - P.bottom}
-                    stroke="#3C82F7"
+                    style={{ stroke: "var(--color-accent)" }}
                     strokeWidth="1"
                     strokeDasharray="3,3"
                     opacity="0.6"
                   />
                   {visible.reads ? (
-                    <circle cx={cx} cy={y(pt.reads)} r="5" fill="#050505" stroke={SERIES_COLORS.reads.line} strokeWidth="2" />
+                    <circle cx={cx} cy={y(pt.reads)} r="5" style={{ fill: "var(--chart-dot-center)", stroke: SERIES_COLORS.reads.line }} strokeWidth="2" />
                   ) : null}
                   {visible.writes ? (
-                    <circle cx={cx} cy={y(pt.writes)} r="5" fill="#050505" stroke={SERIES_COLORS.writes.line} strokeWidth="2" />
+                    <circle cx={cx} cy={y(pt.writes)} r="5" style={{ fill: "var(--chart-dot-center)", stroke: SERIES_COLORS.writes.line }} strokeWidth="2" />
                   ) : null}
                   {visible.deletes ? (
-                    <circle cx={cx} cy={y(pt.deletes)} r="5" fill="#050505" stroke={SERIES_COLORS.deletes.line} strokeWidth="2" />
+                    <circle cx={cx} cy={y(pt.deletes)} r="5" style={{ fill: "var(--chart-dot-center)", stroke: SERIES_COLORS.deletes.line }} strokeWidth="2" />
                   ) : null}
                 </>
               ) : null}
@@ -328,7 +328,7 @@ export function ThroughputChart({ timeframe, visible, data: externalData }: Prop
               x={x(i)}
               y={H - 8}
               textAnchor="middle"
-              fill="#737373"
+              style={{ fill: "var(--color-text-muted)" }}
               fontSize="9"
               fontFamily="JetBrains Mono, monospace"
             >

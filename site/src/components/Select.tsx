@@ -133,11 +133,11 @@ export function Select<T extends string = string>({
                     onChange(o.value);
                     setOpen(false);
                   }}
-                  whileHover={{ x: 3, backgroundColor: "rgba(26, 26, 26, 0.6)" }}
+                  whileHover={{ x: 3 }}
                   transition={{ type: "spring", stiffness: 500, damping: 28 }}
                   className={cn(
-                    "w-full text-left px-3 py-2 text-xs whitespace-nowrap font-mono flex items-center gap-2",
-                    selected ? "text-accent bg-accent/10" : "text-text-primary",
+                    "w-full text-left px-3 py-2 text-xs whitespace-nowrap font-mono flex items-center gap-2 transition-colors duration-150",
+                    selected ? "text-accent bg-accent/10" : "text-text-primary hover:bg-border/60",
                   )}
                 >
                   {selected ? (

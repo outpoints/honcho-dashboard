@@ -247,8 +247,7 @@ export function InstancePage() {
                       initial={{ opacity: 0, x: -6 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: idx * 0.03, duration: 0.2 }}
-                      whileHover={{ backgroundColor: "rgba(60, 130, 247, 0.05)" }}
-                      className="border-b border-border last:border-0"
+                      className="border-b border-border last:border-0 transition-colors duration-150 hover:bg-accent/5"
                     >
                       <td className="py-2 pr-2 font-mono text-accent truncate">{w.id}</td>
                       {queuesLoading && !q ? (

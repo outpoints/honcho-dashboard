@@ -487,11 +487,7 @@ function PeerRow({
 
   return (
     <>
-    <motion.div
-      whileHover={{ borderColor: "rgba(60, 130, 247, 0.35)" }}
-      transition={{ duration: 0.15 }}
-      className="bg-surface border border-border"
-    >
+    <motion.div className="bg-surface border border-border transition-colors duration-150 hover:border-accent/35">
       <div className="flex items-start justify-between gap-3 p-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <div className="w-8 h-8 border border-border-light text-text-muted flex items-center justify-center shrink-0">

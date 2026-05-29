@@ -100,3 +100,9 @@ When the checklist closes we are at parity; only then start divergent features.
 - `site/src/types/honcho.ts` — domain types (extend, don't fork)
 - `site/src/components/pages/*` — one file per route; this is where wiring happens
 - `site/docs/research/DESIGN_GUIDE.md` — **binding** visual-system contract (read before any UI change); `BEHAVIORS / COLOR_AUDIT / DROPDOWN` — per-page + component specs
+
+## Design context (impeccable)
+
+- `PRODUCT.md` (repo root) — strategic context: register (`product`), users, purpose, brand personality, anti-references, design principles, accessibility commitments. Read it before design work.
+- `DESIGN.md` (repo root) — visual system in impeccable format (palette, type, components), scanned from the real `@theme` tokens + components. The binding day-to-day contract is still `site/docs/research/DESIGN_GUIDE.md`; DESIGN.md is its strategic sibling for design tooling.
+- The `/impeccable` skill reads both. Run `/impeccable critique <surface>` or `/impeccable audit <area>` for reviews; `/impeccable live` for in-browser variants (configured in `.impeccable/live/config.json`).
