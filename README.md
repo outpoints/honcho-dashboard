@@ -65,11 +65,13 @@ Open <http://localhost:3000>.
 ## Quick start (Docker)
 
 ```bash
+cp docker-compose-example.yml docker-compose.yml   # your local copy (gitignored)
 docker compose up --build
 ```
 
-A minimal `docker-compose.yml` is included at the repo root. To wire the operator modules,
-set these in the environment that runs Compose:
+A `docker-compose-example.yml` template is included at the repo root. Copy it to
+`docker-compose.yml` (which is gitignored, so your local edits stay local). To wire the
+operator modules, set these in the environment that runs Compose:
 
 ```bash
 HONCHO_BASE_URL=http://honcho:8000              # base URL the dashboard proxies to
@@ -100,7 +102,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 │   ├── Dockerfile              # multi-stage build (node:24-alpine, standalone output)
 │   ├── .env.example
 │   └── package.json
-├── docker-compose.yml          # dashboard + (optional) Honcho on the same network
+├── docker-compose-example.yml  # template → copy to docker-compose.yml (gitignored)
 ├── CLAUDE.md
 ├── .github/workflows/          # CI runs inside site/
 └── LICENSE                     # GPL-3.0
