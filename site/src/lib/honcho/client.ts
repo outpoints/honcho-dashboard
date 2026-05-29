@@ -152,6 +152,13 @@ export const honcho = {
     ) {
       return request<ApiWorkspace>(opts, "POST", "/v3/workspaces", body);
     },
+    update(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      body: { metadata?: Record<string, unknown>; configuration?: Record<string, unknown> },
+    ) {
+      return request<ApiWorkspace>(opts, "PUT", ws(workspaceId), body);
+    },
     delete(opts: HonchoClientOptions, workspaceId: string) {
       return request<void>(opts, "DELETE", ws(workspaceId));
     },
