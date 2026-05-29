@@ -317,6 +317,54 @@ export function Toggle({
   );
 }
 
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+  className,
+}: {
+  checked: boolean;
+  onChange?: (next: boolean) => void;
+  label: React.ReactNode;
+  hint?: React.ReactNode;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex gap-2.5 select-none",
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange?.(!checked)}
+        className={cn(
+          "mt-px w-4 h-4 shrink-0 flex items-center justify-center border transition-colors duration-150",
+          checked
+            ? "bg-accent border-accent text-void"
+            : "bg-void border-border-light hover:border-text-muted",
+        )}
+      >
+        {checked ? <Icon name="check" size={11} /> : null}
+      </button>
+      <span className="min-w-0 leading-snug">
+        <span className="text-sm text-text-primary">{label}</span>
+        {hint ? (
+          <span className="block text-[11px] text-text-muted mt-1 leading-snug">{hint}</span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
 export interface MotionRowProps extends MotionProps {
   className?: string;
   delay?: number;

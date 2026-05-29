@@ -1,6 +1,10 @@
-# Honcho Self-Hosted Dashboard
+# Honcho Self-Hosted Dashboard — example Compose file.
+#
+# This is the committed template. Copy it to `docker-compose.yml` (which is
+# gitignored, so your local edits stay local) before bringing the stack up:
 #
 # Quick start:
+#   cp docker-compose-example.yml docker-compose.yml
 #   cp .env.example .env        # then fill in your Honcho URL + (optional) DB URL
 #   docker compose up --build -d
 #   open http://localhost:3000

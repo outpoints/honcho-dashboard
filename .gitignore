@@ -5,6 +5,9 @@
 .env.local
 .env.*.local
 
+# Local docker compose file (committed template is docker-compose-example.yml).
+docker-compose.yml
+
 # OS
 .DS_Store
 Thumbs.db

@@ -5,7 +5,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, StatTile, RefreshButton } from "@/components/atoms";
+import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
+import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -62,6 +63,13 @@ export function ReasoningPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
+  // Schedule-dream modal.
+  const [dreamOpen, setDreamOpen] = useState(false);
+  const [dreamObserver, setDreamObserver] = useState("");
+  const [dreamObserved, setDreamObserved] = useState("");
+  const [dreamSession, setDreamSession] = useState("");
+  const [dreamBusy, setDreamBusy] = useState(false);
+
   // Live aggregate work-unit counters (for the in-flight "processing" tile).
   const queueKey = workspaceId ? `sdk/workspaces/${workspaceId}/queue/status` : null;
   const queue = useHonchoQuery<ApiQueueStatus>(
@@ -94,17 +102,35 @@ export function ReasoningPage() {
     [byType],
   );
 
-  const scheduleDream = async () => {
+  const openDream = () => {
+    setDreamObserver("");
+    setDreamObserved("");
+    setDreamSession("");
+    setDreamOpen(true);
+  };
+
+  const submitDream = async () => {
     if (!apiOpts || !workspaceId) return;
-    const observer = window.prompt("Observer peer id for scheduled dream:");
-    if (!observer) return;
+    const observer = dreamObserver.trim();
+    if (!observer) {
+      push({ type: "error", message: "Observer peer id is required" });
+      return;
+    }
+    setDreamBusy(true);
     try {
-      await getSdk(apiOpts, workspaceId).scheduleDream({ observer });
+      await getSdk(apiOpts, workspaceId).scheduleDream({
+        observer,
+        ...(dreamObserved.trim() ? { observed: dreamObserved.trim() } : {}),
+        ...(dreamSession.trim() ? { session: dreamSession.trim() } : {}),
+      });
       push({ type: "success", message: `Dream scheduled for ${observer}` });
+      setDreamOpen(false);
       reasoning.refetch();
       queue.refetch();
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setDreamBusy(false);
     }
   };
 
@@ -125,7 +151,7 @@ export function ReasoningPage() {
                 conclusions.refetch();
               }}
             />
-            <Button icon="sparkles" onClick={scheduleDream} disabled={!workspaceId}>
+            <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
               SCHEDULE_DREAM
             </Button>
           </div>
@@ -322,6 +348,52 @@ export function ReasoningPage() {
       )}
 
       <StatusBar />
+
+      <Modal
+        title="SCHEDULE_DREAM"
+        open={dreamOpen}
+        onClose={() => setDreamOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDreamOpen(false)} disabled={dreamBusy}>
+              CANCEL
+            </Button>
+            <Button variant="primary" onClick={submitDream} disabled={dreamBusy}>
+              {dreamBusy ? "SCHEDULING…" : "SCHEDULE"}
+            </Button>
+          </>
+        }
+      >
+        <div className="text-[11px] text-text-muted">
+          Queues a consolidation pass over a peer&apos;s representation in{" "}
+          <span className="text-accent font-mono">{workspaceId}</span>.
+        </div>
+        <Field label="OBSERVER" hint="Peer whose representation gets dreamed on. Required.">
+          <TextInput
+            autoFocus
+            placeholder="e.g., peer_alice_001"
+            value={dreamObserver}
+            onChange={(e) => setDreamObserver(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !dreamBusy) submitDream();
+            }}
+          />
+        </Field>
+        <Field label="OBSERVED" hint="Optional — dream on this peer's representation from the observer's perspective.">
+          <TextInput
+            placeholder="(optional)"
+            value={dreamObserved}
+            onChange={(e) => setDreamObserved(e.target.value)}
+          />
+        </Field>
+        <Field label="SESSION" hint="Optional — scope the dream to a single session.">
+          <TextInput
+            placeholder="(optional)"
+            value={dreamSession}
+            onChange={(e) => setDreamSession(e.target.value)}
+          />
+        </Field>
+      </Modal>
     </div>
   );
 }

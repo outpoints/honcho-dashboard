@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Field, TextInput, RefreshButton, ToggleButton } from "@/components/atoms";
+import { Button, Checkbox, Chip, Field, TextInput, RefreshButton, ToggleButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
@@ -354,7 +354,7 @@ function PeerRow({
   const { push } = useToast();
   const [expanded, setExpanded] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
-  const [editObserveMe, setEditObserveMe] = useState<boolean | null>(null);
+  const [editObserveMe, setEditObserveMe] = useState(true);
   const [editMetadata, setEditMetadata] = useState("");
   const [saving, setSaving] = useState(false);
   const [details, setDetails] = useState<{
@@ -450,7 +450,8 @@ function PeerRow({
   const currentObserveMe = cfg.observe_me ?? cfg.observeMe ?? null;
 
   const openEdit = () => {
-    setEditObserveMe(currentObserveMe);
+    // Honcho peers are observed by default unless observe_me is explicitly false.
+    setEditObserveMe(currentObserveMe ?? true);
     setEditMetadata(JSON.stringify(peer.metadata ?? {}, null, 2));
     setEditOpen(true);
   };
@@ -469,8 +470,10 @@ function PeerRow({
     }
     setSaving(true);
     try {
+      // Peer-level config only meaningfully supports observe_me; reasoning is
+      // managed at the workspace level (see WORKSPACE_CONFIG).
       const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
-      if (editObserveMe !== null) await peerObj.setConfiguration({ observeMe: editObserveMe });
+      await peerObj.setConfiguration({ observeMe: editObserveMe });
       await peerObj.setMetadata(parsedMeta);
       push({ type: "success", message: `Peer ${peer.id} updated` });
       setEditOpen(false);
@@ -613,28 +616,34 @@ function PeerRow({
         </>
       }
     >
-      <div className="text-[11px] text-text-muted mb-3">
-        editing <span className="text-accent font-mono">{peer.id}</span> @{peer.workspace_id}
+      <div className="space-y-4">
+        <Field label="PEER_ID" hint={`@${peer.workspace_id}`}>
+          <div className="w-full bg-void border border-border px-3 py-2 text-sm font-mono text-text-muted">
+            {peer.id}
+          </div>
+        </Field>
+
+        <div>
+          <Checkbox
+            checked={editObserveMe}
+            onChange={setEditObserveMe}
+            label="Observe me (enable reasoning about this peer)"
+            hint="When enabled, Honcho will reason over this peer's messages and build a representation (observe_me). Reasoning itself is configured at the workspace level."
+          />
+        </div>
+
+        <div className="border-t border-border pt-4">
+          <Field label="METADATA (JSON)" hint="Stored on the peer. Must be a JSON object.">
+            <textarea
+              value={editMetadata}
+              onChange={(e) => setEditMetadata(e.target.value)}
+              rows={6}
+              spellCheck={false}
+              className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
+            />
+          </Field>
+        </div>
       </div>
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-[10px] uppercase tracking-wider text-text-muted">type:</span>
-        <ToggleButton active={editObserveMe === true} onClick={() => setEditObserveMe(true)}>
-          USER (observe_me)
-        </ToggleButton>
-        <ToggleButton active={editObserveMe === false} onClick={() => setEditObserveMe(false)}>
-          AGENT
-        </ToggleButton>
-        {editObserveMe === null ? <span className="text-[10px] text-text-muted">(unset)</span> : null}
-      </div>
-      <Field label="METADATA (JSON)" hint="Stored on the peer. Must be a JSON object.">
-        <textarea
-          value={editMetadata}
-          onChange={(e) => setEditMetadata(e.target.value)}
-          rows={6}
-          spellCheck={false}
-          className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
-        />
-      </Field>
     </Modal>
     </>
   );

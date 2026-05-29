@@ -9,6 +9,7 @@ import { Button, Field, TextInput, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { WorkspaceConfigModal } from "@/components/WorkspaceConfigModal";
 import { useToast } from "@/components/toast";
 import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
@@ -28,6 +29,7 @@ export function WorkspacesPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  const [configTarget, setConfigTarget] = useState<ApiWorkspace | null>(null);
 
   const workspaces = data?.items ?? [];
 
@@ -110,7 +112,11 @@ export function WorkspacesPage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
               >
-                <WorkspaceCard workspace={w} onRemove={() => setRemoveTarget(w.id)} />
+                <WorkspaceCard
+                  workspace={w}
+                  onRemove={() => setRemoveTarget(w.id)}
+                  onConfig={() => setConfigTarget(w)}
+                />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -157,11 +163,25 @@ export function WorkspacesPage() {
           />
         </Field>
       </Modal>
+
+      <WorkspaceConfigModal
+        workspace={configTarget}
+        onClose={() => setConfigTarget(null)}
+        onSaved={() => refetch()}
+      />
     </div>
   );
 }
 
-function WorkspaceCard({ workspace, onRemove }: { workspace: ApiWorkspace; onRemove: () => void }) {
+function WorkspaceCard({
+  workspace,
+  onRemove,
+  onConfig,
+}: {
+  workspace: ApiWorkspace;
+  onRemove: () => void;
+  onConfig: () => void;
+}) {
   const created = workspace.created_at
     ? new Date(workspace.created_at).toLocaleString()
     : "—";
@@ -192,6 +212,16 @@ function WorkspaceCard({ workspace, onRemove }: { workspace: ApiWorkspace; onRem
       </div>
       <div className="flex items-center gap-1">
         <Button variant="outline" className="flex-1" onClick={() => (window.location.hash = `#/peers?ws=${workspace.id}`)}>VIEW_PEERS</Button>
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={onConfig}
+          className="w-8 h-8 border border-border-light text-text-muted hover:text-accent flex items-center justify-center"
+          aria-label="Edit workspace config"
+          title="Edit workspace config"
+        >
+          <Icon name="settings" size={12} />
+        </motion.button>
         <motion.button
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
