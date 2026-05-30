@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon, type IconName } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { useTheme, type ThemeMode } from "@/lib/theme";
+import { useAnchoredPosition, useIsClient } from "@/lib/usePopover";
 
 const OPTIONS: { value: ThemeMode; label: string; icon: IconName }[] = [
   { value: "light", label: "LIGHT", icon: "sun" },
@@ -39,12 +41,19 @@ const itemVariants = {
 export function ThemeToggle() {
   const { mode, setMode } = useTheme();
   const [open, setOpen] = useState(false);
+  const mounted = useIsClient();
   const ref = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const position = useAnchoredPosition(ref, open, "right");
 
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // Panel is portaled out of `ref`; check it separately so selecting an
+      // option doesn't read as an outside click and close before onClick fires.
+      if (ref.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -72,57 +81,69 @@ export function ThemeToggle() {
         <Icon name={ICON_FOR[mode]} size={13} />
       </motion.button>
 
-      <AnimatePresence>
-        {open ? (
-          <motion.div
-            role="listbox"
-            aria-label="THEME"
-            variants={panelVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            style={{ transformOrigin: "top right" }}
-            className="absolute z-50 right-0 mt-1 min-w-[140px] bg-surface border border-border shadow-lg shadow-black/40"
-          >
-            {OPTIONS.map((o) => {
-              const selected = o.value === mode;
-              return (
-                <motion.button
-                  key={o.value}
-                  variants={itemVariants}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    setMode(o.value);
-                    setOpen(false);
+      {mounted
+        ? createPortal(
+            <AnimatePresence>
+              {open && position ? (
+                <motion.div
+                  ref={panelRef}
+                  role="listbox"
+                  aria-label="THEME"
+                  variants={panelVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  style={{
+                    position: "fixed",
+                    top: position.top,
+                    right: position.right,
+                    minWidth: 140,
+                    transformOrigin: "top right",
                   }}
-                  whileHover={{ x: 3 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 28 }}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-[11px] uppercase tracking-wider font-mono flex items-center gap-2 transition-colors duration-150",
-                    selected
-                      ? "text-accent bg-accent/10"
-                      : "text-text-primary hover:bg-border/60",
-                  )}
+                  className="z-50 bg-surface border border-border shadow-lg shadow-black/40"
                 >
-                  <Icon
-                    name={o.icon}
-                    size={12}
-                    className={cn("shrink-0", selected ? "text-accent" : "text-text-muted")}
-                  />
-                  <span className="flex-1">{o.label}</span>
-                  {selected ? (
-                    <Icon name="check" size={11} className="text-accent shrink-0" />
-                  ) : (
-                    <span className="w-[11px] shrink-0" aria-hidden />
-                  )}
-                </motion.button>
-              );
-            })}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                  {OPTIONS.map((o) => {
+                    const selected = o.value === mode;
+                    return (
+                      <motion.button
+                        key={o.value}
+                        variants={itemVariants}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => {
+                          setMode(o.value);
+                          setOpen(false);
+                        }}
+                        whileHover={{ x: 3 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 28 }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-[11px] uppercase tracking-wider font-mono flex items-center gap-2 transition-colors duration-150",
+                          selected
+                            ? "text-accent bg-accent/10"
+                            : "text-text-primary hover:bg-border/60",
+                        )}
+                      >
+                        <Icon
+                          name={o.icon}
+                          size={12}
+                          className={cn("shrink-0", selected ? "text-accent" : "text-text-muted")}
+                        />
+                        <span className="flex-1">{o.label}</span>
+                        {selected ? (
+                          <Icon name="check" size={11} className="text-accent shrink-0" />
+                        ) : (
+                          <span className="w-[11px] shrink-0" aria-hidden />
+                        )}
+                      </motion.button>
+                    );
+                  })}
+                </motion.div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

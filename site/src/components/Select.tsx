@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
+import { useAnchoredPosition, useIsClient } from "@/lib/usePopover";
 
 export interface SelectOption<T extends string = string> {
   value: T;
@@ -49,14 +51,23 @@ export function Select<T extends string = string>({
   panelClassName,
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false);
+  const mounted = useIsClient();
   const ref = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  const current = options.find((o) => o.value === value);
+  const effectiveOpen = open && !disabled;
+  const position = useAnchoredPosition(ref, effectiveOpen);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      // The panel is portaled out of `ref`, so it must be checked separately —
+      // otherwise a mousedown on an option reads as "outside" and closes the
+      // menu before the option's click handler can fire.
+      if (ref.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -70,9 +81,6 @@ export function Select<T extends string = string>({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
-
-  const current = options.find((o) => o.value === value);
-  const effectiveOpen = open && !disabled;
 
   return (
     <div ref={ref} className={cn("relative", className)}>
@@ -106,52 +114,64 @@ export function Select<T extends string = string>({
         </motion.span>
       </motion.button>
 
-      <AnimatePresence>
-        {effectiveOpen ? (
-          <motion.div
-            role="listbox"
-            variants={panelVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            style={{ transformOrigin: "top", minWidth: "max(100%, max-content)" }}
-            className={cn(
-              "absolute z-50 left-0 mt-1 bg-surface border border-border shadow-lg shadow-black/40 max-h-[320px] overflow-y-auto",
-              panelClassName,
-            )}
-          >
-            {options.map((o) => {
-              const selected = o.value === value;
-              return (
-                <motion.button
-                  key={o.value}
-                  variants={itemVariants}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
+      {mounted
+        ? createPortal(
+            <AnimatePresence>
+              {effectiveOpen && position ? (
+                <motion.div
+                  ref={panelRef}
+                  role="listbox"
+                  variants={panelVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  style={{
+                    position: "fixed",
+                    top: position.top,
+                    left: position.left,
+                    minWidth: position.minWidth,
+                    transformOrigin: "top",
                   }}
-                  whileHover={{ x: 3 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 28 }}
                   className={cn(
-                    "w-full text-left px-3 py-2 text-xs whitespace-nowrap font-mono flex items-center gap-2 transition-colors duration-150",
-                    selected ? "text-accent bg-accent/10" : "text-text-primary hover:bg-border/60",
+                    "z-50 bg-surface border border-border shadow-lg shadow-black/40 max-h-[320px] overflow-y-auto",
+                    panelClassName,
                   )}
                 >
-                  {selected ? (
-                    <Icon name="check" size={11} className="text-accent shrink-0" />
-                  ) : (
-                    <span className="w-[11px] shrink-0" aria-hidden />
-                  )}
-                  <span className="truncate">{o.label}</span>
-                </motion.button>
-              );
-            })}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                  {options.map((o) => {
+                    const selected = o.value === value;
+                    return (
+                      <motion.button
+                        key={o.value}
+                        variants={itemVariants}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => {
+                          onChange(o.value);
+                          setOpen(false);
+                        }}
+                        whileHover={{ x: 3 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 28 }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-xs whitespace-nowrap font-mono flex items-center gap-2 transition-colors duration-150",
+                          selected ? "text-accent bg-accent/10" : "text-text-primary hover:bg-border/60",
+                        )}
+                      >
+                        {selected ? (
+                          <Icon name="check" size={11} className="text-accent shrink-0" />
+                        ) : (
+                          <span className="w-[11px] shrink-0" aria-hidden />
+                        )}
+                        <span className="truncate">{o.label}</span>
+                      </motion.button>
+                    );
+                  })}
+                </motion.div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
