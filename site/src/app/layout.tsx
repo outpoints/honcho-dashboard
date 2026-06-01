@@ -16,7 +16,10 @@ const vt323 = VT323({
 });
 
 export const metadata: Metadata = {
-  title: "honcho-self-host",
+  // The document title is owned by AppShell via a reactive <title> element so it
+  // can reflect the active hash route + the user's preference. Setting a static
+  // title here too would render a second, competing <title> that React re-asserts
+  // on mount (overwriting the dynamic one on initial load).
   description: "honcho_dashboard",
   icons: { icon: "/seo/favicon.svg" },
 };

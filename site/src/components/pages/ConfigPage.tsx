@@ -4,12 +4,14 @@ import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Field, TextInput } from "@/components/atoms";
+import { Button, Checkbox, Field, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { honcho } from "@/lib/honcho/client";
 import { useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
+import { TITLE_BASE, sectionTitle, useAppendSectionToTitle } from "@/lib/title";
+import { useNav } from "@/lib/nav";
 
 type TestState =
   | { kind: "idle" }
@@ -22,6 +24,11 @@ type EditorMode = { kind: "new" } | { kind: "edit"; id: string };
 export function ConfigPage() {
   const { instances, activeId, setActive, upsert, remove } = useHonchoInstances();
   const [mode, setMode] = useState<EditorMode | null>(null);
+  const { current } = useNav();
+  const [appendSection, setAppendSection] = useAppendSectionToTitle();
+  const titlePreview = appendSection
+    ? `${TITLE_BASE} - ${sectionTitle(current) ?? ""}`
+    : TITLE_BASE;
 
   const effectiveMode: EditorMode =
     mode ?? (activeId ? { kind: "edit", id: activeId } : { kind: "new" });
@@ -130,6 +137,19 @@ export function ConfigPage() {
                 </div>
               );
             })()}
+          </Panel>
+
+          <Panel title="BROWSER_TAB">
+            <Checkbox
+              checked={appendSection}
+              onChange={setAppendSection}
+              label="Append section to tab title"
+              hint="Adds the active section after the title so each open tab is identifiable. Off keeps every tab as the title alone."
+            />
+            <div className="mt-3 flex justify-between gap-2 text-xs py-1.5 border-t border-border">
+              <span className="text-text-muted">tab_title</span>
+              <span className="text-accent truncate font-mono">{titlePreview}</span>
+            </div>
           </Panel>
 
           <Panel title="NOTES">

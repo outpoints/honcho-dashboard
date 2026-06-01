@@ -24,6 +24,7 @@ import { DiagnosticsPage } from "@/components/pages/DiagnosticsPage";
 import { IntegrationsPage } from "@/components/pages/IntegrationsPage";
 import { ConfigPage } from "@/components/pages/ConfigPage";
 import { NavContext } from "@/lib/nav";
+import { buildTitle, useAppendSectionToTitle } from "@/lib/title";
 import { ToastProvider } from "@/components/toast";
 
 const RENDER: Record<RouteKey, React.ComponentType> = {
@@ -63,6 +64,7 @@ export function AppShell() {
     () => SERVER_HASH,
   );
   const [menuOpen, setMenuOpen] = useState(false);
+  const [appendSection] = useAppendSectionToTitle();
 
   const onNavigate = useCallback((key: RouteKey) => {
     if (typeof window !== "undefined") {
@@ -75,6 +77,9 @@ export function AppShell() {
 
   return (
     <NavContext.Provider value={{ navigate: onNavigate, current }}>
+    {/* React 19 hoists this <title> into <head>; it is the single source of
+        truth for the tab title and updates reactively on route + pref change. */}
+    <title>{buildTitle(current, appendSection)}</title>
     <ToastProvider>
     <div className="min-h-screen flex">
       <GridCanvas />
