@@ -9,6 +9,7 @@ import { Button, Chip, Tabs, RefreshButton } from "@/components/atoms";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/toast";
 import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
@@ -372,8 +373,19 @@ function SessionRow({
     messages: ApiMessage[];
     hasSummary: boolean;
     summary: string | null;
+    shortSummary: SummaryView | null;
+    longSummary: SummaryView | null;
     error?: string;
-  }>({ loading: false, loaded: false, messages: [], hasSummary: false, summary: null });
+  }>({
+    loading: false,
+    loaded: false,
+    messages: [],
+    hasSummary: false,
+    summary: null,
+    shortSummary: null,
+    longSummary: null,
+  });
+  const [summariesOpen, setSummariesOpen] = useState(false);
 
   // Dedupe by session key and depend ONLY on stable primitives. `useActiveHonchoOptions`
   // returns a fresh object every render, so depending on apiOpts re-runs this effect each
@@ -405,14 +417,20 @@ function SessionRow({
             ses.summaries().catch(() => null),
           ]);
           if (cancelled) return;
-          const short = summaries?.shortSummary?.content ?? null;
-          const long = summaries?.longSummary?.content ?? null;
+          const short = summaries?.shortSummary ?? null;
+          const long = summaries?.longSummary ?? null;
           setDetail({
             loading: false,
             loaded: true,
             messages: msgs,
             hasSummary: !!(short || long),
-            summary: short ?? long ?? null,
+            summary: short?.content ?? long?.content ?? null,
+            shortSummary: short
+              ? { content: short.content, tokenCount: short.tokenCount, createdAt: short.createdAt }
+              : null,
+            longSummary: long
+              ? { content: long.content, tokenCount: long.tokenCount, createdAt: long.createdAt }
+              : null,
             error: undefined,
           });
         } catch (err) {
@@ -606,7 +624,22 @@ function SessionRow({
                 <Button variant="primary" size="sm" onClick={onOpenMessages}>
                   VIEW_MESSAGES
                 </Button>
-                <Button variant="warning" size="sm" icon="trash" onClick={onRemove}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon="book"
+                  onClick={() => setSummariesOpen(true)}
+                  disabled={detail.loading && !detail.loaded}
+                >
+                  VIEW_SUMMARIES
+                </Button>
+                <Button
+                  variant="warning"
+                  size="sm"
+                  icon="trash"
+                  onClick={onRemove}
+                  className="ml-auto"
+                >
                   REMOVE_SESSION
                 </Button>
               </div>
@@ -614,6 +647,70 @@ function SessionRow({
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <Modal
+        title="SESSION_SUMMARIES"
+        open={summariesOpen}
+        onClose={() => setSummariesOpen(false)}
+        className="max-w-2xl"
+        footer={
+          <Button variant="secondary" onClick={() => setSummariesOpen(false)}>
+            CLOSE
+          </Button>
+        }
+      >
+        <div className="text-[11px] text-text-muted leading-relaxed">
+          Deriver-generated summaries for{" "}
+          <span className="text-accent font-mono">{session.id}</span>. Short summaries compress recent
+          turns; long summaries roll up the whole session.
+        </div>
+        {detail.error ? (
+          <div className="mt-3 text-xs text-red-400">{detail.error}</div>
+        ) : !detail.loaded ? (
+          <div className="mt-3 space-y-2">
+            <div className="h-4 w-32 bg-border/40 animate-pulse" />
+            <div className="h-20 bg-border/40 animate-pulse" />
+          </div>
+        ) : detail.shortSummary || detail.longSummary ? (
+          <div className="mt-3 space-y-4">
+            {detail.shortSummary ? (
+              <SummaryBlock label="SHORT_SUMMARY" summary={detail.shortSummary} />
+            ) : null}
+            {detail.longSummary ? (
+              <SummaryBlock label="LONG_SUMMARY" summary={detail.longSummary} />
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-3 text-xs text-text-muted italic">
+            No summaries generated for this session yet. Summaries appear once the deriver runs summary
+            passes (controlled by the workspace summary config).
+          </div>
+        )}
+      </Modal>
     </>
+  );
+}
+
+interface SummaryView {
+  content: string;
+  tokenCount: number;
+  createdAt: string;
+}
+
+function SummaryBlock({ label, summary }: { label: string; summary: SummaryView }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-purple-400 uppercase tracking-wider flex items-center gap-1">
+          <Icon name="book" size={11} /> {label}
+        </span>
+        <span className="text-[10px] text-text-muted tabular-nums">
+          {summary.tokenCount.toLocaleString()} tok · {new Date(summary.createdAt).toLocaleString()}
+        </span>
+      </div>
+      <div className="text-xs text-text-primary bg-void border border-border px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
+        {summary.content}
+      </div>
+    </div>
   );
 }

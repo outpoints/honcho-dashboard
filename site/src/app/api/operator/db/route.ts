@@ -7,6 +7,8 @@ import {
   dbSessionStats,
   dbRecentMessages,
   dbReasoningTasks,
+  dbRetryReasoningTask,
+  dbRetryAllFailedReasoningTasks,
   dbWebhookStats,
   dbPeerDetail,
 } from "@/lib/operator/db";
@@ -60,4 +62,26 @@ export async function GET(req: NextRequest) {
     return Response.json(await dbPeerDetail(ws, peer, limit));
   }
   return Response.json(await dbStats());
+}
+
+export async function POST(req: NextRequest) {
+  const action = req.nextUrl.searchParams.get("action");
+  if (action === "retry_reasoning") {
+    const ws = req.nextUrl.searchParams.get("workspace_id");
+    const id = req.nextUrl.searchParams.get("id");
+    if (!ws || !id) {
+      return Response.json({ ok: false, reason: "workspace_id and id required" }, { status: 400 });
+    }
+    const result = await dbRetryReasoningTask(ws, id);
+    return Response.json(result, { status: result.ok ? 200 : 400 });
+  }
+  if (action === "retry_all_failed_reasoning") {
+    const ws = req.nextUrl.searchParams.get("workspace_id");
+    if (!ws) {
+      return Response.json({ ok: false, reason: "workspace_id required" }, { status: 400 });
+    }
+    const result = await dbRetryAllFailedReasoningTasks(ws);
+    return Response.json(result, { status: result.ok ? 200 : 400 });
+  }
+  return Response.json({ ok: false, reason: "unknown action" }, { status: 400 });
 }

@@ -7,6 +7,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
 import { Modal } from "@/components/Modal";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -38,6 +39,9 @@ interface ReasoningTaskRow {
   error: string | null;
   created_at: string;
   token_count: number;
+  work_unit_key: string | null;
+  message_id: string | null;
+  payload: Record<string, unknown> | null;
 }
 
 interface ReasoningResp {
@@ -69,6 +73,12 @@ export function ReasoningPage() {
   const [dreamObserved, setDreamObserved] = useState("");
   const [dreamSession, setDreamSession] = useState("");
   const [dreamBusy, setDreamBusy] = useState(false);
+
+  // Retry (re-queue) a failed task via the operator DB write path.
+  const [retryTarget, setRetryTarget] = useState<ReasoningTaskRow | null>(null);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [retryAllOpen, setRetryAllOpen] = useState(false);
+  const [retryAllBusy, setRetryAllBusy] = useState(false);
 
   // Live aggregate work-unit counters (for the in-flight "processing" tile).
   const queueKey = workspaceId ? `sdk/workspaces/${workspaceId}/queue/status` : null;
@@ -134,6 +144,61 @@ export function ReasoningPage() {
     }
   };
 
+  const doRetry = async () => {
+    if (!workspaceId || !retryTarget || retryBusy) return;
+    setRetryBusy(true);
+    try {
+      const res = await fetch(
+        `/api/operator/db?action=retry_reasoning&workspace_id=${encodeURIComponent(workspaceId)}` +
+          `&id=${encodeURIComponent(retryTarget.id)}`,
+        { method: "POST" },
+      );
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
+      if (!res.ok || !body.ok) throw new Error(body.reason || `HTTP ${res.status}`);
+      push({ type: "success", message: `Re-queued ${retryTarget.task_type} task #${retryTarget.id}` });
+      setRetryTarget(null);
+      reasoning.refetch();
+      queue.refetch();
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setRetryBusy(false);
+    }
+  };
+
+  const doRetryAll = async () => {
+    if (!workspaceId || retryAllBusy) return;
+    setRetryAllBusy(true);
+    try {
+      const res = await fetch(
+        `/api/operator/db?action=retry_all_failed_reasoning&workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST" },
+      );
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reason?: string;
+        retried?: number;
+        skipped?: number;
+      };
+      if (!res.ok || !body.ok) throw new Error(body.reason || `HTTP ${res.status}`);
+      const n = body.retried ?? 0;
+      const skip = body.skipped
+        ? ` · ${body.skipped} dream/reconciler skipped (retry individually)`
+        : "";
+      push({ type: "success", message: `Re-queued ${n} failed task${n === 1 ? "" : "s"}${skip}` });
+      setRetryAllOpen(false);
+      reasoning.refetch();
+      queue.refetch();
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setRetryAllBusy(false);
+    }
+  };
+
+  // Click a status stat-tile to filter; click the active one again to clear back to "all".
+  const toggleStatus = (s: string) => setStatusFilter((prev) => (prev === s ? "all" : s));
+
   const opUnavailable = !!reasoning.data && !reasoning.data.available;
 
   return (
@@ -151,6 +216,15 @@ export function ReasoningPage() {
                 conclusions.refetch();
               }}
             />
+            <Button
+              variant="warning"
+              icon="refresh"
+              onClick={() => setRetryAllOpen(true)}
+              disabled={!workspaceId || !counts?.failed}
+              title={counts?.failed ? `Retry all ${counts.failed} failed tasks` : "No failed tasks"}
+            >
+              RETRY_FAILED
+            </Button>
             <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
               SCHEDULE_DREAM
             </Button>
@@ -179,7 +253,14 @@ export function ReasoningPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <StatTile label="queued" value={(counts?.queued ?? 0).toLocaleString()} hint="awaiting" hintTone="muted" />
+            <StatTile
+              label="queued"
+              value={(counts?.queued ?? 0).toLocaleString()}
+              hint="awaiting"
+              hintTone="muted"
+              onClick={() => toggleStatus("queued")}
+              active={statusFilter === "queued"}
+            />
             <StatTile
               label="processing"
               value={processing.toLocaleString()}
@@ -187,7 +268,14 @@ export function ReasoningPage() {
               hintTone="accent"
               className="!border-accent/40"
             />
-            <StatTile label="completed" value={(counts?.completed ?? 0).toLocaleString()} hint="all-time" hintTone="muted" />
+            <StatTile
+              label="completed"
+              value={(counts?.completed ?? 0).toLocaleString()}
+              hint="all-time"
+              hintTone="muted"
+              onClick={() => toggleStatus("completed")}
+              active={statusFilter === "completed"}
+            />
             <StatTile
               label="failed"
               value={
@@ -198,6 +286,8 @@ export function ReasoningPage() {
               hint="needs review"
               hintTone="danger"
               className={counts?.failed ? "!border-red-500/40" : ""}
+              onClick={() => toggleStatus("failed")}
+              active={statusFilter === "failed"}
             />
             <StatTile
               label="tokens_pending"
@@ -212,7 +302,7 @@ export function ReasoningPage() {
               label="status"
               value={statusFilter}
               onChange={setStatusFilter}
-              options={["all", "queued", "processing", "completed", "failed"]}
+              options={["all", "queued", "completed", "failed"]}
             />
             <Filter label="type" value={typeFilter} onChange={setTypeFilter} options={typeOptions} />
           </div>
@@ -237,50 +327,12 @@ export function ReasoningPage() {
                   <div className="space-y-2">
                     <AnimatePresence initial={false}>
                       {tasks.map((t, i) => (
-                        <motion.div
+                        <ReasoningTaskItem
                           key={t.id}
-                          layout
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: 100, transition: { duration: 0.2 } }}
-                          transition={{ delay: Math.min(i * 0.03, 0.3), duration: 0.2 }}
-                          className={cn(
-                            "flex items-center gap-3 px-3 py-2 border bg-void/40 transition-colors duration-150",
-                            t.status === "failed"
-                              ? "border-red-500/40 bg-red-500/5 hover:border-red-400/60"
-                              : "border-border hover:border-accent/50",
-                          )}
-                        >
-                          <span className="shrink-0">
-                            {t.status === "failed" ? (
-                              <Icon name="x-circle" className="text-red-400" size={14} />
-                            ) : t.status === "completed" ? (
-                              <Icon name="check" className="text-accent" size={14} />
-                            ) : (
-                              <Icon name="clock" className="text-text-muted" size={14} />
-                            )}
-                          </span>
-                          <Chip tone={TYPE_TONES[t.task_type] || "muted"}>{t.task_type}</Chip>
-                          <span className="text-xs text-text-primary font-mono truncate max-w-[120px]">
-                            {t.peer ?? "—"}
-                          </span>
-                          <span className="text-[10px] text-text-muted truncate max-w-[200px] hidden md:inline">
-                            {t.session_id}
-                          </span>
-                          {t.error ? (
-                            <span className="text-[10px] text-red-400 truncate max-w-[200px]" title={t.error}>
-                              {t.error}
-                            </span>
-                          ) : null}
-                          <div className="ml-auto flex items-center gap-3 text-[10px] text-text-muted shrink-0">
-                            {t.token_count ? (
-                              <span className="text-text-primary tabular-nums">
-                                {t.token_count.toLocaleString()} tokens
-                              </span>
-                            ) : null}
-                            <span>{new Date(t.created_at).toLocaleString()}</span>
-                          </div>
-                        </motion.div>
+                          t={t}
+                          index={i}
+                          onRetry={() => setRetryTarget(t)}
+                        />
                       ))}
                     </AnimatePresence>
                   </div>
@@ -390,6 +442,53 @@ export function ReasoningPage() {
           />
         </Field>
       </Modal>
+
+      <ConfirmModal
+        open={!!retryTarget}
+        title="RETRY_TASK"
+        destructive={false}
+        confirmLabel={retryBusy ? "RE-QUEUING…" : "RETRY"}
+        onCancel={() => {
+          if (!retryBusy) setRetryTarget(null);
+        }}
+        onConfirm={doRetry}
+        body={
+          <>
+            Re-queue the failed <span className="text-accent">{retryTarget?.task_type}</span> task{" "}
+            <span className="text-accent font-mono">#{retryTarget?.id}</span>? This clears its error
+            and marks it unprocessed so the deriver claims it again on its next poll.
+            <br />
+            <br />
+            It re-runs the <span className="text-text-primary">same work</span> — if the failure was
+            deterministic (e.g. a model validation error), it will fail again until the underlying
+            cause is fixed.
+          </>
+        }
+      />
+
+      <ConfirmModal
+        open={retryAllOpen}
+        title="RETRY_FAILED"
+        confirmLabel={retryAllBusy ? "RE-QUEUING…" : `RETRY ${(counts?.failed ?? 0).toLocaleString()} TASKS`}
+        onCancel={() => {
+          if (!retryAllBusy) setRetryAllOpen(false);
+        }}
+        onConfirm={doRetryAll}
+        body={
+          <>
+            Attempt to re-queue{" "}
+            <span className="text-accent">all {(counts?.failed ?? 0).toLocaleString()} failed</span>{" "}
+            tasks in <span className="text-accent font-mono">{workspaceId}</span>? Each clears its error
+            and is marked unprocessed so the deriver re-runs it.
+            <br />
+            <br />
+            <span className="text-yellow-300">Make sure the deriver worker is running</span> — otherwise
+            they just sit re-queued. This re-runs identical work, so a deterministic failure (e.g. a model
+            validation error) will simply fail again and stay marked FAILED. dream/reconciler tasks are
+            skipped here — retry those individually.
+          </>
+        }
+      />
     </div>
   );
 }
@@ -437,6 +536,294 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
     <div className="flex justify-between gap-2">
       <span className="text-text-muted truncate">{k}</span>
       <span className="text-accent tabular-nums shrink-0">{v}</span>
+    </div>
+  );
+}
+
+/**
+ * One queue row. Collapsed: status / type / peer / session / tokens / time.
+ * Expanded (click): full error, task metadata, and the raw `queue.payload`
+ * JSONB the deriver acts on — the actual "content of the box".
+ */
+function ReasoningTaskItem({
+  t,
+  index,
+  onRetry,
+}: {
+  t: ReasoningTaskRow;
+  index: number;
+  onRetry: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { push } = useToast();
+  const failed = t.status === "failed";
+  const payloadText = useMemo(
+    () => (t.payload ? JSON.stringify(t.payload, null, 2) : ""),
+    [t.payload],
+  );
+
+  const copy = async (label: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      push({ type: "success", message: `${label} copied` });
+    } catch {
+      push({ type: "error", message: "Clipboard unavailable" });
+    }
+  };
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 100, transition: { duration: 0.2 } }}
+      transition={{ delay: Math.min(index * 0.03, 0.3), duration: 0.2 }}
+      className={cn(
+        "border bg-void/40 transition-colors duration-150",
+        failed
+          ? cn("bg-red-500/5", expanded ? "border-red-400/60" : "border-red-500/40 hover:border-red-400/60")
+          : expanded
+            ? "border-accent/50"
+            : "border-border hover:border-accent/50",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-3 px-3 py-2 text-left"
+      >
+        <span className="shrink-0">
+          {failed ? (
+            <Icon name="x-circle" className="text-red-400" size={14} />
+          ) : t.status === "completed" ? (
+            <Icon name="check" className="text-accent" size={14} />
+          ) : (
+            <Icon name="clock" className="text-text-muted" size={14} />
+          )}
+        </span>
+        <Chip tone={TYPE_TONES[t.task_type] || "muted"}>{t.task_type}</Chip>
+        <span className="text-xs text-text-primary font-mono truncate max-w-[120px]">
+          {t.peer ?? "—"}
+        </span>
+        <span className="text-[10px] text-text-muted truncate max-w-[200px] hidden md:inline">
+          {t.session_id}
+        </span>
+        {t.error && !expanded ? (
+          <span className="text-[10px] text-red-400 truncate max-w-[200px]">{t.error}</span>
+        ) : null}
+        <div className="ml-auto flex items-center gap-3 text-[10px] text-text-muted shrink-0">
+          {t.token_count ? (
+            <span className="text-text-primary tabular-nums">
+              {t.token_count.toLocaleString()} tokens
+            </span>
+          ) : null}
+          <span>{new Date(t.created_at).toLocaleString()}</span>
+          <Icon
+            name="chevron-right"
+            size={12}
+            className={cn("transition-transform", expanded && "rotate-90")}
+          />
+        </div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded ? (
+          <motion.div
+            key="expanded"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 pt-3 space-y-3 border-t border-border">
+              {t.error ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-red-400 uppercase tracking-wider">ERROR</span>
+                    <CopyChip onClick={() => copy("Error", t.error!)} />
+                  </div>
+                  <pre className="bg-void border border-red-500/30 text-[11px] text-red-300 px-3 py-2 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                    {t.error}
+                  </pre>
+                </div>
+              ) : null}
+
+              {t.payload ? <PayloadSummary payload={t.payload} /> : null}
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                <Meta k="status" v={t.status} />
+                <Meta k="task_type" v={t.task_type} />
+                <Meta k="queue_id" v={t.id} />
+                <Meta k="message_id" v={t.message_id ?? "—"} />
+                <Meta k="peer" v={t.peer ?? "—"} />
+                <Meta k="session" v={t.session_id} />
+                {t.work_unit_key ? <Meta k="work_unit_key" v={t.work_unit_key} span /> : null}
+                <Meta k="tokens" v={t.token_count ? t.token_count.toLocaleString() : "—"} />
+                <Meta k="created" v={new Date(t.created_at).toLocaleString()} />
+              </div>
+
+              {payloadText ? (
+                <RawPayload text={payloadText} onCopy={() => copy("Payload", payloadText)} />
+              ) : (
+                <div className="text-[11px] text-text-muted italic">No payload recorded.</div>
+              )}
+
+              {failed ? (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button variant="primary" size="sm" icon="refresh" onClick={onRetry}>
+                    RETRY_TASK
+                  </Button>
+                  <span className="text-[10px] text-text-muted">
+                    clears the error and re-queues this task for the deriver
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function Meta({ k, v, span }: { k: string; v: React.ReactNode; span?: boolean }) {
+  return (
+    <div className={cn("flex justify-between gap-2 min-w-0", span && "col-span-2")}>
+      <span className="text-text-muted shrink-0">{k}</span>
+      <span
+        className="text-text-primary font-mono truncate text-right"
+        title={typeof v === "string" ? v : undefined}
+      >
+        {v}
+      </span>
+    </div>
+  );
+}
+
+function CopyChip({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-[9px] uppercase tracking-wider text-text-muted hover:text-accent transition-colors"
+      title="Copy to clipboard"
+    >
+      <Icon name="copy" size={11} /> copy
+    </button>
+  );
+}
+
+/**
+ * Human-readable view of a queue task's payload. Surfaces the fields that
+ * actually matter (the message content, observers, webhook event/data) instead
+ * of raw JSON; the full payload stays available under RAW_PAYLOAD.
+ */
+function PayloadSummary({ payload }: { payload: Record<string, unknown> }) {
+  const str = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : null);
+  const content = str("content");
+  const eventType = str("event_type");
+  const observers = Array.isArray(payload.observers)
+    ? (payload.observers as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  const data =
+    payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+      ? (payload.data as Record<string, unknown>)
+      : null;
+
+  if (!content && !eventType && !observers.length && !data) return null;
+
+  return (
+    <div className="space-y-2">
+      {content ? (
+        <div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">MESSAGE</div>
+          <div className="text-xs text-text-primary bg-void border border-border px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto">
+            {content}
+          </div>
+        </div>
+      ) : null}
+
+      {eventType ? (
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className="text-text-muted">event</span>
+          <Chip tone="orange">{eventType}</Chip>
+        </div>
+      ) : null}
+
+      {observers.length ? (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="text-text-muted">observers</span>
+          {observers.map((o) => (
+            <Chip key={o} tone="blue">
+              {o}
+            </Chip>
+          ))}
+        </div>
+      ) : null}
+
+      {data ? (
+        <div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">DATA</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+            {Object.entries(data).map(([k, v]) => (
+              <Meta
+                key={k}
+                k={k}
+                v={
+                  v !== null && typeof v === "object"
+                    ? Array.isArray(v)
+                      ? `[${v.length}]`
+                      : "{…}"
+                    : String(v)
+                }
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Collapsible raw-JSON payload, default closed (the parsed view is primary). */
+function RawPayload({ text, onCopy }: { text: string; onCopy: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider hover:text-text-primary transition-colors"
+        >
+          <Icon
+            name="chevron-right"
+            size={11}
+            className={cn("transition-transform", open && "rotate-90")}
+          />
+          RAW_PAYLOAD
+        </button>
+        {open ? <CopyChip onClick={onCopy} /> : null}
+      </div>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            key="raw"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <pre className="bg-void border border-border text-[11px] text-text-primary px-3 py-2 overflow-auto max-h-80 leading-relaxed">
+              {text}
+            </pre>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
