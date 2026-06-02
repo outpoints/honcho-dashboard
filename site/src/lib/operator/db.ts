@@ -519,6 +519,9 @@ export interface ReasoningTaskRow {
   error: string | null;
   created_at: string;
   token_count: number;
+  work_unit_key: string | null;
+  message_id: string | null;
+  payload: Record<string, unknown> | null;
 }
 
 export interface ReasoningTasksResult {
@@ -545,6 +548,7 @@ export async function dbReasoningTasks(
     const hasError = await columnExists(p, "queue", "error");
     const hasProcessed = await columnExists(p, "queue", "processed");
     const hasMsgId = await columnExists(p, "queue", "message_id");
+    const hasWorkUnitKey = await columnExists(p, "queue", "work_unit_key");
     const canJoinTokens =
       hasMsgId && (await tableExists(p, "messages")) && (await columnExists(p, "messages", "token_count"));
     const join = canJoinTokens ? "LEFT JOIN messages m ON m.id = q.message_id" : "";
@@ -609,6 +613,9 @@ export async function dbReasoningTasks(
       error: string | null;
       created_at: string;
       token_count: string;
+      work_unit_key: string | null;
+      message_id: string | null;
+      payload: Record<string, unknown> | null;
     }>(
       `SELECT q.id::text AS id,
               q.task_type,
@@ -617,7 +624,10 @@ export async function dbReasoningTasks(
               ${processedCol} AS processed,
               ${errorCol} AS error,
               q.created_at::text AS created_at,
-              ${tokExpr} AS token_count
+              ${tokExpr} AS token_count,
+              ${hasWorkUnitKey ? "q.work_unit_key" : "NULL::text"} AS work_unit_key,
+              ${hasMsgId ? "q.message_id::text" : "NULL::text"} AS message_id,
+              q.payload AS payload
          FROM queue q ${join}
         WHERE ${conds.join(" AND ")}
         ORDER BY q.id DESC
@@ -647,10 +657,106 @@ export async function dbReasoningTasks(
         error: r.error,
         created_at: r.created_at,
         token_count: Number(r.token_count),
+        work_unit_key: r.work_unit_key,
+        message_id: r.message_id,
+        payload: r.payload,
       })),
     };
   } catch (err) {
     return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Re-queue a single failed reasoning task. Honcho's deriver has **no retry of
+ * its own**: on failure it marks the row `processed=true, error=<msg>`, and the
+ * worker only ever claims rows `WHERE NOT processed`. So "retry" here means
+ * clearing the error and flipping `processed` back to false — the deriver then
+ * re-claims it on its next poll. Scoped to the workspace AND a row that is
+ * currently failed, so it can never disturb in-flight or succeeded work.
+ *
+ * This re-runs identical work: a deterministic failure (e.g. a model
+ * ValidationException) will just fail again until its root cause is fixed.
+ */
+export async function dbRetryReasoningTask(
+  workspaceId: string,
+  id: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const p = getPool();
+  if (!p) return { ok: false, reason: "HONCHO_DATABASE_URL not set" };
+  if (!/^\d+$/.test(id)) return { ok: false, reason: "invalid task id" };
+  try {
+    if (!(await tableExists(p, "queue"))) {
+      return { ok: false, reason: "queue table not found in this Honcho schema" };
+    }
+    const qWs = await pickColumn(p, "queue", ["workspace_name", "workspace_id"]);
+    const hasError = await columnExists(p, "queue", "error");
+    const hasProcessed = await columnExists(p, "queue", "processed");
+    if (!qWs || !hasError || !hasProcessed) {
+      return { ok: false, reason: "queue table lacks workspace/error/processed columns; cannot re-queue" };
+    }
+    const r = await p.query(
+      `UPDATE queue SET processed = false, error = NULL
+        WHERE ${qWs} = $1 AND id = $2::bigint AND error IS NOT NULL`,
+      [workspaceId, id],
+    );
+    if (!r.rowCount) {
+      return { ok: false, reason: "task not found, not failed, or already re-queued" };
+    }
+    return { ok: true };
+  } catch (err) {
+    // Honcho keeps a partial unique index on (work_unit_key) WHERE NOT processed
+    // for 'reconciler'/'dream' tasks; re-queuing one whose key already has a
+    // pending row collides. Surface that as a friendly no-op rather than a 500.
+    if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {
+      return { ok: false, reason: "a newer task for this work unit is already queued — no retry needed" };
+    }
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Bulk re-queue every failed reasoning task in a workspace (same mechanism as
+ * {@link dbRetryReasoningTask}: clear error + processed=false). Excludes
+ * `dream`/`reconciler` tasks, which carry a partial unique index on
+ * `(work_unit_key) WHERE NOT processed` that a bulk reset can collide with —
+ * those are retried individually (per-row handles the 23505). Returns the count
+ * re-queued and the count skipped so the UI can report both.
+ */
+export async function dbRetryAllFailedReasoningTasks(
+  workspaceId: string,
+): Promise<{ ok: boolean; reason?: string; retried?: number; skipped?: number }> {
+  const p = getPool();
+  if (!p) return { ok: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "queue"))) {
+      return { ok: false, reason: "queue table not found in this Honcho schema" };
+    }
+    const qWs = await pickColumn(p, "queue", ["workspace_name", "workspace_id"]);
+    const hasError = await columnExists(p, "queue", "error");
+    const hasProcessed = await columnExists(p, "queue", "processed");
+    const hasTaskType = await columnExists(p, "queue", "task_type");
+    if (!qWs || !hasError || !hasProcessed) {
+      return { ok: false, reason: "queue table lacks workspace/error/processed columns; cannot re-queue" };
+    }
+    const exclude = hasTaskType ? "AND task_type NOT IN ('dream','reconciler')" : "";
+    let skipped = 0;
+    if (hasTaskType) {
+      const s = await p.query<{ n: string }>(
+        `SELECT count(*)::bigint AS n FROM queue
+          WHERE ${qWs} = $1 AND error IS NOT NULL AND task_type IN ('dream','reconciler')`,
+        [workspaceId],
+      );
+      skipped = Number(s.rows[0]?.n ?? 0);
+    }
+    const r = await p.query(
+      `UPDATE queue SET processed = false, error = NULL
+        WHERE ${qWs} = $1 AND error IS NOT NULL ${exclude}`,
+      [workspaceId],
+    );
+    return { ok: true, retried: r.rowCount ?? 0, skipped };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }
 

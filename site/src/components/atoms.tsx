@@ -110,6 +110,8 @@ export function StatTile({
   hintTone = "accent",
   className,
   delay = 0,
+  onClick,
+  active = false,
 }: {
   label: string;
   value: React.ReactNode;
@@ -117,6 +119,8 @@ export function StatTile({
   hintTone?: "accent" | "muted" | "warn" | "danger";
   className?: string;
   delay?: number;
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const hintToneCls = {
     accent: "text-accent",
@@ -130,8 +134,24 @@ export function StatTile({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay, ease: EASE }}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-pressed={onClick ? active : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       className={cn(
-        "bg-surface border border-border p-3 group transition-colors duration-150 hover:border-accent/30",
+        "bg-surface border border-border p-3 group transition-colors duration-150",
+        onClick ? "cursor-pointer hover:border-accent/50" : "hover:border-accent/30",
+        active && "outline outline-2 outline-accent -outline-offset-2",
         className,
       )}
     >
