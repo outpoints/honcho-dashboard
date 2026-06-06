@@ -113,8 +113,19 @@ Open <http://localhost:3000>.
 
 ```bash
 cp docker-compose-example.yml docker-compose.yml   # your local copy (gitignored)
-docker compose up --build
+cp .env.example .env                               # set your Honcho URL + (optional) DB
+docker compose up -d                               # pulls ghcr.io/outpoints/honcho-dashboard
 ```
+
+The template pulls the prebuilt image from GHCR — update later with
+`docker compose pull && docker compose up -d`. To build from source instead, uncomment
+the `build:` block in the Compose file and run `docker compose up --build`.
+
+On first run, open the dashboard and point it at your Honcho server under **CONFIG** —
+the prebuilt image ships with a `http://localhost:8000` default baked in (the active
+instance is chosen in-app and stored per browser). Set `HONCHO_PROXY_ALLOWED_BASES` to
+include that URL so the same-origin proxy will forward to it. Building from source with
+`HONCHO_BASE_URL` set instead bakes your instance in as the default.
 
 A `docker-compose-example.yml` template is included at the repo root. Copy it to
 `docker-compose.yml` (which is gitignored, so your local edits stay local). To wire the
