@@ -3,27 +3,35 @@
 # This is the committed template. Copy it to `docker-compose.yml` (which is
 # gitignored, so your local edits stay local) before bringing the stack up:
 #
-# Quick start:
+# Quick start (pulls the prebuilt image from GHCR — no local build):
 #   cp docker-compose-example.yml docker-compose.yml
 #   cp .env.example .env        # then fill in your Honcho URL + (optional) DB URL
-#   docker compose up --build -d
+#   docker compose up -d
 #   open http://localhost:3000
+#
+# Update later with:  docker compose pull && docker compose up -d
 #
 # All values come from the sibling `.env` file. See `.env.example` for the
 # full list and what each one enables.
 
 services:
   dashboard:
-    build:
-      context: ./site
-      dockerfile: Dockerfile
-      args:
-        # NEXT_PUBLIC_* values are inlined into the browser bundle at build time —
-        # they cannot be changed by `-e` flags or a `docker compose up` env override.
-        # If you change HONCHO_BASE_URL after the first build, re-run with `--build`.
-        NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
-        NEXT_PUBLIC_HONCHO_TOKEN: ${HONCHO_TOKEN:-}
-    image: honcho-dashboard:latest
+    # Prebuilt multi-arch image, published to GHCR on each release tag.
+    # Track :latest, or pin a release for reproducibility (e.g. :1.0.0).
+    image: ghcr.io/outpoints/honcho-dashboard:latest
+
+    # ---- Prefer to build from source instead of pulling? Comment out the
+    # `image:` line above and uncomment this block, then `docker compose up --build`.
+    # NEXT_PUBLIC_* values are inlined into the browser bundle at build time and
+    # cannot be changed at runtime, so they live here as build args. (The published
+    # image bakes a http://localhost:8000 fallback; either way the active instance
+    # is chosen in-app, so most users can simply pull.) ----
+    # build:
+    #   context: ./site
+    #   dockerfile: Dockerfile
+    #   args:
+    #     NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
+    #     NEXT_PUBLIC_HONCHO_TOKEN: ${HONCHO_TOKEN:-}
     container_name: honcho-dashboard
     restart: unless-stopped
     ports:
