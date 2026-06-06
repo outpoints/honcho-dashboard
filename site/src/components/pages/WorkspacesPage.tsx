@@ -8,9 +8,10 @@ import { StatusBar } from "@/components/StatusBar";
 import { Button, Field, TextInput, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
-import { ConfirmModal } from "@/components/ConfirmModal";
 import { WorkspaceConfigModal } from "@/components/WorkspaceConfigModal";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
@@ -21,6 +22,8 @@ const LIST_KEY = "workspaces/list";
 export function WorkspacesPage() {
   const apiOpts = useActiveHonchoOptions();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
   const { data, error, isLoading, refetch } = useHonchoQuery(LIST_KEY, (o) =>
     honcho.workspaces.list(o, { size: 100 }),
   );
@@ -28,7 +31,6 @@ export function WorkspacesPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [configTarget, setConfigTarget] = useState<ApiWorkspace | null>(null);
 
   const workspaces = data?.items ?? [];
@@ -48,6 +50,17 @@ export function WorkspacesPage() {
       push({ type: "error", message: "Workspace id is required" });
       return;
     }
+    const ok = await confirm({
+      title: "CREATE_WORKSPACE",
+      confirmLabel: "CREATE",
+      body: (
+        <>
+          Create workspace <span className="text-accent font-mono">{trimmed}</span> on the live
+          instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await honcho.workspaces.create(apiOpts, { id: trimmed });
@@ -64,7 +77,19 @@ export function WorkspacesPage() {
 
   const remove = async (id: string) => {
     if (!apiOpts) return;
-    setRemoveTarget(null);
+    const ok = await confirm({
+      title: "CONFIRM_REMOVE",
+      destructive: true,
+      confirmLabel: "REMOVE_WORKSPACE",
+      body: (
+        <>
+          This will permanently delete the workspace{" "}
+          <span className="text-accent">{id}</span> and all its peers, sessions, and messages on
+          the live instance. This cannot be undone.
+        </>
+      ),
+    });
+    if (!ok) return;
     try {
       await honcho.workspaces.delete(apiOpts, id);
       push({ type: "success", message: `Workspace ${id} removed` });
@@ -83,7 +108,9 @@ export function WorkspacesPage() {
         actions={
           <div className="flex items-center gap-2">
             <RefreshButton label="REFRESH" onClick={() => refetch()} />
-            <Button icon="plus" onClick={openCreate}>NEW_WORKSPACE</Button>
+            {canWrite ? (
+              <Button icon="plus" onClick={openCreate}>NEW_WORKSPACE</Button>
+            ) : null}
           </div>
         }
       />
@@ -100,7 +127,7 @@ export function WorkspacesPage() {
       {isLoading ? (
         <SkeletonGrid />
       ) : workspaces.length === 0 && !error ? (
-        <EmptyState onCreate={openCreate} />
+        <EmptyState onCreate={openCreate} canCreate={canWrite} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <AnimatePresence initial={false}>
@@ -114,8 +141,9 @@ export function WorkspacesPage() {
               >
                 <WorkspaceCard
                   workspace={w}
-                  onRemove={() => setRemoveTarget(w.id)}
+                  onRemove={() => remove(w.id)}
                   onConfig={() => setConfigTarget(w)}
+                  canRemove={canWrite}
                 />
               </motion.div>
             ))}
@@ -124,21 +152,6 @@ export function WorkspacesPage() {
       )}
 
       <StatusBar />
-
-      <ConfirmModal
-        open={!!removeTarget}
-        title="CONFIRM_REMOVE"
-        body={
-          <>
-            This will permanently delete the workspace{" "}
-            <span className="text-accent">{removeTarget}</span> and all its peers, sessions, and
-            messages on the Honcho server. This cannot be undone.
-          </>
-        }
-        confirmLabel="REMOVE_WORKSPACE"
-        onCancel={() => setRemoveTarget(null)}
-        onConfirm={() => removeTarget && remove(removeTarget)}
-      />
 
       <Modal
         title="CREATE_WORKSPACE"
@@ -177,10 +190,12 @@ function WorkspaceCard({
   workspace,
   onRemove,
   onConfig,
+  canRemove,
 }: {
   workspace: ApiWorkspace;
   onRemove: () => void;
   onConfig: () => void;
+  canRemove: boolean;
 }) {
   const created = workspace.created_at
     ? new Date(workspace.created_at).toLocaleString()
@@ -222,16 +237,18 @@ function WorkspaceCard({
         >
           <Icon name="settings" size={12} />
         </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={onRemove}
-          className="w-8 h-8 border border-border-light text-text-muted hover:text-red-400 flex items-center justify-center"
-          aria-label="Remove workspace"
-          title="Remove workspace"
-        >
-          <Icon name="trash" size={12} />
-        </motion.button>
+        {canRemove ? (
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={onRemove}
+            className="w-8 h-8 border border-border-light text-text-muted hover:text-red-400 flex items-center justify-center"
+            aria-label="Remove workspace"
+            title="Remove workspace"
+          >
+            <Icon name="trash" size={12} />
+          </motion.button>
+        ) : null}
       </div>
     </Panel>
   );
@@ -263,7 +280,7 @@ function SkeletonGrid() {
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, canCreate }: { onCreate: () => void; canCreate: boolean }) {
   return (
     <Panel title="NO_WORKSPACES">
       <div className="flex flex-col items-center justify-center text-center py-8 gap-3">
@@ -271,7 +288,9 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <div className="text-xs text-text-muted">
           No workspaces on this Honcho instance yet.
         </div>
-        <Button icon="plus" onClick={onCreate}>CREATE_FIRST_WORKSPACE</Button>
+        {canCreate ? (
+          <Button icon="plus" onClick={onCreate}>CREATE_FIRST_WORKSPACE</Button>
+        ) : null}
       </div>
     </Panel>
   );

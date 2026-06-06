@@ -81,6 +81,19 @@ chrome; reserve larger sizes for headings/values.
 - **Destructive confirmations → `ConfirmModal`** (`components/ConfirmModal.tsx`), not a bare `Modal`.
 - Tall content scrolls inside the body (`max-h-[60vh] overflow-y-auto`), the footer stays pinned.
 
+### Mutations confirm before write (binding)
+
+**Every action that writes to the live Honcho instance — create, update, delete, save (settings,
+peer cards, conclusions, sessions, everything) — must pop a confirmation before it executes.** Reads
+(search, browse, chat, refresh) never confirm.
+
+- Funnel every mutation through the shared **`useConfirm()`** helper (`components/confirm.tsx`):
+  `const ok = await confirm({ title: "DELETE_PEER", body: "…on the live instance?", destructive: true }); if (!ok) return;`.
+  Use `destructive: true` (red tone) for delete/remove, omit it for save/create.
+- Mutating controls are additionally gated by the master **`useWriteActions()`** toggle
+  (`lib/writeActions.ts`, default off, set in CONFIG): render them only when `enabled` is true,
+  otherwise show a muted "read-only · enable in CONFIG" affordance. Reads stay available.
+
 Canonical examples to copy: `EDIT_PEER` (PeersPage), `WORKSPACE_CONFIG` (WorkspaceConfigModal),
 `CREATE_WORKSPACE` (WorkspacesPage), `SCHEDULE_DREAM` (ReasoningPage).
 

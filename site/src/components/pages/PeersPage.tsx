@@ -10,12 +10,14 @@ import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { getSdk } from "@/lib/honcho/sdk";
-import { toApiPeer } from "@/lib/honcho/adapters";
-import type { ApiPeer } from "@/lib/honcho/types";
+import { toApiPeer, toApiMessage } from "@/lib/honcho/adapters";
+import type { ApiPeer, ApiMessage } from "@/lib/honcho/types";
 import { cn } from "@/lib/utils";
 import { useNav } from "@/lib/nav";
 
@@ -73,6 +75,8 @@ export function PeersPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
   const { navigate } = useNav();
 
   const [search, setSearch] = useState("");
@@ -160,6 +164,17 @@ export function PeersPage() {
       push({ type: "error", message: "Pick a workspace first" });
       return;
     }
+    const ok = await confirm({
+      title: "CREATE_PEER",
+      confirmLabel: "CREATE",
+      body: (
+        <>
+          Create peer <span className="text-accent font-mono">{trimmed}</span> in workspace{" "}
+          <span className="text-accent font-mono">{targetWs}</span> on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await getSdk(apiOpts, targetWs).peer(trimmed, {
@@ -200,9 +215,15 @@ export function PeersPage() {
         actions={
           <div className="flex items-center gap-2">
             <RefreshButton label="REFRESH" onClick={() => refetch()} />
-            <Button icon="plus" onClick={() => setOpen(true)} disabled={!activeWorkspaceId}>
-              NEW_PEER
-            </Button>
+            {canWrite ? (
+              <Button icon="plus" onClick={() => setOpen(true)} disabled={!activeWorkspaceId}>
+                NEW_PEER
+              </Button>
+            ) : (
+              <Chip tone="muted" icon="key">
+                read-only · enable in CONFIG
+              </Chip>
+            )}
           </div>
         }
       />
@@ -352,11 +373,16 @@ function PeerRow({
 }) {
   const apiOpts = useActiveHonchoOptions();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
   const [expanded, setExpanded] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
   const [editObserveMe, setEditObserveMe] = useState(true);
   const [editMetadata, setEditMetadata] = useState("");
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<ApiMessage[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [details, setDetails] = useState<{
     loading: boolean;
     sessions: number | null;
@@ -387,8 +413,11 @@ function PeerRow({
     const opts = apiOptsRef.current;
     if (!opts) return;
     const detailKey = `${peer.workspace_id}::${peer.id}`;
+    // Mark fetched only AFTER a successful load (below), never up front: React's
+    // Strict-Mode dev double-invoke cancels the first run, and a pre-set ref made
+    // the second run early-return here — so details never loaded (— counts +
+    // "needs operator DB" even though the data was fetched).
     if (fetchedRef.current === detailKey) return;
-    fetchedRef.current = detailKey;
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
@@ -408,6 +437,7 @@ function PeerRow({
               .catch(() => null),
           ]);
           if (cancelled) return;
+          fetchedRef.current = detailKey;
           const od = opDetail?.available ? opDetail : null;
           setDetails({
             loading: false,
@@ -468,6 +498,17 @@ function PeerRow({
       push({ type: "error", message: "Metadata must be a JSON object" });
       return;
     }
+    const confirmed = await confirm({
+      title: "SAVE_PEER",
+      confirmLabel: "SAVE",
+      body: (
+        <>
+          Save changes to peer <span className="text-accent font-mono">{peer.id}</span> (type +
+          metadata) on the live instance?
+        </>
+      ),
+    });
+    if (!confirmed) return;
     setSaving(true);
     try {
       // Peer-level config only meaningfully supports observe_me; reasoning is
@@ -482,6 +523,47 @@ function PeerRow({
       push({ type: "error", message: formatApiError(err) });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveCard = async (lines: string[]): Promise<boolean> => {
+    if (!apiOpts) return false;
+    const ok = await confirm({
+      title: "SAVE_PEER_CARD",
+      confirmLabel: "SAVE",
+      body: (
+        <>
+          Overwrite the peer card for <span className="text-accent font-mono">{peer.id}</span> on the
+          live instance ({lines.length} line{lines.length === 1 ? "" : "s"})?
+        </>
+      ),
+    });
+    if (!ok) return false;
+    try {
+      const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
+      const updated = await peerObj.setCard(lines);
+      setDetails((d) => ({ ...d, peerCard: updated ?? lines }));
+      push({ type: "success", message: "Peer card saved" });
+      return true;
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+      return false;
+    }
+  };
+
+  const runPeerSearch = async () => {
+    const q = search.trim();
+    if (!apiOpts || !q) return;
+    setSearching(true);
+    try {
+      const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
+      const msgs = await peerObj.search(q, { limit: 20 });
+      setSearchResults(msgs.map((m) => toApiMessage(m)));
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
     }
   };
 
@@ -521,14 +603,16 @@ function PeerRow({
             <div>created</div>
             <div className="text-text-primary font-mono">{created}</div>
           </div>
-          <button
-            className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
-            title="Edit peer (type + metadata)"
-            aria-label="Edit peer"
-            onClick={openEdit}
-          >
-            <Icon name="settings" size={12} />
-          </button>
+          {canWrite ? (
+            <button
+              className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
+              title="Edit peer (type + metadata)"
+              aria-label="Edit peer"
+              onClick={openEdit}
+            >
+              <Icon name="settings" size={12} />
+            </button>
+          ) : null}
           <motion.button
             onClick={() => setExpanded((e) => !e)}
             className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
@@ -556,11 +640,20 @@ function PeerRow({
                 loading={details.loading && details.peerCard === null}
                 card={details.peerCard}
                 error={details.error}
+                canWrite={canWrite}
+                onSave={saveCard}
               />
               <ConclusionsSection
                 loading={details.loading && details.conclusionsList === null}
                 conclusions={details.conclusionsList}
                 total={details.conclusions}
+              />
+              <PeerSearchSection
+                value={search}
+                onChange={setSearch}
+                onSearch={runPeerSearch}
+                searching={searching}
+                results={searchResults}
               />
               <ObserveMeRow peer={peer} />
               <div className="flex items-center gap-2 flex-wrap pt-1">
@@ -645,15 +738,97 @@ function PeerRow({
   );
 }
 
+function PeerSearchSection({
+  value,
+  onChange,
+  onSearch,
+  searching,
+  results,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSearch: () => void;
+  searching: boolean;
+  results: ApiMessage[] | null;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon name="search" size={11} className="text-text-muted" />
+        <span className="text-[10px] text-text-muted uppercase tracking-wider">search_within_peer</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <TextInput
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && value.trim() && !searching) onSearch();
+          }}
+          placeholder="search this peer's messages…"
+          className="flex-1"
+        />
+        <Button variant="outline" size="sm" icon="search" onClick={onSearch} disabled={!value.trim() || searching}>
+          {searching ? "…" : "SEARCH"}
+        </Button>
+      </div>
+      {searching ? (
+        <div className="mt-2 space-y-1.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-8 bg-border/40 animate-pulse" />
+          ))}
+        </div>
+      ) : results === null ? null : results.length === 0 ? (
+        <div className="mt-2 text-[11px] text-text-muted italic">No matching messages for that query.</div>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {results.map((m) => (
+            <div key={m.id} className="px-2 py-1.5 bg-void/40 border border-border text-[11px]">
+              <div className="flex items-center gap-2 text-[9px] text-text-muted mb-0.5">
+                <span className="text-text-primary font-mono">{m.peer_id}</span>
+                <span>{new Date(m.created_at).toLocaleString()}</span>
+              </div>
+              <div className="text-text-primary line-clamp-2">{m.content}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PeerCardSection({
   loading,
   card,
   error,
+  canWrite,
+  onSave,
 }: {
   loading: boolean;
   card: string[] | null;
   error?: string;
+  canWrite: boolean;
+  onSave: (lines: string[]) => Promise<boolean>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const startEdit = () => {
+    setDraft((card ?? []).join("\n"));
+    setEditing(true);
+  };
+  const save = async () => {
+    setBusy(true);
+    const ok = await onSave(
+      draft
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
+    setBusy(false);
+    if (ok) setEditing(false);
+  };
+
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
@@ -662,8 +837,37 @@ function PeerCardSection({
         {card ? (
           <span className="text-[10px] text-text-muted">({card.length})</span>
         ) : null}
+        {canWrite && !loading && !editing ? (
+          <button
+            onClick={startEdit}
+            className="ml-auto text-[10px] text-text-muted hover:text-accent flex items-center gap-1"
+            aria-label="Edit peer card"
+          >
+            <Icon name="edit" size={10} /> EDIT
+          </button>
+        ) : null}
       </div>
-      {loading ? (
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={5}
+            spellCheck={false}
+            placeholder="one fact per line…"
+            className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
+          />
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" onClick={save} disabled={busy}>
+              {busy ? "SAVING…" : "SAVE_CARD"}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setEditing(false)} disabled={busy}>
+              CANCEL
+            </Button>
+            <span className="text-[10px] text-text-muted">one line per card entry</span>
+          </div>
+        </div>
+      ) : loading ? (
         <div className="space-y-1.5">
           <div className="h-2.5 bg-border/60 animate-pulse w-3/4" />
           <div className="h-2.5 bg-border/60 animate-pulse w-2/3" />

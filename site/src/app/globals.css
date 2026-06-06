@@ -50,14 +50,17 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --c-void: #050505;
-  --c-surface: #0a0a0a;
-  --c-border: #1a1a1a;
-  --c-border-light: #262626;
-  --c-text-primary: #ededed;
-  --c-text-muted: #8a8a8a;
-  --c-accent: #3c82f7;
-  --c-accent-secondary: #a6c6e6;
+  /* Sourced from honcho.dev's live `.dark` palette (charcoal, not pure black):
+     void=--background-sunken, surface=--background, border=--border,
+     text=--foreground/--muted-foreground, accent=--text-link/--accent. */
+  --c-void: #0f0f0f;
+  --c-surface: #1a1a1a;
+  --c-border: #22242a;
+  --c-border-light: #2e313a;
+  --c-text-primary: #e3e3e3;
+  --c-text-muted: #99a4b2;
+  --c-accent: #81bffd;
+  --c-accent-secondary: #b4d9fe;
 
   --c-red-300: oklch(80.8% 0.114 19.571);
   --c-red-400: oklch(70.4% 0.191 22.216);
@@ -75,10 +78,10 @@
 
   /* GridCanvas pre-paint background (the canvas then paints concrete colors it
      derives from the resolved theme in JS; see CANVAS_THEME in GridCanvas.tsx). */
-  --canvas-bg: #050505;
+  --canvas-bg: #0f0f0f;
 
-  /* Heatmap empty cell. */
-  --heat-empty: #0d1129;
+  /* Heatmap empty cell — neutral blue-gray well (honcho --background-tertiary). */
+  --heat-empty: #22242a;
 }
 
 /* Light — "Paper Terminal" (warm ink-on-paper). */

@@ -34,11 +34,11 @@ interface CanvasColors {
 }
 const CANVAS_THEME: Record<"light" | "dark", CanvasColors> = {
   dark: {
-    bg: "#050505",
-    grid: "#111111",
-    dot: "#1a1a1a",
-    accent: "60, 130, 247",
-    trail: "166, 198, 230",
+    bg: "#0f0f0f",
+    grid: "#1c1e23",
+    dot: "#2a2d34",
+    accent: "129, 191, 253",
+    trail: "180, 217, 254",
   },
   light: {
     bg: "#efece4",

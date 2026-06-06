@@ -6,6 +6,8 @@ import { Panel } from "@/components/Panel";
 import { Button, Checkbox, Chip, Field, PillTabs, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
@@ -67,6 +69,8 @@ export function WorkspaceConfigModal({
 }) {
   const apiOpts = useActiveHonchoOptions();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
 
   const [mode, setMode] = useState<"form" | "json">("form");
   const [saving, setSaving] = useState(false);
@@ -225,6 +229,17 @@ export function WorkspaceConfigModal({
       push({ type: "error", message: err });
       return;
     }
+    const ok = await confirm({
+      title: "SAVE_WORKSPACE_CONFIG",
+      confirmLabel: "SAVE",
+      body: (
+        <>
+          Save configuration for workspace{" "}
+          <span className="text-accent font-mono">{workspace.id}</span> on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       await honcho.workspaces.update(apiOpts, workspace.id, { configuration: cfg });
@@ -253,6 +268,17 @@ export function WorkspaceConfigModal({
       push({ type: "error", message: err });
       return;
     }
+    const ok = await confirm({
+      title: "CREATE_WORKSPACE",
+      confirmLabel: "CREATE",
+      body: (
+        <>
+          Create workspace <span className="text-accent font-mono">{id}</span> with the cloned
+          configuration on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       await honcho.workspaces.create(apiOpts, { id, configuration: cfg });
@@ -276,11 +302,13 @@ export function WorkspaceConfigModal({
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>
-            CANCEL
+            {canWrite ? "CANCEL" : "CLOSE"}
           </Button>
-          <Button variant="primary" onClick={save} disabled={saving}>
-            {saving ? "SAVING…" : "SAVE"}
-          </Button>
+          {canWrite ? (
+            <Button variant="primary" onClick={save} disabled={saving}>
+              {saving ? "SAVING…" : "SAVE"}
+            </Button>
+          ) : null}
         </>
       }
     >
@@ -396,7 +424,7 @@ export function WorkspaceConfigModal({
             </Panel>
 
             <div className="pt-1">
-              {cloneOpen ? (
+              {!canWrite ? null : cloneOpen ? (
                 <div className="space-y-2">
                   <Field
                     label="NEW WORKSPACE ID"

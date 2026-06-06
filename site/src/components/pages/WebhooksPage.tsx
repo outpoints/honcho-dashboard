@@ -8,8 +8,9 @@ import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
-import { ConfirmModal } from "@/components/ConfirmModal";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
@@ -31,10 +32,11 @@ export function WebhooksPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
   const key = workspaceId ? `workspaces/${workspaceId}/webhooks` : null;
   const { data, error, isLoading, refetch } = useHonchoQuery(key, (o) =>
@@ -54,6 +56,17 @@ export function WebhooksPage() {
       push({ type: "error", message: "URL must start with http:// or https://" });
       return;
     }
+    const ok = await confirm({
+      title: "CREATE_WEBHOOK",
+      confirmLabel: "CREATE",
+      body: (
+        <>
+          Register webhook endpoint <span className="text-accent font-mono break-all">{trimmed}</span>{" "}
+          on the live instance? It will receive all Honcho events.
+        </>
+      ),
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await honcho.webhooks.create(apiOpts, workspaceId, { url: trimmed });
@@ -71,7 +84,18 @@ export function WebhooksPage() {
 
   const remove = async (id: string) => {
     if (!apiOpts || !workspaceId) return;
-    setRemoveTarget(null);
+    const ok = await confirm({
+      title: "REMOVE_WEBHOOK",
+      destructive: true,
+      confirmLabel: "REMOVE",
+      body: (
+        <>
+          Remove webhook <span className="text-accent font-mono break-all">{id}</span> on the live
+          instance? Events will no longer be delivered to this endpoint.
+        </>
+      ),
+    });
+    if (!ok) return;
     try {
       await honcho.webhooks.delete(apiOpts, workspaceId, id);
       push({ type: "success", message: "Webhook removed" });
@@ -84,6 +108,18 @@ export function WebhooksPage() {
 
   const testEmit = async () => {
     if (!apiOpts || !workspaceId) return;
+    const ok = await confirm({
+      title: "TEST_EMIT",
+      destructive: true,
+      confirmLabel: "EMIT",
+      body: (
+        <>
+          Emit a real test event to every registered endpoint on the live instance? Connected
+          webhooks will receive an actual POST.
+        </>
+      ),
+    });
+    if (!ok) return;
     try {
       await honcho.webhooks.test(apiOpts, workspaceId);
       push({ type: "success", message: "Test event emitted to all endpoints" });
@@ -100,9 +136,11 @@ export function WebhooksPage() {
         subtitle="webhook endpoint management for self-hosted Honcho instance"
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={testEmit} disabled={!workspaceId}>
-              TEST_EMIT
-            </Button>
+            {canWrite ? (
+              <Button variant="ghost" onClick={testEmit} disabled={!workspaceId}>
+                TEST_EMIT
+              </Button>
+            ) : null}
             <RefreshButton
               label="REFRESH"
               onClick={() => {
@@ -110,9 +148,15 @@ export function WebhooksPage() {
                 stats.refetch();
               }}
             />
-            <Button icon="plus" onClick={() => setOpen(true)} disabled={!workspaceId}>
-              NEW_WEBHOOK
-            </Button>
+            {canWrite ? (
+              <Button icon="plus" onClick={() => setOpen(true)} disabled={!workspaceId}>
+                NEW_WEBHOOK
+              </Button>
+            ) : (
+              <Chip tone="muted" icon="key">
+                read-only · enable in CONFIG
+              </Chip>
+            )}
           </div>
         }
       />
@@ -186,15 +230,17 @@ export function WebhooksPage() {
                         </span>
                       </div>
                     </div>
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => setRemoveTarget(w.id)}
-                      className="w-8 h-8 border border-border-light text-text-muted hover:text-red-400 flex items-center justify-center transition-colors duration-150"
-                      aria-label="Remove webhook"
-                    >
-                      <Icon name="trash" size={12} />
-                    </motion.button>
+                    {canWrite ? (
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => remove(w.id)}
+                        className="w-8 h-8 border border-border-light text-text-muted hover:text-red-400 flex items-center justify-center transition-colors duration-150"
+                        aria-label="Remove webhook"
+                      >
+                        <Icon name="trash" size={12} />
+                      </motion.button>
+                    ) : null}
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -281,20 +327,6 @@ export function WebhooksPage() {
       </div>
 
       <StatusBar />
-
-      <ConfirmModal
-        open={!!removeTarget}
-        title="CONFIRM_REMOVE"
-        body={
-          <>
-            Remove webhook <span className="text-accent">{removeTarget}</span>? Events will no longer be
-            delivered to this endpoint.
-          </>
-        }
-        confirmLabel="REMOVE_WEBHOOK"
-        onCancel={() => setRemoveTarget(null)}
-        onConfirm={() => removeTarget && remove(removeTarget)}
-      />
 
       <Modal
         title="NEW_WEBHOOK"

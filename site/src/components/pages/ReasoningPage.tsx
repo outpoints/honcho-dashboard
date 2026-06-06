@@ -7,10 +7,11 @@ import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
 import { Modal } from "@/components/Modal";
-import { ConfirmModal } from "@/components/ConfirmModal";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
@@ -63,6 +64,8 @@ export function ReasoningPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -75,9 +78,7 @@ export function ReasoningPage() {
   const [dreamBusy, setDreamBusy] = useState(false);
 
   // Retry (re-queue) a failed task via the operator DB write path.
-  const [retryTarget, setRetryTarget] = useState<ReasoningTaskRow | null>(null);
   const [retryBusy, setRetryBusy] = useState(false);
-  const [retryAllOpen, setRetryAllOpen] = useState(false);
   const [retryAllBusy, setRetryAllBusy] = useState(false);
 
   // Live aggregate work-unit counters (for the in-flight "processing" tile).
@@ -126,6 +127,18 @@ export function ReasoningPage() {
       push({ type: "error", message: "Observer peer id is required" });
       return;
     }
+    const ok = await confirm({
+      title: "SCHEDULE_DREAM",
+      confirmLabel: "SCHEDULE",
+      body: (
+        <>
+          Queue a dream consolidation pass for{" "}
+          <span className="text-accent font-mono">{observer}</span> in{" "}
+          <span className="text-accent font-mono">{workspaceId}</span> on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     setDreamBusy(true);
     try {
       await getSdk(apiOpts, workspaceId).scheduleDream({
@@ -144,19 +157,31 @@ export function ReasoningPage() {
     }
   };
 
-  const doRetry = async () => {
-    if (!workspaceId || !retryTarget || retryBusy) return;
+  const doRetry = async (target: ReasoningTaskRow) => {
+    if (!workspaceId || retryBusy) return;
+    const ok = await confirm({
+      title: "RETRY_TASK",
+      confirmLabel: "RETRY",
+      body: (
+        <>
+          Re-queue the failed <span className="text-accent">{target.task_type}</span> task{" "}
+          <span className="text-accent font-mono">#{target.id}</span> on the live instance? This
+          clears its error and marks it unprocessed so the deriver re-runs the same work on its next
+          poll.
+        </>
+      ),
+    });
+    if (!ok) return;
     setRetryBusy(true);
     try {
       const res = await fetch(
         `/api/operator/db?action=retry_reasoning&workspace_id=${encodeURIComponent(workspaceId)}` +
-          `&id=${encodeURIComponent(retryTarget.id)}`,
+          `&id=${encodeURIComponent(target.id)}`,
         { method: "POST" },
       );
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
       if (!res.ok || !body.ok) throw new Error(body.reason || `HTTP ${res.status}`);
-      push({ type: "success", message: `Re-queued ${retryTarget.task_type} task #${retryTarget.id}` });
-      setRetryTarget(null);
+      push({ type: "success", message: `Re-queued ${target.task_type} task #${target.id}` });
       reasoning.refetch();
       queue.refetch();
     } catch (err) {
@@ -168,6 +193,20 @@ export function ReasoningPage() {
 
   const doRetryAll = async () => {
     if (!workspaceId || retryAllBusy) return;
+    const ok = await confirm({
+      title: "RETRY_FAILED",
+      confirmLabel: `RETRY ${(counts?.failed ?? 0).toLocaleString()} TASKS`,
+      body: (
+        <>
+          Re-queue all{" "}
+          <span className="text-accent">{(counts?.failed ?? 0).toLocaleString()} failed</span> tasks
+          in <span className="text-accent font-mono">{workspaceId}</span> on the live instance? Each
+          clears its error and is marked unprocessed so the deriver re-runs the same work. dream and
+          reconciler tasks are skipped here — retry those individually.
+        </>
+      ),
+    });
+    if (!ok) return;
     setRetryAllBusy(true);
     try {
       const res = await fetch(
@@ -186,7 +225,6 @@ export function ReasoningPage() {
         ? ` · ${body.skipped} dream/reconciler skipped (retry individually)`
         : "";
       push({ type: "success", message: `Re-queued ${n} failed task${n === 1 ? "" : "s"}${skip}` });
-      setRetryAllOpen(false);
       reasoning.refetch();
       queue.refetch();
     } catch (err) {
@@ -216,18 +254,22 @@ export function ReasoningPage() {
                 conclusions.refetch();
               }}
             />
-            <Button
-              variant="warning"
-              icon="refresh"
-              onClick={() => setRetryAllOpen(true)}
-              disabled={!workspaceId || !counts?.failed}
-              title={counts?.failed ? `Retry all ${counts.failed} failed tasks` : "No failed tasks"}
-            >
-              RETRY_FAILED
-            </Button>
-            <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
-              SCHEDULE_DREAM
-            </Button>
+            {canWrite ? (
+              <Button
+                variant="warning"
+                icon="refresh"
+                onClick={doRetryAll}
+                disabled={!workspaceId || !counts?.failed || retryAllBusy}
+                title={counts?.failed ? `Retry all ${counts.failed} failed tasks` : "No failed tasks"}
+              >
+                RETRY_FAILED
+              </Button>
+            ) : null}
+            {canWrite ? (
+              <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
+                SCHEDULE_DREAM
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -331,7 +373,8 @@ export function ReasoningPage() {
                           key={t.id}
                           t={t}
                           index={i}
-                          onRetry={() => setRetryTarget(t)}
+                          canRetry={canWrite}
+                          onRetry={() => doRetry(t)}
                         />
                       ))}
                     </AnimatePresence>
@@ -442,53 +485,6 @@ export function ReasoningPage() {
           />
         </Field>
       </Modal>
-
-      <ConfirmModal
-        open={!!retryTarget}
-        title="RETRY_TASK"
-        destructive={false}
-        confirmLabel={retryBusy ? "RE-QUEUING…" : "RETRY"}
-        onCancel={() => {
-          if (!retryBusy) setRetryTarget(null);
-        }}
-        onConfirm={doRetry}
-        body={
-          <>
-            Re-queue the failed <span className="text-accent">{retryTarget?.task_type}</span> task{" "}
-            <span className="text-accent font-mono">#{retryTarget?.id}</span>? This clears its error
-            and marks it unprocessed so the deriver claims it again on its next poll.
-            <br />
-            <br />
-            It re-runs the <span className="text-text-primary">same work</span> — if the failure was
-            deterministic (e.g. a model validation error), it will fail again until the underlying
-            cause is fixed.
-          </>
-        }
-      />
-
-      <ConfirmModal
-        open={retryAllOpen}
-        title="RETRY_FAILED"
-        confirmLabel={retryAllBusy ? "RE-QUEUING…" : `RETRY ${(counts?.failed ?? 0).toLocaleString()} TASKS`}
-        onCancel={() => {
-          if (!retryAllBusy) setRetryAllOpen(false);
-        }}
-        onConfirm={doRetryAll}
-        body={
-          <>
-            Attempt to re-queue{" "}
-            <span className="text-accent">all {(counts?.failed ?? 0).toLocaleString()} failed</span>{" "}
-            tasks in <span className="text-accent font-mono">{workspaceId}</span>? Each clears its error
-            and is marked unprocessed so the deriver re-runs it.
-            <br />
-            <br />
-            <span className="text-yellow-300">Make sure the deriver worker is running</span> — otherwise
-            they just sit re-queued. This re-runs identical work, so a deterministic failure (e.g. a model
-            validation error) will simply fail again and stay marked FAILED. dream/reconciler tasks are
-            skipped here — retry those individually.
-          </>
-        }
-      />
     </div>
   );
 }
@@ -548,10 +544,12 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 function ReasoningTaskItem({
   t,
   index,
+  canRetry,
   onRetry,
 }: {
   t: ReasoningTaskRow;
   index: number;
+  canRetry: boolean;
   onRetry: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -670,7 +668,7 @@ function ReasoningTaskItem({
                 <div className="text-[11px] text-text-muted italic">No payload recorded.</div>
               )}
 
-              {failed ? (
+              {failed && canRetry ? (
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <Button variant="primary" size="sm" icon="refresh" onClick={onRetry}>
                     RETRY_TASK

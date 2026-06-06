@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { honcho } from "@/lib/honcho/client";
+import { useHonchoQuery } from "@/lib/honcho/useQuery";
 
 export interface PageHeaderProps {
   title: string;
@@ -30,12 +32,21 @@ function useClock() {
 
 export function PageHeader({ title, subtitle, actions, className, showClock = true }: PageHeaderProps) {
   const now = useClock();
+  // Real Honcho version from the connected instance (openapi `info.version`),
+  // shared/cached across page headers. Falls back to hiding the badge when the
+  // instance is unreachable or no version is reported.
+  const versionQuery = useHonchoQuery("openapi-version", (o) => honcho.openapi(o), {
+    refreshInterval: 0,
+  });
+  const version = versionQuery.data?.info?.version;
   return (
     <div className={cn("space-y-2 mb-4", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <h1 className="font-pixel text-2xl text-text-primary tracking-wider">{title}</h1>
-          <span className="text-[10px] text-text-muted bg-border px-2 py-0.5">v3.0.5</span>
+          {version ? (
+            <span className="text-[10px] text-text-muted bg-border px-2 py-0.5">v{version}</span>
+          ) : null}
           <span className="flex items-center gap-1 px-1.5 py-0.5 bg-accent/10 border border-accent/30">
             <span className="w-1.5 h-1.5 bg-accent" aria-hidden />
             <span className="text-[9px] text-accent uppercase tracking-wider">SELF-HOSTED</span>

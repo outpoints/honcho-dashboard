@@ -5,12 +5,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Tabs, RefreshButton } from "@/components/atoms";
+import { Button, Chip, Tabs, RefreshButton, TextInput } from "@/components/atoms";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/toast";
+import { useConfirm } from "@/components/confirm";
+import { useWriteActions } from "@/lib/writeActions";
 import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
@@ -24,6 +26,16 @@ import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "active" | "idle" | "archived";
 type PeerType = "user" | "agent" | "unknown";
+type SortKey = "recent" | "oldest" | "most_msgs" | "fewest_msgs" | "created_desc" | "created_asc";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "recent", label: "most recent message" },
+  { value: "oldest", label: "oldest message" },
+  { value: "most_msgs", label: "most messages" },
+  { value: "fewest_msgs", label: "fewest messages" },
+  { value: "created_desc", label: "newest created" },
+  { value: "created_asc", label: "oldest created" },
+];
 
 interface SessionStatRow {
   session_id: string;
@@ -73,6 +85,7 @@ export function SessionsPage() {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<SortKey>("recent");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("__active__");
   const [open, setOpen] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
@@ -156,7 +169,7 @@ export function SessionsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return decorated.filter((d) => {
+    const list = decorated.filter((d) => {
       if (statusFilter !== "all" && d.status !== statusFilter) return false;
       if (q) {
         const hay = `${d.session.id} ${(d.stat?.peers ?? []).join(",")}`.toLowerCase();
@@ -164,7 +177,33 @@ export function SessionsPage() {
       }
       return true;
     });
-  }, [decorated, statusFilter, query]);
+
+    // Sort metrics. Sessions missing a last message sink to the bottom for both
+    // recency orders (Infinity for "oldest", 0 for "recent"); missing counts → 0.
+    const msgs = (d: (typeof list)[number]) => d.stat?.message_count ?? 0;
+    const lastAt = (d: (typeof list)[number]) =>
+      d.stat?.last_message_at ? Date.parse(d.stat.last_message_at) : 0;
+    const createdAt = (d: (typeof list)[number]) => Date.parse(d.session.created_at) || 0;
+
+    list.sort((a, b) => {
+      switch (sort) {
+        case "oldest":
+          return (lastAt(a) || Infinity) - (lastAt(b) || Infinity);
+        case "most_msgs":
+          return msgs(b) - msgs(a);
+        case "fewest_msgs":
+          return msgs(a) - msgs(b);
+        case "created_desc":
+          return createdAt(b) - createdAt(a);
+        case "created_asc":
+          return createdAt(a) - createdAt(b);
+        case "recent":
+        default:
+          return lastAt(b) - lastAt(a);
+      }
+    });
+    return list;
+  }, [decorated, statusFilter, query, sort]);
 
   const remove = async (workspaceId: string, sid: string) => {
     if (!apiOpts) return;
@@ -232,6 +271,16 @@ export function SessionsPage() {
             onChange={setWorkspaceFilter}
             options={workspaceOptions}
             className="min-w-[160px]"
+            triggerClassName="py-1.5"
+          />
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-text-muted">sort:</span>
+          <Select
+            value={sort}
+            onChange={(v) => setSort(v as SortKey)}
+            options={SORT_OPTIONS}
+            className="min-w-[180px]"
             triggerClassName="py-1.5"
           />
         </div>
@@ -386,6 +435,11 @@ function SessionRow({
     longSummary: null,
   });
   const [summariesOpen, setSummariesOpen] = useState(false);
+  const { push } = useToast();
+  const confirm = useConfirm();
+  const { enabled: canWrite } = useWriteActions();
+  const [newPeer, setNewPeer] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
 
   // Dedupe by session key and depend ONLY on stable primitives. `useActiveHonchoOptions`
   // returns a fresh object every render, so depending on apiOpts re-runs this effect each
@@ -452,12 +506,82 @@ function SessionRow({
 
   const removePeer = async (peerId: string) => {
     if (!apiOpts) return;
+    const ok = await confirm({
+      title: "REMOVE_PEER",
+      destructive: true,
+      confirmLabel: "REMOVE",
+      body: (
+        <>
+          Remove <span className="text-accent font-mono">{peerId}</span> from session{" "}
+          <span className="text-accent font-mono">{session.id}</span> on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
+    setActionBusy(true);
     try {
       const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
       await ses.removePeers(peerId);
+      push({ type: "success", message: `Removed ${peerId}` });
       onPeerRemoved();
-    } catch {
-      /* surfaced via the list refetch; row stays put on failure */
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const addPeer = async () => {
+    const pid = newPeer.trim();
+    if (!apiOpts || !pid) return;
+    const ok = await confirm({
+      title: "ADD_PEER",
+      confirmLabel: "ADD",
+      body: (
+        <>
+          Add <span className="text-accent font-mono">{pid}</span> to session{" "}
+          <span className="text-accent font-mono">{session.id}</span>?
+        </>
+      ),
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    try {
+      const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
+      await ses.addPeers(pid);
+      push({ type: "success", message: `Added ${pid}` });
+      setNewPeer("");
+      onPeerRemoved();
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const cloneSession = async () => {
+    if (!apiOpts) return;
+    const ok = await confirm({
+      title: "CLONE_SESSION",
+      confirmLabel: "CLONE",
+      body: (
+        <>
+          Create a copy of session <span className="text-accent font-mono">{session.id}</span> (its
+          peers and messages) on the live instance?
+        </>
+      ),
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    try {
+      const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
+      const cloned = await ses.clone();
+      push({ type: "success", message: `Cloned to ${cloned.id}` });
+      onPeerRemoved();
+    } catch (err) {
+      push({ type: "error", message: formatApiError(err) });
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -539,18 +663,44 @@ function SessionRow({
                       >
                         <PeerAvatar type={resolvePeerType(session.workspace_id, p)} size={12} />
                         {p}
-                        <button
-                          onClick={() => removePeer(p)}
-                          className="text-text-muted hover:text-red-400"
-                          aria-label={`Remove ${p}`}
-                          title={`Remove ${p} from session`}
-                        >
-                          <Icon name="x" size={10} />
-                        </button>
+                        {canWrite ? (
+                          <button
+                            onClick={() => removePeer(p)}
+                            disabled={actionBusy}
+                            className="text-text-muted hover:text-red-400 disabled:opacity-40"
+                            aria-label={`Remove ${p}`}
+                            title={`Remove ${p} from session`}
+                          >
+                            <Icon name="x" size={10} />
+                          </button>
+                        ) : null}
                       </span>
                     ))}
                   </div>
                 )}
+                {canWrite ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <TextInput
+                      value={newPeer}
+                      onChange={(e) => setNewPeer(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newPeer.trim() && !actionBusy) addPeer();
+                      }}
+                      placeholder="peer id to add…"
+                      disabled={actionBusy}
+                      className="max-w-[220px]"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon="plus"
+                      onClick={addPeer}
+                      disabled={!newPeer.trim() || actionBusy}
+                    >
+                      ADD_PEER
+                    </Button>
+                  </div>
+                ) : null}
               </div>
 
               <div>
@@ -633,15 +783,29 @@ function SessionRow({
                 >
                   VIEW_SUMMARIES
                 </Button>
-                <Button
-                  variant="warning"
-                  size="sm"
-                  icon="trash"
-                  onClick={onRemove}
-                  className="ml-auto"
-                >
-                  REMOVE_SESSION
-                </Button>
+                {canWrite ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon="copy"
+                    onClick={cloneSession}
+                    disabled={actionBusy}
+                  >
+                    CLONE_SESSION
+                  </Button>
+                ) : null}
+                {canWrite ? (
+                  <Button
+                    variant="warning"
+                    size="sm"
+                    icon="trash"
+                    onClick={onRemove}
+                    disabled={actionBusy}
+                    className="ml-auto"
+                  >
+                    REMOVE_SESSION
+                  </Button>
+                ) : null}
               </div>
             </div>
           </motion.div>

@@ -5,8 +5,10 @@ export type RouteKey =
   | "peers"
   | "sessions"
   | "messages"
+  | "conclusions"
   | "reasoning"
   | "context"
+  | "chat"
   | "webhooks"
   | "instance"
   | "diagnostics"
@@ -18,6 +20,9 @@ export interface NavItem {
   label: string;
   icon: string;
   badge?: number;
+  /** Group heading this item belongs under in the sidebar. Items sharing a
+   *  section render contiguously; the label shows once at the group's top. */
+  section?: string;
 }
 
 export type AgentKey = "hermes" | "openclaw" | "claude-code" | "mcp";

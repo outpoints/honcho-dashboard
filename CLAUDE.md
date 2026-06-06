@@ -2,11 +2,9 @@
 
 ## North star
 
-Build a **Next.js alternative to [openconcho](https://github.com/offendingcommit/openconcho)** — a fast, privacy-first web UI for a self-hosted Honcho memory server. Same job, different stack: browse workspaces / peers / sessions / messages / conclusions, and chat with peers using their memory as context.
+A fast, privacy-first **operator dashboard for a self-hosted [Honcho](https://honcho.dev) memory server**, built with Next.js. Browse workspaces / peers / sessions / messages / conclusions, watch the reasoning (deriver) queue across the whole fleet, and chat with peers using their memory as context.
 
-Today the site is a polished UI shell with **hardcoded mock data**. The job is to make every page talk to a real Honcho `v3` API and reach feature parity with openconcho before adding anything new.
-
-Reference repo: <https://github.com/offendingcommit/openconcho> (React + Vite + TanStack Router + Tauri).
+Every page talks to a real Honcho `v3` API. The product is mature: beyond a basic memory browser, it leans into operator and observability surfaces — Fleet, Reasoning internals, Instance/DB stats, Diagnostics, and throughput/heatmaps. The work now is **polish, craft, and divergent features**.
 
 ## Stack
 
@@ -43,9 +41,28 @@ Routing is **hash-based inside `AppShell`** (`#/overview`, `#/workspaces`, …).
 | `npm run build`     | Production build                             |
 | `npm run check`     | lint + typecheck + build (run before commit) |
 
+## Releasing
+
+Versioned with semver. The single source of truth is `site/package.json` (`version`);
+keep it in sync with the README `## Changelog`.
+
+To cut a release:
+
+1. Bump `site/package.json` `version` and add a matching `## Changelog` entry in the
+   README — in the **same commit** as the work being released.
+2. Run `npm run check` and commit.
+3. After the commit is on `main`, tag it `vX.Y.Z` (strict semver, leading `v`) and push
+   the tag. The GHCR workflow (`.github/workflows/docker-release.yml`) builds and
+   publishes the multi-arch Docker image on that tag — so **only tag once the release
+   commit is merged**, and never reuse or move a published tag.
+
+`1.0.0` is the first stable release. From here, use
+standard semver: patch for fixes, minor for backward-compatible features, major for
+breaking changes. Tagging publishes a public image — treat it as irreversible.
+
 ## Honcho API conventions
 
-Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpoints we care about for parity:
+Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpoints we care about:
 
 - `POST /v3/workspaces/list` · `POST /v3/workspaces` · `PUT /v3/workspaces/{id}` · `DELETE /v3/workspaces/{id}`
 - `GET  /v3/workspaces/{id}/queue/status` (poll ~10s on workspace detail)
@@ -58,24 +75,7 @@ Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpo
 
 Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_USE_AUTH=false`).
 
-API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance, matches openconcho's UX).
-
-## Parity checklist vs openconcho
-
-- [ ] Multi-instance config (localStorage) + Test Connection
-- [ ] Workspaces list / detail / create / edit / delete — real API
-- [ ] Queue-status polling on workspace detail
-- [ ] Peers list + peer detail (representation, peer card, search-within-peer)
-- [ ] Sessions list + session detail (messages, summaries, context tabs)
-- [ ] Conclusions browser + **semantic search**
-- [ ] **Memory-augmented chat** screen per peer (currently missing)
-- [ ] Webhooks CRUD
-- [ ] Workspace-wide search
-- [ ] Pagination on every list page
-- [ ] Light/dark theme toggle (today is dark-only)
-- [ ] Deep-link friendly URLs (acceptable while hash routing; revisit if we ever Tauri-wrap)
-
-When the checklist closes we are at parity; only then start divergent features.
+API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
 ## Working rules
 
@@ -83,12 +83,13 @@ When the checklist closes we are at parity; only then start divergent features.
 - **Loading / empty / error states are not optional.** Every fetch path renders all three. CLAUDE.md global rules apply: AI-generated code defaults to happy path — audit each new page for failure modes.
 - **Don't delete the mocks.** Keep `src/lib/data.ts` until each page no longer imports from it; remove per-section as you migrate.
 - **Follow the design guide.** `site/docs/research/DESIGN_GUIDE.md` is binding for every UI change — read it before touching components. Key rules: reuse `Panel`/`Modal`/atoms (never raw HTML controls or hand-rolled overlays), **all popups use `Modal`/`ConfirmModal` (never `window.prompt/confirm/alert`)**, booleans use `Checkbox` (not the broken `Toggle`), colors/type come from `@theme` tokens only, labels in `SCREAMING_SNAKE` and hints in sentence case. The `site-clone` branch is the canonical design baseline.
-- **Hash router stays put** until parity is done.
+- **Mutations confirm before write.** Every create/update/delete/save against the live instance funnels through `useConfirm()` (`src/components/confirm.tsx`) and is gated by the `useWriteActions()` master toggle (`src/lib/writeActions.ts`, default off, set in CONFIG). Reads never confirm. New mutating UI must follow this — see DESIGN_GUIDE.md §4.
+- **Hash router stays put** for now — too much UI is wired through `AppShell`; revisit only with discussion.
 - **Run `npm run check` before reporting a task done.**
 
 ## Out-of-scope (for now)
 
-- Tauri / desktop wrapper (openconcho has it; we don't)
+- Tauri / desktop wrapper
 - Auth UX beyond bearer token (no signup / org management)
 - New animations on pages still using mock data
 - Switching to file-based routing or pnpm/Turbo monorepo
