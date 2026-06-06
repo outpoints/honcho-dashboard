@@ -5,9 +5,56 @@ Tailwind CSS v4, Framer Motion, and the official [`@honcho-ai/sdk`](https://www.
 
 The Next.js app lives in [`site/`](./site).
 
-![Honcho Dashboard — overview](docs/dashboard.png)
+![Honcho Self-Hosted Dashboard — Overview](docs/overview.png)
 
-> Screenshot shows the live dashboard with workspace/peer/session identifiers replaced by generic demo values.
+> The dashboard wired to a live Honcho instance, in the dark "Memory Console" theme.
+> Every workspace, peer, session, and message shown is synthetic demo data.
+
+|  Fleet — cross-workspace queue monitor  |  Reasoning — deriver queue with expandable tasks  |
+| :-------------------------------------: | :-----------------------------------------------: |
+|        ![Fleet](docs/fleet.png)         |          ![Reasoning](docs/reasoning.png)         |
+
+|  Chat — memory-augmented dialectic over a peer  |  Conclusions — browse + semantic search  |
+| :---------------------------------------------: | :--------------------------------------: |
+|             ![Chat](docs/chat.png)              |   ![Conclusions](docs/conclusions.png)   |
+
+## Features
+
+Organized into four sections that mirror the sidebar.
+
+**Monitor** — read-only operator dashboards.
+
+- **Fleet** — every workspace on the instance at a glance, with live deriver-queue status (total / done / active / pending) across the whole fleet, polled every 10s. The default landing screen.
+- **Overview** — per-workspace dashboard: peer / session / workspace / conclusion counts, a message-throughput chart (1H / 6H / 24H / 7D), a 52-week conclusion-activity heatmap, recent sessions, and instance status.
+- **Instance** — live server state: health, endpoint, workspace age, runtime, database (size, connections, pgvector), vector columns, largest tables, and per-workspace queue status.
+- **Diagnostics** — composite health probes (Honcho API + database + operator), a config readout, and a tail of recent server logs.
+
+**Explore**
+
+- **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API.
+- **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
+- **Sessions** — search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session or add / remove peers.
+- **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
+- **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions.
+
+**Memory**
+
+- **Reasoning** — the deriver queue that builds peer representations: queued / processing / completed / failed tiles, expandable tasks with parsed and raw payloads, a task-type breakdown, and a config readout; filter by status / type, retry failed tasks, or schedule a dream.
+- **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, and a live preview.
+- **Chat** — memory-augmented dialectic chat: ask a peer about itself over its representation, scoped to an optional session and a chosen reasoning level.
+
+**Setup**
+
+- **Webhooks** — register and remove webhook endpoints, send a test emit, and view delivery activity.
+- **Integrations** — reference guides for connecting agents (MCP, Claude Code, and others) to Honcho, with config examples pre-filled with your live endpoint.
+- **Config** — manage multiple Honcho connections (stored in `localStorage`), test a connection, switch the active instance, and flip the write-actions master toggle.
+
+**Cross-cutting**
+
+- **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth.
+- **Safe by default** — a master **write-actions** toggle (off by default) hides the create / update / delete controls on the workspace, peer, session, conclusion, reasoning, and webhook screens; each confirms before writing to the live instance. Reads never confirm.
+- **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook deliveries, log tail) come from a read-only operator database connection, and degrade gracefully to the Honcho API when it isn't configured.
+- **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme.
 
 ## Architecture
 
@@ -131,9 +178,10 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 
 ## Routes
 
-Hash-based router inside `AppShell`: `#/overview`, `#/workspaces`, `#/peers`, `#/sessions`,
-`#/messages`, `#/reasoning`, `#/context`, `#/webhooks`, `#/instance`, `#/diagnostics`,
-`#/integrations`, `#/config`.
+Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, `#/instance`,
+`#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/messages`, `#/conclusions`,
+`#/reasoning`, `#/context`, `#/chat`, `#/webhooks`, `#/integrations`, `#/config`.
+`#/fleet` is the default landing route.
 
 ## Known quirks
 
@@ -165,6 +213,42 @@ Hash-based router inside `AppShell`: `#/overview`, `#/workspaces`, `#/peers`, `#
   *archive*, webhook *per-event filters* / per-endpoint failure counts, and the
   reasoning *pause / process-all* buttons have no public API, so they were
   dropped rather than faked. Webhook endpoints are registered by URL only.
+
+## Changelog
+
+### 1.0.0 — 2026-06-05
+
+First stable release — a self-hosted operator dashboard wired end-to-end to a
+live Honcho `v3` instance (no more mock data).
+
+**Added**
+
+- **Live Honcho v3 integration** across workspaces, peers, sessions, messages,
+  conclusions, context, and memory-augmented chat — via the official
+  [`@honcho-ai/sdk`](https://www.npmjs.com/package/@honcho-ai/sdk), a thin raw
+  client for endpoints the SDK doesn't cover, and read-only Postgres *operator
+  modules* for metrics the REST API doesn't expose.
+- **Fleet** — cross-workspace queue monitor as the default landing page.
+- **Reasoning** — deriver-queue view with expandable tasks, retry, parsed
+  payloads, and status-tile filtering, backed by direct `queue` table queries.
+- **Light / dark theme toggle** — "Memory Console" (dark) and "Paper Terminal"
+  (light), with the dark palette matched to [honcho.dev](https://honcho.dev).
+- **Operator surfaces** — Overview throughput + heatmap, Instance stats,
+  Diagnostics, and workspace / peer / config editor modals.
+- Reactive browser tab title, portal-anchored dropdowns, and a binding design
+  guide for the visual system.
+- **Deployment** — Docker Compose stack and a GHCR multi-arch release workflow
+  triggered on `vX.Y.Z` tags.
+
+**Fixed**
+
+- The header version badge now reads the real Honcho version from the connected
+  instance (`/openapi.json` → `info.version`) instead of a hardcoded value
+  ([#4](https://github.com/outpoints/honcho-dashboard/issues/4)).
+
+### 0.1.0
+
+- Initial scaffold — the polished UI shell with mock data.
 
 ## Credits
 

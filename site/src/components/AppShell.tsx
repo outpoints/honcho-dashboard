@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
@@ -16,8 +16,10 @@ import { WorkspacesPage } from "@/components/pages/WorkspacesPage";
 import { PeersPage } from "@/components/pages/PeersPage";
 import { SessionsPage } from "@/components/pages/SessionsPage";
 import { MessagesPage } from "@/components/pages/MessagesPage";
+import { ConclusionsPage } from "@/components/pages/ConclusionsPage";
 import { ReasoningPage } from "@/components/pages/ReasoningPage";
 import { ContextPage } from "@/components/pages/ContextPage";
+import { ChatPage } from "@/components/pages/ChatPage";
 import { WebhooksPage } from "@/components/pages/WebhooksPage";
 import { InstancePage } from "@/components/pages/InstancePage";
 import { DiagnosticsPage } from "@/components/pages/DiagnosticsPage";
@@ -26,6 +28,7 @@ import { ConfigPage } from "@/components/pages/ConfigPage";
 import { NavContext } from "@/lib/nav";
 import { buildTitle, useAppendSectionToTitle } from "@/lib/title";
 import { ToastProvider } from "@/components/toast";
+import { ConfirmProvider } from "@/components/confirm";
 
 const RENDER: Record<RouteKey, React.ComponentType> = {
   overview: OverviewPage,
@@ -34,8 +37,10 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
   peers: PeersPage,
   sessions: SessionsPage,
   messages: MessagesPage,
+  conclusions: ConclusionsPage,
   reasoning: ReasoningPage,
   context: ContextPage,
+  chat: ChatPage,
   webhooks: WebhooksPage,
   instance: InstancePage,
   diagnostics: DiagnosticsPage,
@@ -81,6 +86,7 @@ export function AppShell() {
         truth for the tab title and updates reactively on route + pref change. */}
     <title>{buildTitle(current, appendSection)}</title>
     <ToastProvider>
+    <ConfirmProvider>
     <div className="min-h-screen flex">
       <GridCanvas />
       <Sidebar current={current} onNavigate={onNavigate} />
@@ -93,6 +99,7 @@ export function AppShell() {
         </main>
       </div>
     </div>
+    </ConfirmProvider>
     </ToastProvider>
     </NavContext.Provider>
   );
@@ -143,25 +150,37 @@ function MobileDrawer({
           <button onClick={onClose} className="text-text-muted hover:text-text-primary"><Icon name="x" size={14} /></button>
         </div>
         <nav className="flex-1 py-2 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.map((item, i) => {
             const isActive = item.key === current;
+            const newSection = item.section && item.section !== NAV_ITEMS[i - 1]?.section;
             return (
-              <button
-                key={item.key}
-                onClick={() => onNavigate(item.key)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors",
-                  isActive
-                    ? "text-accent bg-accent/10"
-                    : "text-text-muted hover:text-text-primary hover:bg-border/30"
-                )}
-              >
-                <Icon name={item.icon as "activity"} size={14} />
-                <span className={cn("flex-1 text-left", isActive && "cursor-blink")}>{isActive ? `> ${item.label}` : item.label}</span>
-                {item.badge ? (
-                  <span className="ml-auto text-[10px] bg-accent/20 text-accent px-1.5 py-0.5">{item.badge}</span>
+              <Fragment key={item.key}>
+                {newSection ? (
+                  <div
+                    className={cn(
+                      "px-3 pb-1 text-[8px] text-text-muted/70 uppercase tracking-[0.18em]",
+                      i === 0 ? "pt-1" : "pt-3",
+                    )}
+                  >
+                    {item.section}
+                  </div>
                 ) : null}
-              </button>
+                <button
+                  onClick={() => onNavigate(item.key)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors",
+                    isActive
+                      ? "text-accent bg-accent/10"
+                      : "text-text-muted hover:text-text-primary hover:bg-border/30"
+                  )}
+                >
+                  <Icon name={item.icon as "activity"} size={14} />
+                  <span className={cn("flex-1 text-left", isActive && "cursor-blink")}>{isActive ? `> ${item.label}` : item.label}</span>
+                  {item.badge ? (
+                    <span className="ml-auto text-[10px] bg-accent/20 text-accent px-1.5 py-0.5">{item.badge}</span>
+                  ) : null}
+                </button>
+              </Fragment>
             );
           })}
         </nav>

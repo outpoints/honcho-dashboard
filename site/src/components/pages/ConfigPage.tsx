@@ -12,6 +12,8 @@ import { useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
 import { TITLE_BASE, sectionTitle, useAppendSectionToTitle } from "@/lib/title";
 import { useNav } from "@/lib/nav";
+import { useWriteActions } from "@/lib/writeActions";
+import { useConfirm } from "@/components/confirm";
 
 type TestState =
   | { kind: "idle" }
@@ -152,6 +154,10 @@ export function ConfigPage() {
             </div>
           </Panel>
 
+          <WriteActionsPanel
+            baseUrl={instances.find((i) => i.id === activeId)?.baseUrl ?? "the active instance"}
+          />
+
           <Panel title="NOTES">
             <div className="text-[11px] text-text-muted space-y-2 leading-relaxed">
               <p>
@@ -173,6 +179,53 @@ export function ConfigPage() {
   );
 }
 
+function WriteActionsPanel({ baseUrl }: { baseUrl: string }) {
+  const { enabled, setEnabled } = useWriteActions();
+  const confirm = useConfirm();
+  const { push } = useToast();
+
+  const onToggle = async (next: boolean) => {
+    if (!next) {
+      setEnabled(false);
+      push({ type: "info", message: "Write actions disabled" });
+      return;
+    }
+    const ok = await confirm({
+      title: "ENABLE_WRITE_ACTIONS",
+      destructive: true,
+      confirmLabel: "ENABLE",
+      body: (
+        <>
+          This lets the dashboard create, update, and delete data on the live Honcho instance
+          (<span className="font-mono text-accent">{baseUrl}</span>). Each action still asks for a
+          separate confirmation, but the changes are real and some — like deletes — are permanent.
+        </>
+      ),
+    });
+    if (ok) {
+      setEnabled(true);
+      push({ type: "info", message: "Write actions enabled" });
+    }
+  };
+
+  return (
+    <Panel title="WRITE_ACTIONS" status={enabled ? "active" : "idle"}>
+      <Checkbox
+        checked={enabled}
+        onChange={onToggle}
+        label="ENABLE_WRITE_ACTIONS"
+        hint="Allow create / update / delete against the live Honcho instance. Off by default; while off, every mutating control is disabled. Every write still confirms before it runs."
+      />
+      <div className="mt-3 flex justify-between gap-2 text-xs py-1.5 border-t border-border">
+        <span className="text-text-muted">status</span>
+        <span className={enabled ? "text-orange-400" : "text-text-muted"}>
+          {enabled ? "writes enabled" : "read-only"}
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
 function InstanceEditor({
   editing,
   upsert,
@@ -189,12 +242,13 @@ function InstanceEditor({
   canRemove: boolean;
 }) {
   const { push } = useToast();
+  const confirm = useConfirm();
   const [name, setName] = useState(editing?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "http://localhost:8000");
   const [token, setToken] = useState(editing?.token ?? "");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmedUrl = baseUrl.trim().replace(/\/+$/, "");
     const trimmedName = name.trim();
     if (!trimmedName) {
@@ -205,6 +259,18 @@ function InstanceEditor({
       push({ type: "error", message: "Base URL must start with http:// or https://" });
       return;
     }
+    const ok = await confirm({
+      title: editing ? "SAVE_INSTANCE" : "CREATE_INSTANCE",
+      confirmLabel: editing ? "SAVE" : "CREATE",
+      body: (
+        <>
+          Save connection settings for <span className="text-accent">{trimmedName}</span> (
+          <span className="font-mono text-accent">{trimmedUrl}</span>) and make it the active
+          instance?
+        </>
+      ),
+    });
+    if (!ok) return;
     const id = editing?.id ?? `inst_${Date.now().toString(36)}`;
     const next: HonchoInstance = {
       id,
@@ -270,7 +336,26 @@ function InstanceEditor({
           {test.kind === "testing" ? "TESTING…" : "TEST_CONNECTION"}
         </Button>
         {canRemove && editing ? (
-          <Button variant="ghost" onClick={() => onRemove(editing.id)}>REMOVE</Button>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              const ok = await confirm({
+                title: "REMOVE_INSTANCE",
+                destructive: true,
+                confirmLabel: "REMOVE",
+                body: (
+                  <>
+                    Remove instance <span className="text-accent">{editing.name}</span> from this
+                    browser? This only forgets the saved connection; it does not touch the Honcho
+                    server.
+                  </>
+                ),
+              });
+              if (ok) onRemove(editing.id);
+            }}
+          >
+            REMOVE
+          </Button>
         ) : null}
       </div>
 

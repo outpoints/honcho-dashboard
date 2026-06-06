@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Image from "next/image";
 import { Icon, type IconName } from "@/components/icons";
 import { NAV_ITEMS } from "@/lib/data";
@@ -53,26 +54,38 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
         <WorkspaceSelector />
       </div>
 
-      <nav className="flex-1 py-2 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+      <nav className="flex-1 py-1.5 overflow-y-auto">
+        {NAV_ITEMS.map((item, i) => {
           const isActive = item.key === current;
+          const newSection = item.section && item.section !== NAV_ITEMS[i - 1]?.section;
           return (
-            <button
-              key={item.key}
-              onClick={() => onNavigate(item.key)}
-              className={cn(
-                "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors relative",
-                isActive
-                  ? "text-accent bg-accent/10"
-                  : "text-text-muted hover:text-text-primary hover:bg-border/30",
-              )}
-            >
-              <Icon name={item.icon as IconName} size={14} />
-              <span className={cn("flex-1 text-left", isActive && "cursor-blink")}>
-                {isActive ? `> ${item.label}` : item.label}
-              </span>
-              {isActive ? <span className="absolute right-0 top-0 bottom-0 w-0.5 bg-accent" /> : null}
-            </button>
+            <Fragment key={item.key}>
+              {newSection ? (
+                <div
+                  className={cn(
+                    "px-3 pb-1 text-[8px] text-text-muted/70 uppercase tracking-[0.18em]",
+                    i === 0 ? "pt-1" : "pt-3",
+                  )}
+                >
+                  {item.section}
+                </div>
+              ) : null}
+              <button
+                onClick={() => onNavigate(item.key)}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors relative",
+                  isActive
+                    ? "text-accent bg-accent/10"
+                    : "text-text-muted hover:text-text-primary hover:bg-border/30",
+                )}
+              >
+                <Icon name={item.icon as IconName} size={14} />
+                <span className={cn("flex-1 text-left", isActive && "cursor-blink")}>
+                  {isActive ? `> ${item.label}` : item.label}
+                </span>
+                {isActive ? <span className="absolute right-0 top-0 bottom-0 w-0.5 bg-accent" /> : null}
+              </button>
+            </Fragment>
           );
         })}
       </nav>

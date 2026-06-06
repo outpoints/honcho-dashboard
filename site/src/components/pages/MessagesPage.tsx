@@ -5,11 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Field, RefreshButton } from "@/components/atoms";
+import { Chip, RefreshButton } from "@/components/atoms";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
-import { useToast } from "@/components/toast";
-import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import { useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
 import { getSdk } from "@/lib/honcho/sdk";
@@ -61,9 +60,7 @@ function subscribeHash(notify: () => void) {
 }
 
 export function MessagesPage() {
-  const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
-  const { push } = useToast();
 
   const hashSession = useSyncExternalStore(subscribeHash, () => readHashParam("session"), () => null);
   const hashPeer = useSyncExternalStore(subscribeHash, () => readHashParam("peer"), () => null);
@@ -178,7 +175,7 @@ export function MessagesPage() {
     <div className="space-y-3">
       <PageHeader
         title="MESSAGES"
-        subtitle="view and create messages within sessions"
+        subtitle="browse the message stream across a workspace's sessions"
         actions={
           <RefreshButton
             label="REFRESH"
@@ -305,17 +302,6 @@ export function MessagesPage() {
         </div>
 
         <div className="col-span-12 lg:col-span-4 space-y-3">
-          <ComposePanel
-            workspaceId={workspaceId}
-            sessionId={sessionFilter}
-            peers={meta.data?.sessions ? meta.data : null}
-            apiOpts={apiOpts}
-            onSent={() => {
-              op.refetch();
-              sdk.refetch();
-              push({ type: "success", message: "Message added" });
-            }}
-          />
           <Panel title="MESSAGE_STATS">
             <div className="space-y-2 text-xs">
               {[
@@ -339,93 +325,5 @@ export function MessagesPage() {
 
       <StatusBar />
     </div>
-  );
-}
-
-function ComposePanel({
-  workspaceId,
-  sessionId,
-  peers,
-  apiOpts,
-  onSent,
-}: {
-  workspaceId: string | null;
-  sessionId: string;
-  peers: { peerTypes: Record<string, PeerType> } | null;
-  apiOpts: ReturnType<typeof useActiveHonchoOptions>;
-  onSent: () => void;
-}) {
-  const { push } = useToast();
-  const [peerId, setPeerId] = useState("");
-  const [content, setContent] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const peerOptions = useMemo(() => {
-    const ids = Object.keys(peers?.peerTypes ?? {});
-    return ids.map((id) => ({ value: id, label: id }));
-  }, [peers]);
-
-  if (!sessionId) {
-    return (
-      <Panel title="COMPOSE_MESSAGE">
-        <div className="flex flex-col items-center justify-center py-12 gap-2">
-          <Icon name="message-square" className="text-text-muted" size={24} />
-          <p className="text-xs text-text-muted text-center">Select a session to compose messages</p>
-        </div>
-      </Panel>
-    );
-  }
-
-  const send = async () => {
-    if (!apiOpts || !workspaceId) return;
-    const peer = peerId || peerOptions[0]?.value;
-    if (!peer) {
-      push({ type: "error", message: "Pick a peer to author the message" });
-      return;
-    }
-    if (!content.trim()) {
-      push({ type: "error", message: "Message content is required" });
-      return;
-    }
-    setBusy(true);
-    try {
-      const ses = await getSdk(apiOpts, workspaceId).session(sessionId);
-      await ses.addMessages([{ peerId: peer, content: content.trim() }]);
-      setContent("");
-      onSent();
-    } catch (err) {
-      push({ type: "error", message: formatApiError(err) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Panel title="COMPOSE_MESSAGE">
-      <div className="space-y-3">
-        <Field label="AUTHOR_PEER">
-          <Select
-            value={peerId || peerOptions[0]?.value || ""}
-            onChange={setPeerId}
-            options={peerOptions.length ? peerOptions : [{ value: "", label: "no peers" }]}
-            className="w-full"
-          />
-        </Field>
-        <Field label="CONTENT" hint={`session: ${sessionId}`}>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="type a message…"
-            rows={4}
-            className="w-full bg-void border border-border px-3 py-2 text-xs text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
-          />
-        </Field>
-        <div className="flex justify-end">
-          <Button variant="primary" icon="message-square" onClick={send} disabled={busy}>
-            {busy ? "SENDING…" : "SEND"}
-          </Button>
-        </div>
-      </div>
-    </Panel>
   );
 }
