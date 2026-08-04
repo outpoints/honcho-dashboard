@@ -111,7 +111,7 @@ export function SessionsPage() {
       targetWorkspaces.map(async (ws) => {
         const [sessions, peers] = await Promise.all([
           getSdk(o, ws)
-            .sessions({ size: 100 })
+            .sessions({ size: 100, reverse: true })
             .then((p) => p.items.map((s) => toApiSession(s)))
             .catch(() => [] as ApiSession[]),
           getSdk(o, ws)
