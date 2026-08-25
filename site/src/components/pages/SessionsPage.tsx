@@ -19,6 +19,7 @@ import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config"
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
 import { getSdk } from "@/lib/honcho/sdk";
+import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiSession, toApiMessage, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiSession, ApiMessage } from "@/lib/honcho/types";
 import type { HonchoClientOptions } from "@/lib/honcho/client";
@@ -109,10 +110,7 @@ export function SessionsPage() {
     const perWs = await Promise.all(
       targetWorkspaces.map(async (ws) => {
         const [sessions, peers] = await Promise.all([
-          getSdk(o, ws)
-            .sessions({ size: 100, reverse: true })
-            .then((p) => p.items.map((s) => toApiSession(s)))
-            .catch(() => [] as ApiSession[]),
+          listAllSessions(getSdk(o, ws)).then((items) => items.map((s) => toApiSession(s))),
           getSdk(o, ws)
             .peers({ size: 100 })
             .then((p) => p.items.map((peer) => toApiPeer(peer)))

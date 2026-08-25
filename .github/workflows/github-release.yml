@@ -18,14 +18,30 @@ jobs:
       startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+
       - name: Create release if it does not exist
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
         run: |
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          notes_file=".github/release-notes/${RELEASE_TAG}.md"
+          if [[ -f "$notes_file" ]]; then
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --notes-file "$notes_file" \
+              --title "Honcho Dashboard ${RELEASE_TAG#v}"
+          else
             gh release create "$RELEASE_TAG" \
               --verify-tag \
               --generate-notes \
               --title "Honcho Dashboard ${RELEASE_TAG#v}"
+          fi

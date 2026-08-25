@@ -39,7 +39,7 @@ Organized into four sections that mirror the sidebar.
 
 - **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API.
 - **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
-- **Sessions** — search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
+- **Sessions** — browse every paginated Honcho session, then search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
 - **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
 - **Search** — Honcho-native hybrid keyword/vector search across workspace, session, or peer scope, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
 - **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions.
@@ -254,6 +254,7 @@ Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, 
 
 **Fixed**
 
+- Loaded every page from Honcho's paginated session list so search, filtering, and sorting are no longer limited to the first 100 sessions ([#9](https://github.com/outpoints/honcho-dashboard/issues/9)).
 - Suppressed placeholder values such as `unknown` so the page header never renders `vunknown` when an instance omits its OpenAPI version.
 - Preserved the selected session when **VIEW_MESSAGES** navigates from Sessions to Messages.
 - Made the 52-week activity heatmap render exactly 364 UTC days ending on the current UTC day, eliminating future-looking empty cells.

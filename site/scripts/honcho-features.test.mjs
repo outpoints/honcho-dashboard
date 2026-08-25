@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Page } from "@honcho-ai/sdk";
 import { supportedUploadContentType } from "../src/lib/honcho/fileUpload.ts";
 import { buildSearchFilters } from "../src/lib/honcho/searchFilters.ts";
 import { orderSearchResults } from "../src/lib/honcho/searchOrdering.ts";
+import {
+  listAllSessions,
+  SESSION_LIST_PAGE_SIZE,
+} from "../src/lib/honcho/sessionListing.ts";
 import { parseOptionalJsonObject } from "../src/lib/json.ts";
 
 test("buildSearchFilters emits UTC date and metadata filters", () => {
@@ -84,4 +89,37 @@ test("search ordering preserves relevance and supports stable chronological orde
     "newest",
     "invalid",
   ]);
+});
+
+test("session listing follows every Honcho page beyond the first 100", async () => {
+  const total = 247;
+  const allSessions = Array.from({ length: total }, (_, index) => ({
+    id: `session-${String(index + 1).padStart(3, "0")}`,
+  }));
+  const requestedPages = [];
+  const pageResponse = (page, size) => ({
+    items: allSessions.slice((page - 1) * size, page * size),
+    total,
+    page,
+    size,
+    pages: Math.ceil(total / size),
+  });
+  const firstPage = Page.from(pageResponse(1, SESSION_LIST_PAGE_SIZE), async (page, size) => {
+    requestedPages.push(page);
+    return pageResponse(page, size);
+  });
+  const requestedOptions = [];
+  const client = {
+    async sessions(options) {
+      requestedOptions.push(options);
+      return firstPage;
+    },
+  };
+
+  const result = await listAllSessions(client);
+
+  assert.deepEqual(requestedOptions, [{ size: 100, reverse: true }]);
+  assert.deepEqual(requestedPages, [2, 3]);
+  assert.equal(result.length, total);
+  assert.equal(result.at(-1)?.id, "session-247");
 });
