@@ -80,7 +80,7 @@ export function MessagesPage() {
     async (o) => {
       const [sessions, peers] = await Promise.all([
         getSdk(o, workspaceId!)
-          .sessions({ size: 100 })
+          .sessions({ size: 100, reverse: true })
           .then((p) => p.items.map((s) => toApiSession(s)))
           .catch(() => [] as ApiSession[]),
         getSdk(o, workspaceId!)
@@ -110,7 +110,7 @@ export function MessagesPage() {
       : null;
   const sdk = useHonchoQuery<StreamMessage[]>(sdkKey, async (o) => {
     const ses = await getSdk(o, workspaceId!).session(sessionFilter);
-    const page = await ses.messages({ size: 100 });
+    const page = await ses.messages({ size: 100, reverse: true });
     return page.items.map((m) => {
       const am = toApiMessage(m);
       return {

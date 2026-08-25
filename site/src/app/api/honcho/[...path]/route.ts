@@ -29,7 +29,17 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] 
   if (!segments) {
     return Response.json({ detail: "Missing path" }, { status: 400 });
   }
-  const search = req.nextUrl.search;
+  const searchUrl = new URL(req.url);
+  // The Honcho SDK serializes unset optional query params as the literal
+  // string "undefined" (page/reverse on list calls), which the FastAPI
+  // backend rejects with 422 (int/bool parsing). Drop those values at the
+  // proxy so SDK list calls (peers/sessions/messages/conclusions) work.
+  for (const [k, v] of [...searchUrl.searchParams]) {
+    if (v === "undefined" || v === "null" || v === "") {
+      searchUrl.searchParams.delete(k);
+    }
+  }
+  const search = searchUrl.search;
   const target = `${resolved.baseUrl}/${segments}${search}`;
 
   const headers = new Headers();

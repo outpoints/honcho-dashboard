@@ -90,7 +90,7 @@ export function ContextPage() {
   );
   const sessions = useHonchoQuery<{ items: ApiSession[] }>(
     workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list?ctx` : null,
-    async (o) => ({ items: (await getSdk(o, workspaceId!).sessions({ size: 100 })).items.map(toApiSession) }),
+    async (o) => ({ items: (await getSdk(o, workspaceId!).sessions({ size: 100, reverse: true })).items.map(toApiSession) }),
   );
 
   const total = useMemo(

@@ -69,7 +69,7 @@ export function ChatPage() {
   );
   const sessions = useHonchoQuery<{ items: ApiSession[] }>(
     workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list?chat` : null,
-    async (o) => ({ items: (await getSdk(o, workspaceId!).sessions({ size: 100 })).items.map(toApiSession) }),
+    async (o) => ({ items: (await getSdk(o, workspaceId!).sessions({ size: 100, reverse: true })).items.map(toApiSession) }),
   );
 
   const peerOptions = useMemo(

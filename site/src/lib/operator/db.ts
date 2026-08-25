@@ -115,7 +115,7 @@ export async function dbStats(): Promise<DbStats> {
       p.query<{ name: string; rows: string; size_bytes: string }>(
         `SELECT
            c.relname AS name,
-           c.reltuples::bigint AS rows,
+           GREATEST(c.reltuples::bigint, 0) AS rows,
            pg_total_relation_size(c.oid)::bigint AS size_bytes
          FROM pg_class c
          JOIN pg_namespace n ON n.oid = c.relnamespace
