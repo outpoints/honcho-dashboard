@@ -10,6 +10,7 @@ import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Modal } from "@/components/Modal";
+import { SessionFileUploadModal } from "@/components/SessionFileUploadModal";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
@@ -21,7 +22,6 @@ import { getSdk } from "@/lib/honcho/sdk";
 import { toApiSession, toApiMessage, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiSession, ApiMessage } from "@/lib/honcho/types";
 import type { HonchoClientOptions } from "@/lib/honcho/client";
-import { useNav } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "active" | "idle" | "archived";
@@ -81,7 +81,6 @@ export function SessionsPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
   const { push } = useToast();
-  const { navigate } = useNav();
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -354,9 +353,8 @@ export function SessionsPage() {
                   onRemove={() => setRemoveTarget(d.session.id)}
                   onOpenMessages={() => {
                     window.location.hash = `#/messages?session=${encodeURIComponent(d.session.id)}`;
-                    navigate("messages");
                   }}
-                  onPeerRemoved={() => {
+                  onDataChanged={() => {
                     refetch();
                     stats.refetch();
                   }}
@@ -403,7 +401,7 @@ function SessionRow({
   apiOpts,
   onRemove,
   onOpenMessages,
-  onPeerRemoved,
+  onDataChanged,
 }: {
   session: ApiSession;
   stat?: SessionStatRow;
@@ -414,12 +412,13 @@ function SessionRow({
   apiOpts: HonchoClientOptions | null;
   onRemove: () => void;
   onOpenMessages: () => void;
-  onPeerRemoved: () => void;
+  onDataChanged: () => void;
 }) {
   const [detail, setDetail] = useState<{
     loading: boolean;
     loaded: boolean;
     messages: ApiMessage[];
+    peers: string[];
     hasSummary: boolean;
     summary: string | null;
     shortSummary: SummaryView | null;
@@ -429,12 +428,15 @@ function SessionRow({
     loading: false,
     loaded: false,
     messages: [],
+    peers: [],
     hasSummary: false,
     summary: null,
     shortSummary: null,
     longSummary: null,
   });
   const [summariesOpen, setSummariesOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [detailVersion, setDetailVersion] = useState(0);
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
@@ -448,12 +450,14 @@ function SessionRow({
   const fetchedRef = useRef<string | null>(null);
   const apiOptsRef = useRef(apiOpts);
   apiOptsRef.current = apiOpts;
+  const fallbackPeersRef = useRef(stat?.peers ?? []);
+  fallbackPeersRef.current = stat?.peers ?? [];
 
   useEffect(() => {
     if (!open) return;
     const opts = apiOptsRef.current;
     if (!opts) return;
-    const detailKey = `${session.workspace_id}::${session.id}`;
+    const detailKey = `${session.workspace_id}::${session.id}::${detailVersion}`;
     if (fetchedRef.current === detailKey) return;
     fetchedRef.current = detailKey;
     let cancelled = false;
@@ -463,12 +467,16 @@ function SessionRow({
       (async () => {
         try {
           const ses = await getSdk(opts, session.workspace_id).session(session.id);
-          const [msgs, summaries] = await Promise.all([
+          const [msgs, summaries, sessionPeers] = await Promise.all([
             ses
               .messages({ size: 5, reverse: true })
               .then((p) => p.items.map((m) => toApiMessage(m)))
               .catch(() => []),
             ses.summaries().catch(() => null),
+            ses
+              .peers()
+              .then((items) => items.map((peer) => peer.id))
+              .catch(() => fallbackPeersRef.current),
           ]);
           if (cancelled) return;
           const short = summaries?.shortSummary ?? null;
@@ -477,6 +485,7 @@ function SessionRow({
             loading: false,
             loaded: true,
             messages: msgs,
+            peers: sessionPeers,
             hasSummary: !!(short || long),
             summary: short?.content ?? long?.content ?? null,
             shortSummary: short
@@ -496,13 +505,18 @@ function SessionRow({
     return () => {
       cancelled = true;
     };
-  }, [open, session.id, session.workspace_id]);
+  }, [detailVersion, open, session.id, session.workspace_id]);
 
-  const peers = stat?.peers ?? [];
+  const peers = detail.loaded ? detail.peers : stat?.peers ?? [];
   const configKeys = Object.keys(session.configuration ?? {}).length;
   const created = new Date(session.created_at).toLocaleString();
   const lastMessage = stat?.last_message_at ? new Date(stat.last_message_at).toLocaleString() : "—";
   const statusTone = status === "active" ? "accent" : status === "idle" ? "yellow" : "muted";
+
+  const refreshDetail = () => {
+    fetchedRef.current = null;
+    setDetailVersion((version) => version + 1);
+  };
 
   const removePeer = async (peerId: string) => {
     if (!apiOpts) return;
@@ -523,7 +537,8 @@ function SessionRow({
       const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
       await ses.removePeers(peerId);
       push({ type: "success", message: `Removed ${peerId}` });
-      onPeerRemoved();
+      refreshDetail();
+      onDataChanged();
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
     } finally {
@@ -551,7 +566,8 @@ function SessionRow({
       await ses.addPeers(pid);
       push({ type: "success", message: `Added ${pid}` });
       setNewPeer("");
-      onPeerRemoved();
+      refreshDetail();
+      onDataChanged();
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
     } finally {
@@ -577,7 +593,7 @@ function SessionRow({
       const ses = await getSdk(apiOpts, session.workspace_id).session(session.id);
       const cloned = await ses.clone();
       push({ type: "success", message: `Cloned to ${cloned.id}` });
-      onPeerRemoved();
+      onDataChanged();
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
     } finally {
@@ -770,7 +786,7 @@ function SessionRow({
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="primary" size="sm" onClick={onOpenMessages}>
                   VIEW_MESSAGES
                 </Button>
@@ -783,6 +799,18 @@ function SessionRow({
                 >
                   VIEW_SUMMARIES
                 </Button>
+                {canWrite ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon="upload"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={actionBusy || peers.length === 0}
+                    title={peers.length === 0 ? "Add a peer before uploading" : undefined}
+                  >
+                    UPLOAD_FILE
+                  </Button>
+                ) : null}
                 {canWrite ? (
                   <Button
                     variant="outline"
@@ -851,6 +879,19 @@ function SessionRow({
           </div>
         )}
       </Modal>
+
+      <SessionFileUploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        apiOpts={apiOpts}
+        workspaceId={session.workspace_id}
+        sessionId={session.id}
+        peers={peers}
+        onUploaded={() => {
+          refreshDetail();
+          onDataChanged();
+        }}
+      />
     </>
   );
 }

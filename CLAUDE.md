@@ -39,7 +39,9 @@ Routing is **hash-based inside `AppShell`** (`#/overview`, `#/workspaces`, …).
 | `npm run lint`      | ESLint                                       |
 | `npm run typecheck` | `tsc --noEmit`                               |
 | `npm run build`     | Production build                             |
-| `npm run check`     | lint + typecheck + build (run before commit) |
+| `npm run capture:screenshots` | Capture PII-free repo screenshots (server required) |
+| `npm run test`      | Focused Node tests                          |
+| `npm run check`     | lint + typecheck + test + build (before commit) |
 
 ## Releasing
 
@@ -69,6 +71,7 @@ Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpo
 - `POST /v3/workspaces/{id}/schedule_dream` · `POST /v3/workspaces/{id}/search`
 - `POST /v3/workspaces/{id}/peers/list` · `POST /v3/workspaces/{id}/peers`
 - `POST /v3/workspaces/{id}/sessions/list` (+ messages, summaries, context)
+- `POST /v3/workspaces/{id}/sessions/{session_id}/messages/upload` (multipart file upload)
 - `POST /v3/workspaces/{id}/conclusions/list` · `POST /v3/workspaces/{id}/conclusions/query` (semantic search)
 - `POST /v3/workspaces/{id}/chat` (memory-augmented chat — peer is the implicit observer)
 - `POST /v3/workspaces/{id}/webhooks`
@@ -76,6 +79,9 @@ Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpo
 Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_USE_AUTH=false`).
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
+
+Repository screenshots must contain synthetic data only. Follow `docs/SCREENSHOTS.md`
+before replacing any image referenced by the README.
 
 ## Working rules
 

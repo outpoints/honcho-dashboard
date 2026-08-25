@@ -239,9 +239,12 @@ export async function dbHeatmap(): Promise<{
       return { available: false, reason: "no activity table found in this Honcho schema" };
     }
     const r = await p.query<{ day: string; n: string }>(
-      `SELECT date_trunc('day', created_at)::date::text AS day, count(*)::bigint AS n
+      `SELECT (created_at AT TIME ZONE 'UTC')::date::text AS day, count(*)::bigint AS n
          FROM ${source}
-        WHERE created_at > now() - interval '52 weeks'
+        WHERE created_at >=
+              (date_trunc('day', now() AT TIME ZONE 'UTC') - interval '363 days') AT TIME ZONE 'UTC'
+          AND created_at <
+              (date_trunc('day', now() AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
         GROUP BY 1 ORDER BY 1`,
     );
     return {

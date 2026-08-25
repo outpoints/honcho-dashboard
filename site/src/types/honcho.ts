@@ -5,6 +5,7 @@ export type RouteKey =
   | "peers"
   | "sessions"
   | "messages"
+  | "search"
   | "conclusions"
   | "reasoning"
   | "context"

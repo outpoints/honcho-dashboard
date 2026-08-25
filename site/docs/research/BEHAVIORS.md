@@ -1,5 +1,10 @@
 # Honcho Self-Host Dashboard — Behaviors
 
+> Historical reconstruction reference for the original mock dashboard. Use the
+> root `README.md` for current live-product capabilities and routes; this file
+> remains the visual and interaction baseline where the live API has an
+> equivalent feature.
+
 ## Global Layout
 - **Body bg:** `#050505` (`--color-void`)
 - **Surface bg:** `#0a0a0a` (`--color-surface`) — cards, sidebar

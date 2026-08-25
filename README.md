@@ -9,6 +9,8 @@ The Next.js app lives in [`site/`](./site).
 
 > The dashboard wired to a live Honcho instance, in the dark "Memory Console" theme.
 > Every workspace, peer, session, and message shown is synthetic demo data.
+> See [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) for the repository's capture and
+> privacy checklist.
 
 |  Fleet — cross-workspace queue monitor  |  Reasoning — deriver queue with expandable tasks  |
 | :-------------------------------------: | :-----------------------------------------------: |
@@ -17,6 +19,10 @@ The Next.js app lives in [`site/`](./site).
 |  Chat — memory-augmented dialectic over a peer  |  Conclusions — browse + semantic search  |
 | :---------------------------------------------: | :--------------------------------------: |
 |             ![Chat](docs/chat.png)              |   ![Conclusions](docs/conclusions.png)   |
+
+|  Search — native hybrid retrieval + ordering  |  Session upload — attributed document ingestion  |
+| :--------------------------------------------: | :------------------------------------------------: |
+|          ![Search](docs/search.png)            |       ![Session upload](docs/session-upload.png)    |
 
 ## Features
 
@@ -33,8 +39,9 @@ Organized into four sections that mirror the sidebar.
 
 - **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API.
 - **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
-- **Sessions** — search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session or add / remove peers.
+- **Sessions** — search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
 - **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
+- **Search** — Honcho-native hybrid keyword/vector search across workspace, session, or peer scope, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
 - **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions.
 
 **Memory**
@@ -62,17 +69,18 @@ Three layers, each with a single job:
 
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
-   status, dream scheduling, search — everything the SDK exposes goes through it.
+   status, dream scheduling, and search use the SDK directly.
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
-   Files: `site/src/lib/honcho/client.ts`. Only endpoints the SDK doesn't reach are
-   exposed there, each labeled with its gap reason:
+   File: `site/src/lib/honcho/client.ts`. Each raw transport is labeled with its gap reason:
    - `/health`, `/openapi.json` — not in SDK
    - Workspace `list / create / delete` — the SDK is workspace-scoped and
      get-or-creates on first use, which is the wrong UX for management screens
    - Workspace-wide conclusion `list / query / delete` — SDK organizes
      conclusions by `(observer, observed)` peer pair
+   - Session file upload — SDK 2.3 multipart requests omit the per-instance
+     proxy header, so the raw transport preserves the selected upstream safely
    - Webhook `list / create / delete / test` — no SDK methods
 
 3. **Operator modules — for self-hosted runtime, db, config, logs, diagnostics.**
@@ -161,6 +169,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 │   ├── .env.example
 │   └── package.json
 ├── docker-compose-example.yml  # template → copy to docker-compose.yml (gitignored)
+├── docs/                        # PII-free product screenshots + capture policy
 ├── CLAUDE.md
 ├── .github/workflows/          # CI runs inside site/
 └── LICENSE                     # GPL-3.0
@@ -172,15 +181,17 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 | ------------------- | -------------------------- |
 | `npm run dev`       | Start the dev server       |
 | `npm run build`     | Production build           |
+| `npm run capture:screenshots` | Capture the synthetic README image set |
 | `npm run start`     | Run the production build   |
 | `npm run lint`      | ESLint                     |
+| `npm run test`      | Focused Node tests         |
 | `npm run typecheck` | TypeScript check (no emit) |
-| `npm run check`     | lint + typecheck + build   |
+| `npm run check`     | lint + typecheck + test + build |
 
 ## Stack
 
 - **Next.js 16** (App Router, React 19, TypeScript strict, standalone output)
-- **`@honcho-ai/sdk`** v2 for native Honcho data flows
+- **`@honcho-ai/sdk`** v2.3 for native Honcho data flows
 - **`pg`** for the read-only operator DB connection
 - **Tailwind CSS v4** with custom `@theme` tokens
 - **Framer Motion** for entrance / hover / tap / layout animations
@@ -190,7 +201,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 ## Routes
 
 Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, `#/instance`,
-`#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/messages`, `#/conclusions`,
+`#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/messages`, `#/search`, `#/conclusions`,
 `#/reasoning`, `#/context`, `#/chat`, `#/webhooks`, `#/integrations`, `#/config`.
 `#/fleet` is the default landing route.
 
@@ -211,7 +222,7 @@ Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, 
   an "operator DB unavailable" state; everything backed by the SDK still works.
 - **`conclusions` is not a physical table.** Honcho's REST `conclusions`
   resource is stored in the `documents` table; conclusion *type* is the `level`
-  column (`explicit` / `deductive` / `inductive` / `abductive`) and *frequency*
+  column (`explicit` / `deductive` / `inductive` / `contradiction`) and *frequency*
   is `times_derived`. Operator queries probe `documents` (falling back to
   `conclusions`) and adapt to `*_name` vs `*_id` join columns across Honcho
   versions.
@@ -226,6 +237,27 @@ Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, 
   dropped rather than faked. Webhook endpoints are registered by URL only.
 
 ## Changelog
+
+### 1.1.0 — 2026-08-25
+
+**Added**
+
+- Honcho-native hybrid message search across workspace, session, and peer scopes, including relevance / chronological ordering plus UTC date and metadata filters.
+- Session-scoped PDF, JSON, text, and code-file upload with peer attribution and optional message metadata.
+- A fail-closed Playwright capture workflow and refreshed repository screenshots built entirely from synthetic fixtures.
+
+**Changed**
+
+- Upgraded `@honcho-ai/sdk` to 2.3 and aligned the raw conclusion-query adapter with the current Honcho v3 request and response shapes.
+- Session, message, chat, and context pickers request newest-first data. Search keeps Honcho's native hybrid ranking for relevance and applies stable chronological ordering within the returned result window for newest / oldest.
+- The header search field and `Cmd/Ctrl+K` shortcut now open the dedicated native Search screen.
+
+**Fixed**
+
+- Suppressed placeholder values such as `unknown` so the page header never renders `vunknown` when an instance omits its OpenAPI version.
+- Preserved the selected session when **VIEW_MESSAGES** navigates from Sessions to Messages.
+- Made the 52-week activity heatmap render exactly 364 UTC days ending on the current UTC day, eliminating future-looking empty cells.
+- Stopped the Honcho proxy from forwarding undefined, null, or empty query values and prevented negative PostgreSQL row estimates ([#8](https://github.com/outpoints/honcho-dashboard/pull/8)).
 
 ### 1.0.0 — 2026-06-05
 
@@ -273,7 +305,8 @@ live Honcho `v3` instance (no more mock data).
   queue, search, dream scheduling). The thin raw client at
   `site/src/lib/honcho/client.ts` is only used for endpoints the SDK doesn't
   cover (health, `/openapi.json`, workspace create/list/delete, workspace-wide
-  conclusions, webhooks).
+  conclusions, webhooks) or cannot safely route through the selected-instance
+  proxy (multipart session uploads in SDK 2.3).
 - **[Honcho](https://honcho.dev)** — the self-hosted memory server this is
   a dashboard for.
 

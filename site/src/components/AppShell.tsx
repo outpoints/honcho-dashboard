@@ -16,6 +16,7 @@ import { WorkspacesPage } from "@/components/pages/WorkspacesPage";
 import { PeersPage } from "@/components/pages/PeersPage";
 import { SessionsPage } from "@/components/pages/SessionsPage";
 import { MessagesPage } from "@/components/pages/MessagesPage";
+import { SearchPage } from "@/components/pages/SearchPage";
 import { ConclusionsPage } from "@/components/pages/ConclusionsPage";
 import { ReasoningPage } from "@/components/pages/ReasoningPage";
 import { ContextPage } from "@/components/pages/ContextPage";
@@ -37,6 +38,7 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
   peers: PeersPage,
   sessions: SessionsPage,
   messages: MessagesPage,
+  search: SearchPage,
   conclusions: ConclusionsPage,
   reasoning: ReasoningPage,
   context: ContextPage,
@@ -115,7 +117,7 @@ function MobileTopBar({ onMenu }: { onMenu: () => void }) {
         <Image src="/images/honcho-logo.svg" alt="Honcho" width={20} height={20} className="w-5 h-5 object-contain" />
         <div className="leading-tight">
           <div className="text-[11px] font-semibold tracking-wider">HONCHO</div>
-          <div className="text-[8px] text-text-muted tracking-wider">SELF-HOSTED</div>
+          <div className="text-[9px] text-text-muted tracking-wider">SELF-HOSTED</div>
         </div>
       </div>
       <div className="w-8 h-8" />
@@ -158,7 +160,7 @@ function MobileDrawer({
                 {newSection ? (
                   <div
                     className={cn(
-                      "px-3 pb-1 text-[8px] text-text-muted/70 uppercase tracking-[0.18em]",
+                      "px-3 pb-1 text-[9px] text-text-muted/70 uppercase tracking-[0.18em]",
                       i === 0 ? "pt-1" : "pt-3",
                     )}
                   >
