@@ -59,6 +59,7 @@ export function ConclusionsPage() {
         observer_id: c.observerId,
         observed_id: c.observedId,
         session_id: c.sessionId,
+        level: c.level,
         created_at: c.createdAt,
       }));
       return { items: mapped, total: mapped.length, page: 1, size: mapped.length, pages: 1 };

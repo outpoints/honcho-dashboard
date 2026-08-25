@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font-size",
+        "value": "9px",
+        "createdAt": "2026-08-24T21:08:15.433Z",
+        "reason": "Project DESIGN.md and binding DESIGN_GUIDE.md explicitly sanction 9px for chips and terminal chrome."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "createdAt": "2026-08-24T21:08:15.483Z",
+        "reason": "Project DESIGN.md and binding DESIGN_GUIDE.md explicitly sanction 11px as a small UI chrome type step."
+      }
+    ]
+  }
+}

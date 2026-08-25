@@ -11,6 +11,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "peers", label: "PEERS", icon: "users", section: "explore" },
   { key: "sessions", label: "SESSIONS", icon: "git-branch", section: "explore" },
   { key: "messages", label: "MESSAGES", icon: "message-square", section: "explore" },
+  { key: "search", label: "SEARCH", icon: "search", section: "explore" },
   { key: "conclusions", label: "CONCLUSIONS", icon: "sparkles", section: "explore" },
   // The memory pipeline: derive → assemble → query.
   { key: "reasoning", label: "REASONING", icon: "brain", section: "memory" },

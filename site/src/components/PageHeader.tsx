@@ -30,6 +30,14 @@ function useClock() {
   return now;
 }
 
+function normalizeHonchoVersion(raw: string | undefined): string | null {
+  const version = raw?.trim();
+  if (!version || ["unknown", "undefined", "null", "n/a"].includes(version.toLowerCase())) {
+    return null;
+  }
+  return version.replace(/^v(?=\d)/i, "");
+}
+
 export function PageHeader({ title, subtitle, actions, className, showClock = true }: PageHeaderProps) {
   const now = useClock();
   // Real Honcho version from the connected instance (openapi `info.version`),
@@ -38,7 +46,7 @@ export function PageHeader({ title, subtitle, actions, className, showClock = tr
   const versionQuery = useHonchoQuery("openapi-version", (o) => honcho.openapi(o), {
     refreshInterval: 0,
   });
-  const version = versionQuery.data?.info?.version;
+  const version = normalizeHonchoVersion(versionQuery.data?.info?.version);
   return (
     <div className={cn("space-y-2 mb-4", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">

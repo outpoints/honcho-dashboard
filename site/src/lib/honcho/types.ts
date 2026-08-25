@@ -41,12 +41,15 @@ export interface ApiMessage {
   created_at: string;
 }
 
+export type ConclusionLevel = "explicit" | "deductive" | "inductive" | "contradiction";
+
 export interface ApiConclusion {
   id: string;
   content: string;
   observer_id: string;
   observed_id: string;
   session_id?: string | null;
+  level?: ConclusionLevel;
   created_at: string;
 }
 

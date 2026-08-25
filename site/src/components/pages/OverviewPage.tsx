@@ -15,6 +15,7 @@ import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus, toApiSession } from "@/lib/honcho/adapters";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
+import { buildHeatmapDays, HEATMAP_WEEKS } from "@/lib/heatmap";
 import type { ApiQueueStatus, ApiSession } from "@/lib/honcho/types";
 import {
   ThroughputChart,
@@ -545,24 +546,11 @@ function Heatmap({ cells }: { cells: { day: string; n: number }[] }) {
       <div className="text-xs text-text-muted py-4">No data in last 52 weeks.</div>
     );
   const peak = cells.reduce((m, c) => Math.max(m, c.n), 1);
-  const today = new Date();
-  const start = new Date(today.getTime() - 52 * 7 * 86_400_000);
-  const dayMs = 86_400_000;
-  const totalDays = Math.floor((today.getTime() - start.getTime()) / dayMs) + 1;
-  const lookup = new Map(cells.map((c) => [c.day, c.n]));
-
-  const days: { day: string; n: number }[] = [];
-  for (let i = 0; i < totalDays; i++) {
-    const d = new Date(start.getTime() + i * dayMs);
-    const key = d.toISOString().slice(0, 10);
-    days.push({ day: key, n: lookup.get(key) ?? 0 });
-  }
-
-  const weeks = Math.ceil(days.length / 7);
+  const days = buildHeatmapDays(cells);
 
   return (
     <div className="flex gap-0.5 overflow-x-auto pb-1">
-      {Array.from({ length: weeks }).map((_, w) => (
+      {Array.from({ length: HEATMAP_WEEKS }).map((_, w) => (
         <div key={w} className="flex flex-col gap-0.5">
           {Array.from({ length: 7 }).map((_, d) => {
             const idx = w * 7 + d;
