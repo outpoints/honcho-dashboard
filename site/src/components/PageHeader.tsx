@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { honcho } from "@/lib/honcho/client";
-import { useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useHonchoVersion } from "@/lib/honcho/useCapabilities";
 
 export interface PageHeaderProps {
   title: string;
@@ -30,23 +29,12 @@ function useClock() {
   return now;
 }
 
-function normalizeHonchoVersion(raw: string | undefined): string | null {
-  const version = raw?.trim();
-  if (!version || ["unknown", "undefined", "null", "n/a"].includes(version.toLowerCase())) {
-    return null;
-  }
-  return version.replace(/^v(?=\d)/i, "");
-}
-
 export function PageHeader({ title, subtitle, actions, className, showClock = true }: PageHeaderProps) {
   const now = useClock();
   // Real Honcho version from the connected instance (openapi `info.version`),
   // shared/cached across page headers. Falls back to hiding the badge when the
   // instance is unreachable or no version is reported.
-  const versionQuery = useHonchoQuery("openapi-version", (o) => honcho.openapi(o), {
-    refreshInterval: 0,
-  });
-  const version = normalizeHonchoVersion(versionQuery.data?.info?.version);
+  const { version } = useHonchoVersion();
   return (
     <div className={cn("space-y-2 mb-4", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">

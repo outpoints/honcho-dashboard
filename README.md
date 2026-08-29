@@ -41,14 +41,15 @@ Organized into four sections that mirror the sidebar.
 - **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
 - **Sessions** — browse every paginated Honcho session, then search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
 - **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
-- **Search** — Honcho-native hybrid keyword/vector search across workspace, session, or peer scope, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
+- **Scopes** — create named visibility boundaries, add or remove member sessions, and monitor asynchronous backfill/reconciliation state and copied-document counts. Requires Honcho 3.1.0+ and a workspace- or admin-level key.
+- **Search** — Honcho-native hybrid keyword/vector search across a workspace, named scope, session, or peer, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
 - **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions.
 
 **Memory**
 
 - **Reasoning** — the deriver queue that builds peer representations: queued / processing / completed / failed tiles, expandable tasks with parsed and raw payloads, a task-type breakdown, and a config readout; filter by status / type, retry failed tasks, or schedule a dream.
-- **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, and a live preview.
-- **Chat** — memory-augmented dialectic chat: ask a peer about itself over its representation, scoped to an optional session and a chosen reasoning level.
+- **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, a live preview, and optional scope-backed representation/card recall.
+- **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level.
 
 **Setup**
 
@@ -69,7 +70,8 @@ Three layers, each with a single job:
 
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
-   status, dream scheduling, and search use the SDK directly.
+   status, dream scheduling, scopes, scope-aware recall, workspace chat, and search use
+   the SDK directly. The dashboard currently targets SDK 2.4.x.
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
@@ -79,8 +81,10 @@ Three layers, each with a single job:
      get-or-creates on first use, which is the wrong UX for management screens
    - Workspace-wide conclusion `list / query / delete` — SDK organizes
      conclusions by `(observer, observed)` peer pair
-   - Session file upload — SDK 2.3 multipart requests omit the per-instance
+   - Session file upload — SDK 2.4 multipart requests omit the per-instance
      proxy header, so the raw transport preserves the selected upstream safely
+   - One read-only scope-list compatibility probe — deliberately bypasses the
+     SDK's workspace get-or-create behavior when version metadata is unavailable
    - Webhook `list / create / delete / test` — no SDK methods
 
 3. **Operator modules — for self-hosted runtime, db, config, logs, diagnostics.**
@@ -104,7 +108,7 @@ Three layers, each with a single job:
 The browser never talks to Honcho directly — every Honcho call goes through the same-origin
 proxy at `/api/honcho/[...path]` so there is no CORS dance and so the proxy can enforce a
 **server-side allowlist** of upstream Honcho URLs (`HONCHO_PROXY_ALLOWED_BASES`). This applies
-to both the SDK and the raw client; the SDK is configured with `baseURL = window.location.origin + "/api/honcho"`.
+to both the SDK and the raw client; SDK `/v3/*` requests are rewritten to the same proxy.
 
 ## Quick start (local dev)
 
@@ -191,7 +195,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 ## Stack
 
 - **Next.js 16** (App Router, React 19, TypeScript strict, standalone output)
-- **`@honcho-ai/sdk`** v2.3 for native Honcho data flows
+- **`@honcho-ai/sdk`** v2.4 for native Honcho data flows
 - **`pg`** for the read-only operator DB connection
 - **Tailwind CSS v4** with custom `@theme` tokens
 - **Framer Motion** for entrance / hover / tap / layout animations
@@ -201,9 +205,28 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 ## Routes
 
 Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, `#/instance`,
-`#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/messages`, `#/search`, `#/conclusions`,
+`#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/scopes`, `#/messages`, `#/search`, `#/conclusions`,
 `#/reasoning`, `#/context`, `#/chat`, `#/webhooks`, `#/integrations`, `#/config`.
 `#/fleet` is the default landing route.
+
+## Honcho version compatibility
+
+The dashboard preserves its established workspace, peer, session, message,
+conclusion, search, peer-chat, and unscoped-context flows on Honcho 3.0.x.
+Features introduced by Honcho 3.1 are capability-gated:
+
+- Dashboard 1.1.1 uses `@honcho-ai/sdk` 2.4.0 and has been exercised end to
+  end against a live self-hosted Honcho 3.1.0 instance, including search, chat,
+  context assembly, scope membership, and scope backfill/reconciliation.
+- A parseable `/openapi.json` version is authoritative. Known pre-3.1 servers
+  receive no scope or workspace-chat requests; those controls show a clear
+  `Requires Honcho 3.1+` state instead.
+- If an instance omits or customizes its version metadata, the dashboard makes
+  one read-only scope-list probe for the active workspace. `404` / `405` means
+  unsupported, while `401` / `403` means the server supports scopes but the
+  active key needs workspace- or admin-level access.
+- Network failures and other ambiguous responses fail conservatively: 3.1-only
+  controls remain disabled without affecting older dashboard workflows.
 
 ## Known quirks
 
@@ -237,6 +260,28 @@ Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, 
   dropped rather than faked. Webhook endpoints are registered by URL only.
 
 ## Changelog
+
+### 1.1.1 — 2026-08-28
+
+**Added**
+
+- Honcho 3.1 scope management with paginated session membership, asynchronous backfill status, and safe add/remove controls.
+- Named-scope search, scope-aware context inspection, and peer/workspace chat with mutually exclusive session or scope recall boundaries.
+- Workspace-wide chat for cross-peer questions and synthesis.
+
+**Changed**
+
+- Upgraded `@honcho-ai/sdk` to 2.4.0 and migrated scopes, scoped search/context, peer scope recall, and workspace chat from raw routes to the SDK's native APIs.
+- Added shared Honcho capability detection so known pre-3.1 servers never receive scope or workspace-chat requests; upgrade, permission, and unknown-version states now preserve all established workflows with explicit guidance.
+
+**Compatibility**
+
+- Scope management, named-scope recall, and workspace-wide chat require Honcho 3.1.0+; established browsing, peer chat, search, and unscoped context workflows remain available on older servers.
+- Creating scopes or changing their session membership requires a workspace- or admin-level key and the dashboard's write-actions toggle.
+
+**Known limitation**
+
+- Honcho does not currently expose an API for deleting an entire scope. The dashboard can create scopes and add or remove all member sessions, but an obsolete empty scope cannot yet be removed.
 
 ### 1.1.0 — 2026-08-25
 
@@ -296,18 +341,20 @@ live Honcho `v3` instance (no more mock data).
 
 ## Credits
 
-- **Original dashboard design** by **nodaylight** (Discord) — the visual
-  language, layout, and component aesthetic this project rebuilds against the
-  live Honcho API are based on the demo at
-  <https://honcho-dashboard-gamma.vercel.app/>.
+- **Design inspiration** — the dashboard's initial visual direction was
+  inspired by **nodaylight's** Honcho dashboard demo at
+  <https://honcho-dashboard-gamma.vercel.app/>. This repository is an
+  independent implementation that has since expanded with its own architecture,
+  operator tooling, and feature set.
 - **[`@honcho-ai/sdk`](https://www.npmjs.com/package/@honcho-ai/sdk)** — the
   official TypeScript SDK from the Honcho team powers every native data flow
-  in this dashboard (workspaces, peers, sessions, messages, contexts, chat,
-  queue, search, dream scheduling). The thin raw client at
+  in this dashboard (workspaces, peers, sessions, scopes, messages, contexts,
+  chat, queue, search, and dream scheduling). The thin raw client at
   `site/src/lib/honcho/client.ts` is only used for endpoints the SDK doesn't
   cover (health, `/openapi.json`, workspace create/list/delete, workspace-wide
-  conclusions, webhooks) or cannot safely route through the selected-instance
-  proxy (multipart session uploads in SDK 2.3).
+  conclusions, webhooks, and the side-effect-free compatibility probe) or
+  cannot safely route through the selected-instance proxy (multipart session
+  uploads in SDK 2.4).
 - **[Honcho](https://honcho.dev)** — the self-hosted memory server this is
   a dashboard for.
 

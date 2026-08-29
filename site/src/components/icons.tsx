@@ -51,6 +51,7 @@ import {
   Sun,
   Moon,
   Monitor,
+  Focus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -107,6 +108,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   sun: Sun,
   moon: Moon,
   monitor: Monitor,
+  focus: Focus,
 };
 
 export interface IconProps {

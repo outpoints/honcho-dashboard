@@ -11,6 +11,8 @@
  *     (conclusions: SDK scopes per (observer, observed) — we want workspace-wide).
  *   - or cannot carry the dashboard's per-instance proxy headers
  *     (the SDK's multipart file-upload transport omits default headers).
+ *   - or must probe an optional API without the SDK's get-or-create workspace
+ *     side effect (the pre-3.1 compatibility check).
  *
  * If a new endpoint can be reached through the SDK, prefer that over adding here.
  */
@@ -18,10 +20,11 @@ import {
   HonchoApiError,
   type ApiConclusion,
   type ApiMessage,
+  type ApiScope,
   type ApiWebhookEndpoint,
   type ApiWorkspace,
   type Page,
-} from "./types";
+} from "./types.ts";
 
 export interface HonchoClientOptions {
   baseUrl: string;
@@ -236,8 +239,22 @@ export const honcho = {
     },
   },
 
+  compatibility: {
+    /**
+     * Probe the smallest scopes response without invoking the SDK's workspace
+     * get-or-create behavior. Used only when OpenAPI has no comparable version.
+     */
+    probeScopes(opts: HonchoClientOptions, workspaceId: string) {
+      return request<Page<ApiScope>>(
+        opts,
+        "POST",
+        `${ws(workspaceId)}/scopes/list?page=1&size=1`,
+      );
+    },
+  },
+
   /**
-   * Integration gap: SDK 2.3 multipart uploads omit `defaultHeaders`, so they
+   * Integration gap: SDK multipart uploads omit `defaultHeaders`, so they
    * cannot identify the selected upstream through our multi-instance proxy.
    */
   sessionFiles: {

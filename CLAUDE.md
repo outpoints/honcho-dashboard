@@ -2,7 +2,7 @@
 
 ## North star
 
-A fast, privacy-first **operator dashboard for a self-hosted [Honcho](https://honcho.dev) memory server**, built with Next.js. Browse workspaces / peers / sessions / messages / conclusions, watch the reasoning (deriver) queue across the whole fleet, and chat with peers using their memory as context.
+A fast, privacy-first **operator dashboard for a self-hosted [Honcho](https://honcho.dev) memory server**, built with Next.js. Browse workspaces / peers / sessions / scopes / messages / conclusions, watch the reasoning (deriver) queue across the whole fleet, and chat with peers or the whole workspace using memory as context.
 
 Every page talks to a real Honcho `v3` API. The product is mature: beyond a basic memory browser, it leans into operator and observability surfaces — Fleet, Reasoning internals, Instance/DB stats, Diagnostics, and throughput/heatmaps. The work now is **polish, craft, and divergent features**.
 
@@ -52,8 +52,11 @@ To cut a release:
 
 1. Bump `site/package.json` `version` and add a matching `## Changelog` entry in the
    README — in the **same commit** as the work being released.
-2. Run `npm run check` and commit.
-3. After the commit is on `main`, tag it `vX.Y.Z` (strict semver, leading `v`) and push
+2. Add `.github/release-notes/vX.Y.Z.md` with **What changed**, **Compatibility**,
+   **Upgrade**, and any applicable **Known limitation** section. The release workflow
+   publishes this file verbatim after the container image succeeds.
+3. Run `npm run check` and commit.
+4. After the commit is on `main`, tag it `vX.Y.Z` (strict semver, leading `v`) and push
    the tag. The GHCR workflow (`.github/workflows/docker-release.yml`) builds and
    publishes the multi-arch Docker image on that tag — so **only tag once the release
    commit is merged**, and never reuse or move a published tag.
@@ -71,14 +74,26 @@ Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpo
 - `POST /v3/workspaces/{id}/schedule_dream` · `POST /v3/workspaces/{id}/search`
 - `POST /v3/workspaces/{id}/peers/list` · `POST /v3/workspaces/{id}/peers`
 - `POST /v3/workspaces/{id}/sessions/list` (+ messages, summaries, context)
+- `POST /v3/workspaces/{id}/scopes` · `POST /scopes/list` · membership `add / list / remove` · `GET /status` (Honcho 3.1+)
 - `POST /v3/workspaces/{id}/sessions/{session_id}/messages/upload` (multipart file upload)
 - `POST /v3/workspaces/{id}/conclusions/list` · `POST /v3/workspaces/{id}/conclusions/query` (semantic search)
-- `POST /v3/workspaces/{id}/chat` (memory-augmented chat — peer is the implicit observer)
+- `POST /v3/workspaces/{id}/chat` (Honcho 3.1 workspace-wide memory chat)
+- `POST /v3/workspaces/{id}/peers/{peer_id}/chat` (peer dialectic; accepts a named scope on Honcho 3.1+)
 - `POST /v3/workspaces/{id}/webhooks`
 
 Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_USE_AUTH=false`).
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
+
+Use `@honcho-ai/sdk` 2.4+ for scopes, scope-aware search/context, peer scope
+recall, and workspace chat. The raw scope-list call is reserved for the
+side-effect-free compatibility probe; do not reintroduce raw 3.1 feature paths.
+
+Honcho 3.1-only UI must use `useHonchoCapabilities()` from
+`src/lib/honcho/useCapabilities.ts`. A known pre-3.1 server must not receive
+scope or workspace-chat requests. Keep upgrade (`404` / `405`), restricted-key
+(`401` / `403`), and unknown-version states distinct, and preserve the existing
+unscoped workflow in every case.
 
 Repository screenshots must contain synthetic data only. Follow `docs/SCREENSHOTS.md`
 before replacing any image referenced by the README.

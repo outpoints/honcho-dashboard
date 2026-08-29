@@ -15,6 +15,7 @@ import { FleetPage } from "@/components/pages/FleetPage";
 import { WorkspacesPage } from "@/components/pages/WorkspacesPage";
 import { PeersPage } from "@/components/pages/PeersPage";
 import { SessionsPage } from "@/components/pages/SessionsPage";
+import { ScopesPage } from "@/components/pages/ScopesPage";
 import { MessagesPage } from "@/components/pages/MessagesPage";
 import { SearchPage } from "@/components/pages/SearchPage";
 import { ConclusionsPage } from "@/components/pages/ConclusionsPage";
@@ -37,6 +38,7 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
   workspaces: WorkspacesPage,
   peers: PeersPage,
   sessions: SessionsPage,
+  scopes: ScopesPage,
   messages: MessagesPage,
   search: SearchPage,
   conclusions: ConclusionsPage,

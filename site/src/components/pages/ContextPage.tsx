@@ -1,8 +1,10 @@
 "use client";
 
+import type { Scope } from "@honcho-ai/sdk";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
+import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Field } from "@/components/atoms";
@@ -10,8 +12,14 @@ import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import {
+  isHonchoPermissionError,
+  useHonchoCapabilities,
+} from "@/lib/honcho/useCapabilities";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { getSdk } from "@/lib/honcho/sdk";
+import { listAllScopes, listAllScopeSessions } from "@/lib/honcho/scopeListing";
+import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiPeer, toApiPeerContext, toApiSession, toApiSessionContext } from "@/lib/honcho/adapters";
 import type { ApiPeer, ApiSession, ApiMessage } from "@/lib/honcho/types";
 import { cn } from "@/lib/utils";
@@ -65,9 +73,12 @@ export function ContextPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
+  const capabilities = useHonchoCapabilities();
+  const scopesAvailable = capabilities.scopes === "available";
 
   const [sessionId, setSessionId] = useState<string>("");
   const [peerId, setPeerId] = useState<string>("");
+  const [scopeId, setScopeId] = useState<string>("");
   const [tokenLimit, setTokenLimit] = useState(4000);
   const [layers, setLayers] = useState<Layer[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,8 +101,32 @@ export function ContextPage() {
   );
   const sessions = useHonchoQuery<{ items: ApiSession[] }>(
     workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list?ctx` : null,
-    async (o) => ({ items: (await getSdk(o, workspaceId!).sessions({ size: 100, reverse: true })).items.map(toApiSession) }),
+    async (o) => ({ items: (await listAllSessions(getSdk(o, workspaceId!))).map(toApiSession) }),
   );
+  const scopes = useHonchoQuery<Scope[]>(
+    workspaceId && scopesAvailable ? `workspaces/${workspaceId}/scopes/list?ctx` : null,
+    (o) => listAllScopes(getSdk(o, workspaceId!)),
+  );
+  useEffect(() => {
+    if (!scopesAvailable && scopeId) {
+      setScopeId("");
+      setLayers(null);
+      setError(null);
+    }
+  }, [scopeId, scopesAvailable]);
+  const activeScope = (scopes.data ?? []).find((scope) => scope.id === scopeId);
+  const effectiveScopeId = activeScope?.id ?? "";
+  const scopeSessions = useHonchoQuery<ApiSession[]>(
+    workspaceId && scopesAvailable && activeScope
+      ? `workspaces/${workspaceId}/scopes/${effectiveScopeId}/sessions?ctx`
+      : null,
+    async () => (await listAllScopeSessions(activeScope!)).map(toApiSession),
+  );
+
+  const visibleSessions = effectiveScopeId ? scopeSessions.data ?? [] : sessions.data?.items ?? [];
+  const effectiveSessionId = visibleSessions.some((session) => session.id === sessionId)
+    ? sessionId
+    : "";
 
   const total = useMemo(
     () => (layers ?? []).filter((l) => l.enabled).reduce((s, l) => s + l.tokens, 0),
@@ -101,7 +136,11 @@ export function ContextPage() {
 
   const generate = async () => {
     if (!apiOpts || !workspaceId) return;
-    if (!sessionId && !peerId) {
+    if (effectiveScopeId && (!effectiveSessionId || !peerId)) {
+      push({ type: "error", message: "Scoped context needs both a member session and a peer" });
+      return;
+    }
+    if (!effectiveSessionId && !peerId) {
       push({ type: "error", message: "Pick a session and/or a peer first" });
       return;
     }
@@ -115,13 +154,16 @@ export function ContextPage() {
       let summaryTokens = 0;
       let messages: ApiMessage[] = [];
 
-      if (sessionId) {
-        const ses = await sdk.session(sessionId);
+      if (effectiveSessionId) {
         const ctx = toApiSessionContext(
-          await ses.context({
+          await (await sdk.session(effectiveSessionId)).context({
             summary: true,
             tokens: tokenLimit,
-            ...(peerId ? { peerTarget: peerId, peerPerspective: peerId } : {}),
+            ...(effectiveScopeId
+              ? { peerTarget: peerId, scope: effectiveScopeId }
+              : peerId
+                ? { peerTarget: peerId, peerPerspective: peerId }
+                : {}),
           }),
         );
         peerCard = ctx.peer_card ?? [];
@@ -195,12 +237,23 @@ export function ContextPage() {
 
   const sessionOptions = [
     { value: "", label: "— none —" },
-    ...(sessions.data?.items ?? []).map((s) => ({ value: s.id, label: s.id })),
+    ...visibleSessions.map((s) => ({ value: s.id, label: s.id })),
   ];
   const peerOptions = [
     { value: "", label: "— none —" },
     ...(peers.data?.items ?? []).map((p) => ({ value: p.id, label: p.id })),
   ];
+  const scopeOptions = [
+    { value: "", label: "— global representation —" },
+    ...(scopes.data ?? []).map((scope) => ({ value: scope.id, label: scope.id })),
+  ];
+
+  const canGenerate =
+    !!workspaceId &&
+    !busy &&
+    (effectiveScopeId
+      ? !!effectiveSessionId && !!peerId && !scopeSessions.isLoading && !scopeSessions.error
+      : !!effectiveSessionId || !!peerId);
 
   const previewLayers = (layers ?? []).filter((l) => l.enabled && l.text.trim());
 
@@ -220,14 +273,39 @@ export function ContextPage() {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
+        <Field label="SCOPE" hint="Optional visibility boundary for the representation.">
+          <Select
+            value={effectiveScopeId}
+            onChange={(next) => {
+              setScopeId(next);
+              setLayers(null);
+              setError(null);
+            }}
+            options={scopeOptions}
+            disabled={!workspaceId || !scopesAvailable || scopes.isLoading || !!scopes.error}
+            placeholder={
+              !scopesAvailable
+                ? "Honcho 3.1+ required"
+                : scopes.error
+                  ? "scopes unavailable"
+                  : "— global representation —"
+            }
+          />
+        </Field>
         <Field label="SESSION">
           <Select
-            value={sessionId}
+            value={effectiveSessionId}
             onChange={setSessionId}
             options={sessionOptions}
-            disabled={!workspaceId}
-            placeholder="select a session…"
+            disabled={!workspaceId || (effectiveScopeId ? scopeSessions.isLoading || !!scopeSessions.error : false)}
+            placeholder={
+              effectiveScopeId && scopeSessions.isLoading
+                ? "loading scope members…"
+                : effectiveScopeId
+                  ? "select a member session…"
+                  : "select a session…"
+            }
           />
         </Field>
         <Field label="PEER">
@@ -255,11 +333,40 @@ export function ContextPage() {
           icon="sparkles"
           className="self-end"
           onClick={generate}
-          disabled={busy || !workspaceId || (!sessionId && !peerId)}
+          disabled={!canGenerate}
         >
           {busy ? "GENERATING…" : "GENERATE_CONTEXT"}
         </Button>
       </div>
+
+      {!scopesAvailable ? (
+        <Honcho31Notice
+          state={capabilities.scopes}
+          version={capabilities.version}
+          feature="scope-aware context"
+          fallback="Session and peer context generation remain available."
+        />
+      ) : isHonchoPermissionError(scopes.error) ? (
+        <Honcho31Notice
+          state="restricted"
+          version={capabilities.version}
+          feature="scope-aware context"
+          fallback="Session and peer context generation remain available."
+        />
+      ) : effectiveScopeId ? (
+        <div className="flex items-start gap-2 text-[10px] text-text-muted">
+          <Icon name="focus" size={11} className="mt-px text-accent" />
+          <span>
+            Context uses <span className="text-accent">scope:{effectiveScopeId}</span> as the perspective
+            source. The selected peer&apos;s representation and card are restricted to what this
+            scope observed; the session&apos;s messages and summary remain visible.
+          </span>
+        </div>
+      ) : scopes.error ? (
+        <div className="text-[10px] text-text-muted">
+          Scope context requires Honcho 3.1.0+ and a workspace- or admin-level key.
+        </div>
+      ) : null}
 
       {error ? (
         <Panel title="ERROR" status="processing">
@@ -286,7 +393,9 @@ export function ContextPage() {
               </div>
             ) : !layers ? (
               <div className="text-[11px] text-text-muted py-6 text-center">
-                Select a session and/or peer, then GENERATE_CONTEXT to assemble the layers.
+                {effectiveScopeId
+                  ? "Select a member session and peer, then GENERATE_CONTEXT to inspect scoped recall."
+                  : "Select a session and/or peer, then GENERATE_CONTEXT to assemble the layers."}
               </div>
             ) : (
               <>
@@ -400,7 +509,9 @@ export function ContextPage() {
                 <Icon name="eye" className="text-text-muted" size={28} />
                 <p className="text-sm text-text-muted">No context generated yet</p>
                 <p className="text-[10px] text-text-muted">
-                  Select session &amp; peer, then click GENERATE_CONTEXT
+                  {effectiveScopeId
+                    ? "Select a member session and peer, then generate scoped context"
+                    : "Select session & peer, then click GENERATE_CONTEXT"}
                 </p>
               </motion.div>
             ) : (

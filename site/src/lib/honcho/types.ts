@@ -30,6 +30,12 @@ export interface ApiSession {
   created_at: string;
 }
 
+export interface ApiScope {
+  id: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ApiMessage {
   id: string;
   workspace_id: string;
@@ -117,17 +123,24 @@ export interface ChatBody {
 }
 
 export interface ChatResponse {
-  content: string;
+  content: string | null;
 }
 
 export class HonchoApiError extends Error {
+  public readonly status: number;
+  public readonly url: string;
+  public readonly body?: unknown;
+
   constructor(
-    public readonly status: number,
-    public readonly url: string,
+    status: number,
+    url: string,
     message: string,
-    public readonly body?: unknown,
+    body?: unknown,
   ) {
     super(message);
+    this.status = status;
+    this.url = url;
+    this.body = body;
     this.name = "HonchoApiError";
   }
 }

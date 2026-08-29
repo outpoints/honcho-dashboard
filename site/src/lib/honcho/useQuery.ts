@@ -32,8 +32,13 @@ function getEntry<T>(key: string): CacheEntry<T> {
 }
 
 export function invalidate(prefix: string): void {
-  for (const [key, entry] of cache) {
-    if (key.startsWith(prefix)) {
+  for (const [cacheKey, entry] of cache) {
+    // Cache keys include the active base URL and token before the logical query
+    // key. Match against the logical portion so mutations invalidate every
+    // consumer of a resource, regardless of which connection is active.
+    const separator = cacheKey.lastIndexOf("::");
+    const queryKey = separator >= 0 ? cacheKey.slice(separator + 2) : cacheKey;
+    if (queryKey.startsWith(prefix)) {
       entry.data = undefined;
       entry.error = undefined;
       for (const sub of entry.subscribers) sub();

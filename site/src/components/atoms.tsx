@@ -251,7 +251,7 @@ export function PillTabs<T extends string>({
   className,
   layoutId = "pill-tab",
 }: {
-  items: { key: T; label: string; icon?: IconName }[];
+  items: { key: T; label: string; icon?: IconName; disabled?: boolean; title?: string }[];
   current: T;
   onChange: (key: T) => void;
   className?: string;
@@ -264,9 +264,12 @@ export function PillTabs<T extends string>({
         return (
           <button
             key={item.key}
+            type="button"
+            disabled={item.disabled}
+            title={item.title}
             onClick={() => onChange(item.key)}
             className={cn(
-              "relative flex items-center gap-2 px-3 py-1.5 transition-colors text-[10px] uppercase tracking-wider",
+              "relative flex items-center gap-2 px-3 py-1.5 transition-colors text-[10px] uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed",
               active ? "text-void" : "text-text-muted hover:text-text-primary",
             )}
           >

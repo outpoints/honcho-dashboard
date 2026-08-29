@@ -4,6 +4,7 @@ export type RouteKey =
   | "workspaces"
   | "peers"
   | "sessions"
+  | "scopes"
   | "messages"
   | "search"
   | "conclusions"

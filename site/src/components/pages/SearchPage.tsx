@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { Scope } from "@honcho-ai/sdk";
+import { useEffect, useMemo, useState } from "react";
+import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
@@ -8,14 +10,20 @@ import { Button, Chip, Field, PillTabs, TextInput } from "@/components/atoms";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import {
+  isHonchoPermissionError,
+  useHonchoCapabilities,
+} from "@/lib/honcho/useCapabilities";
 import { getSdk } from "@/lib/honcho/sdk";
+import { listAllScopes } from "@/lib/honcho/scopeListing";
+import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiMessage, toApiPeer, toApiSession } from "@/lib/honcho/adapters";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { buildSearchFilters } from "@/lib/honcho/searchFilters";
 import { orderSearchResults, type SearchOrder } from "@/lib/honcho/searchOrdering";
 import type { ApiMessage, ApiPeer, ApiSession } from "@/lib/honcho/types";
 
-type SearchScope = "workspace" | "session" | "peer";
+type SearchScope = "workspace" | "scope" | "session" | "peer";
 
 interface SearchRun {
   workspaceId: string;
@@ -35,6 +43,8 @@ const ORDER_OPTIONS: { value: SearchOrder; label: string }[] = [
 export function SearchPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
+  const capabilities = useHonchoCapabilities();
+  const scopesAvailable = capabilities.scopes === "available";
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<SearchScope>("workspace");
   const [targetId, setTargetId] = useState("");
@@ -57,9 +67,23 @@ export function SearchPage() {
   const sessions = useHonchoQuery<{ items: ApiSession[] }>(
     workspaceId ? `sdk/workspaces/${workspaceId}/sessions/list?native-search` : null,
     async (o) => ({
-      items: (await getSdk(o, workspaceId!).sessions({ size: 100 })).items.map(toApiSession),
+      items: (await listAllSessions(getSdk(o, workspaceId!))).map(toApiSession),
     }),
   );
+  const scopes = useHonchoQuery<Scope[]>(
+    workspaceId && scopesAvailable
+      ? `workspaces/${workspaceId}/scopes/list?native-search`
+      : null,
+    (o) => listAllScopes(getSdk(o, workspaceId!)),
+  );
+
+  useEffect(() => {
+    if (scope !== "scope" || scopesAvailable) return;
+    setScope("workspace");
+    setTargetId("");
+    setError(null);
+    setRun(null);
+  }, [scope, scopesAvailable]);
 
   const targetOptions = useMemo(() => {
     if (scope === "peer") {
@@ -68,8 +92,11 @@ export function SearchPage() {
     if (scope === "session") {
       return (sessions.data?.items ?? []).map((session) => ({ value: session.id, label: session.id }));
     }
+    if (scope === "scope") {
+      return (scopes.data ?? []).map((item) => ({ value: item.id, label: item.id }));
+    }
     return [];
-  }, [peers.data?.items, scope, sessions.data?.items]);
+  }, [peers.data?.items, scope, scopes.data, sessions.data?.items]);
 
   const effectiveTarget = targetOptions.some((option) => option.value === targetId) ? targetId : "";
   const targetRequired = scope !== "workspace";
@@ -89,7 +116,13 @@ export function SearchPage() {
 
   const search = async () => {
     const searchQuery = query.trim();
-    if (!apiOpts || !workspaceId || !searchQuery || (targetRequired && !effectiveTarget)) return;
+    if (
+      !apiOpts ||
+      !workspaceId ||
+      !searchQuery ||
+      (targetRequired && !effectiveTarget) ||
+      (scope === "scope" && !scopesAvailable)
+    ) return;
 
     const built = buildSearchFilters({ fromDate, toDate, metadataJson });
     if (!built.ok) {
@@ -104,18 +137,21 @@ export function SearchPage() {
       const sdk = getSdk(apiOpts, workspaceId);
       const options = { filters: built.filters, limit: Number(limit) };
       const found =
-        scope === "session"
-          ? await (await sdk.session(effectiveTarget)).search(searchQuery, options)
-          : scope === "peer"
-            ? await (await sdk.peer(effectiveTarget)).search(searchQuery, options)
-            : await sdk.search(searchQuery, options);
+        scope === "scope"
+          ? await sdk.search(searchQuery, { ...options, scope: effectiveTarget })
+          : scope === "session"
+            ? await (await sdk.session(effectiveTarget)).search(searchQuery, options)
+            : scope === "peer"
+              ? await (await sdk.peer(effectiveTarget)).search(searchQuery, options)
+              : await sdk.search(searchQuery, options);
+      const items: ApiMessage[] = found.map(toApiMessage);
 
       setRun({
         workspaceId,
         query: searchQuery,
         scope,
         targetId: effectiveTarget,
-        items: found.map(toApiMessage),
+        items,
       });
     } catch (err) {
       setError(formatApiError(err));
@@ -126,7 +162,12 @@ export function SearchPage() {
   };
 
   const canSearch =
-    !!apiOpts && !!workspaceId && !!query.trim() && (!targetRequired || !!effectiveTarget) && !busy;
+    !!apiOpts &&
+    !!workspaceId &&
+    !!query.trim() &&
+    (!targetRequired || !!effectiveTarget) &&
+    (scope !== "scope" || scopesAvailable) &&
+    !busy;
 
   return (
     <div className="space-y-3">
@@ -165,10 +206,16 @@ export function SearchPage() {
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="SCOPE" className="min-w-[280px]">
+            <Field label="SEARCH_AREA" className="w-full sm:w-auto sm:min-w-[360px]">
               <PillTabs<SearchScope>
                 items={[
                   { key: "workspace", label: "WORKSPACE" },
+                  {
+                    key: "scope",
+                    label: scopesAvailable ? "SCOPE" : "SCOPE · 3.1+",
+                    disabled: !scopesAvailable,
+                    title: scopesAvailable ? undefined : "Requires Honcho 3.1.0 or newer",
+                  },
                   { key: "session", label: "SESSION" },
                   { key: "peer", label: "PEER" },
                 ]}
@@ -179,7 +226,10 @@ export function SearchPage() {
             </Field>
 
             {targetRequired ? (
-              <Field label={scope === "session" ? "SESSION" : "PEER"} className="min-w-[220px] flex-1">
+              <Field
+                label={scope === "session" ? "SESSION" : scope === "scope" ? "SCOPE" : "PEER"}
+                className="min-w-[220px] flex-1"
+              >
                 <Select
                   value={effectiveTarget}
                   onChange={setTargetId}
@@ -189,11 +239,25 @@ export function SearchPage() {
                       ? sessions.isLoading
                         ? "loading sessions…"
                         : "select a session…"
+                      : scope === "scope"
+                        ? scopes.isLoading
+                          ? "loading scopes…"
+                          : scopes.error
+                            ? "scopes unavailable"
+                            : "select a scope…"
                       : peers.isLoading
                         ? "loading peers…"
                         : "select a peer…"
                   }
-                  disabled={!workspaceId || busy || (scope === "session" ? sessions.isLoading : peers.isLoading)}
+                  disabled={
+                    !workspaceId ||
+                    busy ||
+                    (scope === "session"
+                      ? sessions.isLoading
+                      : scope === "scope"
+                        ? scopes.isLoading || !!scopes.error
+                        : peers.isLoading)
+                  }
                 />
               </Field>
             ) : null}
@@ -250,6 +314,25 @@ export function SearchPage() {
               Honcho relevance blends full-text and semantic rankings. Date order is applied after Honcho returns the selected maximum; new messages may take a few seconds to enter semantic results.
             </span>
           </div>
+          {!scopesAvailable ? (
+            <Honcho31Notice
+              state={capabilities.scopes}
+              version={capabilities.version}
+              feature="scope-aware search"
+              fallback="Workspace, session, and peer search remain available."
+            />
+          ) : scope === "scope" && isHonchoPermissionError(scopes.error) ? (
+            <Honcho31Notice
+              state="restricted"
+              version={capabilities.version}
+              feature="scope-aware search"
+              fallback="Workspace, session, and peer search remain available."
+            />
+          ) : scope === "scope" && scopes.error ? (
+            <div className="text-[10px] text-red-400">
+              Scope search needs Honcho 3.1.0+ and a workspace- or admin-level key: {formatApiError(scopes.error)}
+            </div>
+          ) : null}
         </form>
       </Panel>
 

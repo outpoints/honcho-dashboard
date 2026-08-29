@@ -10,6 +10,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "workspaces", label: "WORKSPACES", icon: "layers", section: "explore" },
   { key: "peers", label: "PEERS", icon: "users", section: "explore" },
   { key: "sessions", label: "SESSIONS", icon: "git-branch", section: "explore" },
+  { key: "scopes", label: "SCOPES", icon: "focus", section: "explore" },
   { key: "messages", label: "MESSAGES", icon: "message-square", section: "explore" },
   { key: "search", label: "SEARCH", icon: "search", section: "explore" },
   { key: "conclusions", label: "CONCLUSIONS", icon: "sparkles", section: "explore" },
