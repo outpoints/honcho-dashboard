@@ -1,31 +1,87 @@
-# Publish container image to GitHub Container Registry on release tags.
+# Publish a multi-platform container image to GitHub Container Registry.
 #
-# Uses the project Dockerfile in site/Dockerfile for the image context.
-# Multi-arch: linux/amd64 + linux/arm64
-# Auth: ghcr.io via GITHUB_TOKEN
+# Each architecture builds on a native GitHub-hosted runner. The manifest job
+# combines the immutable per-platform digests into the public release tags.
 name: Docker Release
 
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing immutable release tag to rebuild
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      version: ${{ steps.release.outputs.version }}
+      major_minor: ${{ steps.release.outputs.major_minor }}
+      tag_commit: ${{ steps.release.outputs.tag_commit }}
+    steps:
+      - name: Checkout repository metadata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          release_tag="$REQUESTED_TAG"
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+
+          if ! git rev-parse --verify --quiet "refs/tags/${release_tag}^{commit}" >/dev/null; then
+            echo "Release tag ${release_tag} does not exist" >&2
+            exit 1
+          fi
+
+          version="${release_tag#v}"
+          major_minor="${version%.*}"
+          tag_commit="$(git rev-list -n 1 "$release_tag")"
+
+          {
+            echo "release_tag=$release_tag"
+            echo "version=$version"
+            echo "major_minor=$major_minor"
+            echo "tag_commit=$tag_commit"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            artifact: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            artifact: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write
-      attestations: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout immutable release tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release_tag }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -36,35 +92,108 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64, linux/arm64
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      - name: Build and push Docker image
-        id: push
+      - name: Build and push ${{ matrix.platform }} image by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./site
           file: ./site/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64, linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.tag_commit }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-${{ matrix.artifact }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.artifact }}
+
+      - name: Export image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="${IMAGE_DIGEST#sha256:}"
+          if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Build did not return a valid image digest" >&2
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/$digest"
+
+      - name: Upload image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Publish multi-platform manifest
+        id: manifest
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          MAJOR_MINOR: ${{ needs.prepare.outputs.major_minor }}
+        run: |
+          image="${REGISTRY}/${IMAGE_NAME}"
+          mapfile -t digests < <(find "$RUNNER_TEMP/digests" -maxdepth 1 -type f -exec basename {} \; | sort)
+          if [[ "${#digests[@]}" -ne 2 ]]; then
+            echo "Expected two platform digests, found ${#digests[@]}" >&2
+            exit 1
+          fi
+
+          sources=()
+          for digest in "${digests[@]}"; do
+            if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "Invalid platform digest: $digest" >&2
+              exit 1
+            fi
+            sources+=("${image}@sha256:${digest}")
+          done
+
+          docker buildx imagetools create \
+            --tag "${image}:${VERSION}" \
+            --tag "${image}:${MAJOR_MINOR}" \
+            --tag "${image}:latest" \
+            "${sources[@]}"
+
+          docker buildx imagetools inspect "${image}:${VERSION}"
+          manifest_digest="$(docker buildx imagetools inspect "${image}:${VERSION}" | awk '$1 == "Digest:" { print $2; exit }')"
+          if [[ ! "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Published manifest did not return a valid digest" >&2
+            exit 1
+          fi
+          echo "digest=$manifest_digest" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true

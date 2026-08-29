@@ -58,8 +58,11 @@ To cut a release:
 3. Run `npm run check` and commit.
 4. After the commit is on `main`, tag it `vX.Y.Z` (strict semver, leading `v`) and push
    the tag. The GHCR workflow (`.github/workflows/docker-release.yml`) builds and
-   publishes the multi-arch Docker image on that tag — so **only tag once the release
-   commit is merged**, and never reuse or move a published tag.
+   publishes the multi-arch Docker image on native AMD64 and ARM64 runners, then
+   assembles the release manifest — so **only tag once the release commit is merged**,
+   and never reuse or move a published tag. If infrastructure interrupts a build,
+   manually dispatch the same workflow with the existing immutable tag; it checks out
+   that tag rather than rebuilding from the current branch.
 
 `1.0.0` is the first stable release. From here, use
 standard semver: patch for fixes, minor for backward-compatible features, major for
