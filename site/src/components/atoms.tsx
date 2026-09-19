@@ -46,6 +46,8 @@ export function Button({
       type={type}
       disabled={disabled}
       aria-label={aria}
+      aria-expanded={rest["aria-expanded"]}
+      aria-controls={rest["aria-controls"]}
       title={title}
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
@@ -357,6 +359,7 @@ export function Checkbox({
   disabled?: boolean;
   className?: string;
 }) {
+  const labelId = React.useId();
   return (
     <label
       className={cn(
@@ -369,6 +372,7 @@ export function Checkbox({
         type="button"
         role="checkbox"
         aria-checked={checked}
+        aria-labelledby={labelId}
         disabled={disabled}
         onClick={() => onChange?.(!checked)}
         className={cn(
@@ -381,7 +385,7 @@ export function Checkbox({
         {checked ? <Icon name="check" size={11} /> : null}
       </button>
       <span className="min-w-0 leading-snug">
-        <span className="text-sm text-text-primary">{label}</span>
+        <span id={labelId} className="text-sm text-text-primary">{label}</span>
         {hint ? (
           <span className="block text-[11px] text-text-muted mt-1 leading-snug">{hint}</span>
         ) : null}

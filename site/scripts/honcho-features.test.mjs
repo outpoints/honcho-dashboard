@@ -139,6 +139,7 @@ test("Honcho 3.1 capability detection protects older servers", () => {
   assert.equal(normalizeHonchoVersion("unknown"), null);
   assert.equal(honcho31FromVersion("3.0.12"), "unsupported");
   assert.equal(honcho31FromVersion("3.1.0"), "available");
+  assert.equal(honcho31FromVersion("3.2.0"), "available");
   assert.equal(honcho31FromVersion("4.0.0-rc.1"), "available");
 
   // A known older version is authoritative: do not probe any 3.1-only route.
@@ -187,7 +188,7 @@ test("Honcho 3.1 capability detection protects older servers", () => {
   );
 });
 
-test("Honcho SDK 2.4 drives scopes and scoped recall through the dashboard proxy", async (t) => {
+test("Honcho SDK drives scopes and scoped recall through the dashboard proxy", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, init = {}) => {
     calls.push({ url: String(url), init });

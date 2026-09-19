@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
+import { DeriverBacklog } from "@/components/DeriverBacklog";
+import { useDeriverMetrics } from "@/lib/honcho/useDeriverMetrics";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
 import { Modal } from "@/components/Modal";
@@ -66,6 +68,7 @@ export function ReasoningPage() {
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
+  const metrics = useDeriverMetrics();
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -245,13 +248,14 @@ export function ReasoningPage() {
         title="REASONING"
         subtitle="background inference tasks that build peer representations"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <RefreshButton
               label="REFRESH"
               onClick={() => {
                 reasoning.refetch();
                 queue.refetch();
                 conclusions.refetch();
+                metrics.refetch();
               }}
             />
             {canWrite ? (
@@ -273,6 +277,8 @@ export function ReasoningPage() {
           </div>
         }
       />
+
+      <DeriverBacklog metrics={metrics} />
 
       {!workspaceId ? (
         <Panel title="NO_WORKSPACE">

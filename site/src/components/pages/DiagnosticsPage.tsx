@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
@@ -9,6 +8,8 @@ import { Button } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
 import { useOperatorQuery } from "@/lib/operator/client";
+import { TraceInspector } from "@/components/TraceInspector";
+import type { TraceResult } from "@/lib/operator/traceRecords";
 
 interface Probe {
   id: string;
@@ -40,15 +41,16 @@ interface ConfigResp {
 
 export function DiagnosticsPage() {
   const apiOpts = useActiveHonchoOptions();
-  const [pollKey, setPollKey] = useState(0);
   const diag = useOperatorQuery<DiagnosticsResp>(
-    `/api/operator/diagnostics?n=${pollKey}`,
+    "/api/operator/diagnostics",
     { withHonchoHeaders: true },
   );
   const logs = useOperatorQuery<LogsResp>("/api/operator/logs?limit=80", {
     refreshInterval: 15000,
   });
   const config = useOperatorQuery<ConfigResp>("/api/operator/config");
+  const traces = useOperatorQuery<TraceResult>("/api/operator/traces");
+  const refreshing = diag.isLoading || logs.isLoading || config.isLoading || traces.isLoading;
 
   const probes = diag.data?.probes ?? [];
   const byCategory = (cat: Probe["category"]) => probes.filter((p) => p.category === cat);
@@ -68,8 +70,8 @@ export function DiagnosticsPage() {
         title="DIAGNOSTICS"
         subtitle="composite probes from operator + honcho"
         actions={
-          <Button onClick={() => setPollKey((n) => n + 1)} disabled={!apiOpts || diag.isLoading}>
-            {diag.isLoading ? "RUNNING…" : "RE_RUN"}
+          <Button onClick={() => { diag.refetch(); logs.refetch(); config.refetch(); traces.refetch(); }} disabled={!apiOpts || refreshing}>
+            {refreshing ? "RUNNING…" : "RE_RUN"}
           </Button>
         }
       />
@@ -127,6 +129,8 @@ export function DiagnosticsPage() {
           )}
         </Panel>
       </div>
+
+      <TraceInspector traces={traces} />
 
       <Panel title="LOGS">
         {!logs.data ? (

@@ -88,9 +88,24 @@ Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
-Use `@honcho-ai/sdk` 2.4+ for scopes, scope-aware search/context, peer scope
+Use `@honcho-ai/sdk` 2.5+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the
 side-effect-free compatibility probe; do not reintroduce raw 3.1 feature paths.
+
+Maintain Honcho 3.1 compatibility alongside Honcho 3.2 support.
+Conclusion attribution (`source_ids`, `times_derived`) is optional on the raw API;
+the SDK supplies null/1 defaults for older servers. Preserve it with
+`toApiConclusion` when mapping SDK search results. `includeEvidence` and single
+conclusion/reasoning-tree APIs require 3.2+; do not enable them unconditionally.
+Use `chatWithEvidence` to normalize the SDK's string/evidence response overloads.
+Evidence is opt-in, tied to its answer, and means accessed records, not citations.
+Use `honcho.messages.get` for evidence text: SDK `session(id)` get-or-creates
+the session and must not be used for this read-only lookup.
+Use `provenance.ts` for one-level, paginated parent/backlink reads; do not recursively
+fetch entire reasoning trees. New features fail closed on unknown server versions.
+`/deriver/metrics` requires 3.1.2+ and reports service-wide, not workspace metrics.
+Trace inspection reads the optional dashboard-host `HONCHO_TRACE_FILE` collector
+export, independent of the selected API instance; preserve its bounded metadata-only projection.
 
 Honcho 3.1-only UI must use `useHonchoCapabilities()` from
 `src/lib/honcho/useCapabilities.ts`. A known pre-3.1 server must not receive

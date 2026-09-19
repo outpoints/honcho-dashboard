@@ -58,6 +58,9 @@ services:
       # via the volumes block below. Enables: log tail panel on Diagnostics.
       HONCHO_LOG_FILE: ${HONCHO_LOG_FILE:-}
 
+      # Collector CloudEvents JSONL export, separate from application logs.
+      HONCHO_TRACE_FILE: ${HONCHO_TRACE_FILE:-}
+
       # ISO-8601 timestamp of when the Honcho process started. When set, the
       # Instance page reports a Honcho uptime alongside the dashboard's own.
       HONCHO_RUNTIME_START_TS: ${HONCHO_RUNTIME_START_TS:-}
@@ -70,6 +73,7 @@ services:
     # log on your host; the right-hand path must match HONCHO_LOG_FILE exactly.
     # volumes:
     #   - /var/log/honcho/honcho.log:/honcho.log:ro
+    #   - /var/log/honcho/traces.jsonl:/honcho-traces.jsonl:ro
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/operator/runtime"]

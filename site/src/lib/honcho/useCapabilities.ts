@@ -3,6 +3,7 @@
 import { honcho } from "./client";
 import {
   capabilityFromProbe,
+  capabilityAtVersion,
   honcho31FromVersion,
   normalizeHonchoVersion,
   shouldProbeHoncho31,
@@ -40,6 +41,9 @@ export interface HonchoCapabilities {
   honcho31: HonchoCapabilityState;
   scopes: HonchoCapabilityState;
   workspaceChat: HonchoCapabilityState;
+  evidence: HonchoCapabilityState;
+  provenance: HonchoCapabilityState;
+  deriverMetrics: HonchoCapabilityState;
 }
 
 export function useHonchoCapabilities(): HonchoCapabilities {
@@ -77,5 +81,8 @@ export function useHonchoCapabilities(): HonchoCapabilities {
     honcho31: state === "restricted" ? "available" : state,
     scopes: state,
     workspaceChat: state === "restricted" ? "available" : state,
+    evidence: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 2, 0]),
+    provenance: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 2, 0]),
+    deriverMetrics: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 1, 2]),
   };
 }

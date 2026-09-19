@@ -76,10 +76,28 @@ export function Select<T extends string = string>({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+        const items = [...(panelRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+        const currentIndex = items.findIndex((item) => item === document.activeElement);
+        const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1
+          : e.key === "ArrowDown" ? (currentIndex + 1) % items.length
+          : currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+        e.preventDefault();
+        items[next]?.focus();
+        return;
+      }
+      if (e.key !== "Escape" && e.key !== "Tab") return;
+      setOpen(false);
+      // The menu is portaled outside its dialog. Return focus before native
+      // Tab navigation, and consume Escape before the parent dialog sees it.
+      ref.current?.querySelector("button")?.focus();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [open]);
 
   return (
@@ -149,6 +167,7 @@ export function Select<T extends string = string>({
                         onClick={() => {
                           onChange(o.value);
                           setOpen(false);
+                          ref.current?.querySelector("button")?.focus();
                         }}
                         whileHover={{ x: 3 }}
                         transition={{ type: "spring", stiffness: 500, damping: 28 }}

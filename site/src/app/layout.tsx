@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   // title here too would render a second, competing <title> that React re-asserts
   // on mount (overwriting the dynamic one on initial load).
   description: "honcho_dashboard",
-  icons: { icon: "/seo/favicon.svg" },
+  icons: { icon: { url: "/seo/favicon.svg", type: "image/svg+xml", sizes: "any" } },
 };
 
 export default function RootLayout({

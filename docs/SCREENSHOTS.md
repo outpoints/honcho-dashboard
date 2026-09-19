@@ -52,17 +52,46 @@ script supplies every Honcho and operator response from synthetic fixtures,
 blocks external traffic, fails on unmocked API requests, and enables write
 actions only for the session-upload views.
 
+To recapture only Overview, add `SCREENSHOT_SET=overview` to the command. Its
+generated hourly throughput data shows irregular read-heavy bursts and smaller
+write spikes, with both series above zero in every bucket. These illustrative
+values are not copied from production metrics.
+
+## Honcho 3.2 release image set
+
+Capture the new features from the current dashboard build with:
+
+```bash
+SCREENSHOT_BASE_URL=http://localhost:3000 SCREENSHOT_SET=honcho32 npm run capture:screenshots
+```
+
+This uses the same isolated capture browser and request interception as the README
+set. It writes six PNGs outside the repository, under the operating system's
+temporary directory at `honcho-dashboard-v1.2.0/images/`: chat evidence, conclusion
+provenance, instance backlog, call traces, mobile provenance, and trace details.
+Set `SCREENSHOT_OUTPUT_DIR` to a persistent directory outside the repository to
+keep them. Release notes, changelog drafts, social copy, and their attachment
+images are local artifacts and must not be committed or published without
+explicit authorization. The README image set remains repository documentation.
+Desktop images are 1440 × 1080; the mobile image is 430 × 932. Write actions remain
+disabled. These are screenshots of the working tree, not proof of a published tag
+or of a configured production trace collector. Apply the metadata and visual/OCR
+checks above after capture and before sharing.
+
 ## README image set
 
-The README currently presents these synthetic-data views:
+The default capture produces ten synthetic-data views. The README embeds nine;
+`dashboard.png` documents the expanded session used to open the upload view.
 
 | File | Purpose |
 | --- | --- |
 | `overview.png` | Per-workspace metrics and the 52-week activity heatmap |
-| `fleet.png` | Cross-workspace queue monitoring |
-| `reasoning.png` | Deriver queue details |
-| `chat.png` | Memory-augmented chat |
-| `conclusions.png` | Conclusion browsing and semantic search |
+| `fleet.png` | Workspace queues and service-wide instance backlog |
+| `reasoning.png` | Instance backlog and expanded deriver task details |
+| `chat.png` | Chat modes, recall boundaries, and expanded answer evidence |
+| `conclusions.png` | Conclusion browsing, semantic search, and provenance controls |
 | `dashboard.png` | Expanded session details and the upload entry point |
-| `search.png` | Native hybrid search and relevance ordering |
+| `search.png` | Native hybrid search inside a synthetic named scope |
 | `session-upload.png` | Session file-upload modal with a generated fixture file |
+| `provenance.png` | A conclusion with its parent premise and derived backlink |
+| `diagnostics.png` | Optional LLM and embedding call-trace inspection |

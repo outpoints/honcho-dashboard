@@ -15,18 +15,8 @@ import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
+import type { WebhookStatsResult } from "@/lib/operator/db";
 import { cn } from "@/lib/utils";
-
-interface WebhookStats {
-  available: boolean;
-  reason?: string;
-  total?: number;
-  delivered?: number;
-  failed?: number;
-  last_delivery?: string | null;
-  byEvent?: { event_type: string; n: number }[];
-  recent?: { id: string; event_type: string; status: "delivered" | "failed"; created_at: string }[];
-}
 
 export function WebhooksPage() {
   const apiOpts = useActiveHonchoOptions();
@@ -42,7 +32,7 @@ export function WebhooksPage() {
   const { data, error, isLoading, refetch } = useHonchoQuery(key, (o) =>
     honcho.webhooks.list(o, workspaceId!),
   );
-  const stats = useOperatorQuery<WebhookStats>(
+  const stats = useOperatorQuery<WebhookStatsResult>(
     workspaceId ? `/api/operator/db?view=webhooks&workspace_id=${encodeURIComponent(workspaceId)}` : null,
   );
 
@@ -114,15 +104,15 @@ export function WebhooksPage() {
       confirmLabel: "EMIT",
       body: (
         <>
-          Emit a real test event to every registered endpoint on the live instance? Connected
-          webhooks will receive an actual POST.
+          Queue a real test event for every registered endpoint in this workspace? Check your
+          receiver to confirm that the POST arrives.
         </>
       ),
     });
     if (!ok) return;
     try {
       await honcho.webhooks.test(apiOpts, workspaceId);
-      push({ type: "success", message: "Test event emitted to all endpoints" });
+      push({ type: "success", message: "Test event queued. Check your receiver to confirm delivery." });
       setTimeout(() => stats.refetch(), 800);
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
@@ -169,20 +159,20 @@ export function WebhooksPage() {
           hint={<span>registered endpoints</span>}
         />
         <StatTile
-          label="delivered"
-          value={(s?.delivered ?? 0).toLocaleString()}
+          label="processed"
+          value={s?.processed?.toLocaleString() ?? "—"}
           hintTone="muted"
-          hint={<span>all-time deliveries</span>}
+          hint={<span>queue tasks completed</span>}
         />
         <StatTile
-          label="failures"
+          label="task_errors"
           value={
             <span className={s?.failed ? "text-yellow-400" : "text-text-primary"}>
-              {(s?.failed ?? 0).toLocaleString()}
+              {s?.failed?.toLocaleString() ?? "—"}
             </span>
           }
           hintTone="warn"
-          hint={<span>failed deliveries</span>}
+          hint={<span>errors recorded by queue</span>}
         />
       </div>
 
@@ -251,17 +241,21 @@ export function WebhooksPage() {
 
       <div className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-7">
-          <Panel title="DELIVERY_ACTIVITY">
+          <Panel title="EVENT_ACTIVITY">
             {!s ? (
               <div className="text-[11px] text-text-muted py-4">
                 {stats.isLoading
                   ? "loading…"
-                  : `Delivery history needs the operator DB${
+                  : `Event history needs the operator DB${
                       stats.data?.reason ? ` (${stats.data.reason})` : ""
                     }.`}
               </div>
             ) : (
               <div className="space-y-3">
+                <p className="text-[11px] text-text-muted">
+                  Queue completion does not confirm delivery. Check your receiver or Honcho logs.
+                  {s.pending !== undefined ? ` ${s.pending.toLocaleString()} events pending.` : ""}
+                </p>
                 {(s.byEvent ?? []).length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
                     {(s.byEvent ?? []).map((e) => (
@@ -272,7 +266,7 @@ export function WebhooksPage() {
                   </div>
                 ) : null}
                 {(s.recent ?? []).length === 0 ? (
-                  <div className="text-[11px] text-text-muted py-2">No webhook deliveries recorded.</div>
+                  <div className="text-[11px] text-text-muted py-2">No webhook events recorded.</div>
                 ) : (
                   <div className="space-y-1">
                     {(s.recent ?? []).map((r) => (
@@ -281,11 +275,12 @@ export function WebhooksPage() {
                         className="flex items-center gap-2 px-2 py-1.5 bg-void/40 border border-border text-[11px]"
                       >
                         <Icon
-                          name={r.status === "failed" ? "x-circle" : "check"}
+                          name={r.queue_status === "failed" ? "x-circle" : "clock"}
                           size={12}
-                          className={r.status === "failed" ? "text-red-400" : "text-accent"}
+                          className={r.queue_status === "failed" ? "text-red-400" : "text-text-muted"}
                         />
                         <span className="text-text-primary font-mono truncate">{r.event_type}</span>
+                        <span className="text-text-muted">{r.queue_status ?? "unknown"}</span>
                         <span className="ml-auto text-text-muted shrink-0">
                           {new Date(r.created_at).toLocaleString()}
                         </span>
@@ -300,9 +295,9 @@ export function WebhooksPage() {
         <div className="col-span-12 lg:col-span-5">
           <Panel title="SELF_HOSTED_INFO">
             <div className="space-y-2 text-xs">
-              <Bullet icon="external-link" label="No API key required for self-hosted" />
+              <Bullet icon="external-link" label="Uses the selected instance credentials" />
               <Bullet icon="webhook" label="Endpoints registered by URL (no per-event filter)" />
-              <Bullet icon="warning" label="Ensure endpoints are reachable from the server" tone="warn" />
+              <Bullet icon="warning" label="Honcho requires WEBHOOK_SECRET and a reachable public receiver" tone="warn" />
               <div className="mt-3 pt-3 border-t border-border space-y-0.5 text-[11px] text-text-muted">
                 <div>
                   &gt; endpoint:{" "}
@@ -311,9 +306,9 @@ export function WebhooksPage() {
                   </span>
                 </div>
                 <div>
-                  &gt; last_delivery:{" "}
+                  &gt; last_event:{" "}
                   <span className="text-text-primary">
-                    {s?.last_delivery ? new Date(s.last_delivery).toLocaleString() : "never"}
+                    {s ? (s.last_event ? new Date(s.last_event).toLocaleString() : "none") : "—"}
                   </span>
                 </div>
                 <div>

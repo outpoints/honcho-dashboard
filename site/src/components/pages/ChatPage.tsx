@@ -1,13 +1,16 @@
 "use client";
 
-import type { Scope } from "@honcho-ai/sdk";
+import type { Evidence, Scope } from "@honcho-ai/sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Field, PillTabs, TextInput } from "@/components/atoms";
+import { Button, Checkbox, Field, PillTabs, TextInput } from "@/components/atoms";
+import { ChatEvidence } from "@/components/ChatEvidence";
+import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
+import { chatWithEvidence } from "@/lib/honcho/chat";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -35,6 +38,7 @@ interface Turn {
   role: "user" | "assistant";
   content: string;
   label?: string;
+  evidence?: Evidence | null;
 }
 
 function recallBoundary(value: string): { sessionId?: string; scopeId?: string } {
@@ -54,6 +58,12 @@ function readHashParam(key: string): string | null {
  * it does not write messages or memory — so it needs no write-gate or confirm.
  */
 export function ChatPage() {
+  const opts = useActiveHonchoOptions();
+  const { workspaceId } = useActiveWorkspace();
+  return <ChatSession key={`${opts?.baseUrl}/${opts?.token}/${workspaceId}`} />;
+}
+
+function ChatSession() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
@@ -68,6 +78,8 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
+  const [includeEvidence, setIncludeEvidence] = useState(false);
+  const evidenceAvailable = capabilities.evidence === "available";
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -160,17 +172,20 @@ export function ChatPage() {
         reasoningLevel: level,
       };
       const sdk = getSdk(apiOpts, workspaceId);
-      const reply =
-        mode === "workspace"
-          ? await sdk.chat(query, options)
-          : await (await sdk.peer(effectivePeerId)).chat(query, options);
+      const reply = await chatWithEvidence(sdk, query, {
+        ...options,
+        peerId: mode === "peer" ? effectivePeerId : undefined,
+        includeEvidence: includeEvidence && evidenceAvailable,
+        evidenceCapability: capabilities.evidence,
+      });
       setTurns((cur) => [
         ...cur,
         {
           id: `a-${Date.now()}`,
           role: "assistant",
-          content: reply && reply.trim() ? reply : "(no answer — the peer has no relevant memory)",
+          content: reply.content?.trim() ? reply.content : "(no answer returned)",
           label: mode === "workspace" ? "WORKSPACE" : effectivePeerId,
+          ...(reply.evidenceRequested ? { evidence: reply.evidence } : {}),
         },
       ]);
     } catch (err) {
@@ -196,7 +211,7 @@ export function ChatPage() {
         subtitle="query one peer or synthesize an answer across the entire workspace"
         actions={
           turns.length > 0 ? (
-            <Button variant="ghost" icon="x" onClick={() => setTurns([])}>
+            <Button variant="ghost" icon="x" disabled={busy} onClick={() => setTurns([])}>
               CLEAR
             </Button>
           ) : undefined
@@ -207,11 +222,11 @@ export function ChatPage() {
         <Field label="CHAT_MODE" hint="Ask one peer or reason across every peer.">
           <PillTabs<ChatMode>
             items={[
-              { key: "peer", label: "PEER" },
+              { key: "peer", label: "PEER", disabled: busy },
               {
                 key: "workspace",
                 label: workspaceChatAvailable ? "WORKSPACE" : "WORKSPACE · 3.1+",
-                disabled: !workspaceChatAvailable,
+                disabled: busy || !workspaceChatAvailable,
                 title: workspaceChatAvailable ? undefined : "Requires Honcho 3.1.0 or newer",
               },
             ]}
@@ -227,7 +242,7 @@ export function ChatPage() {
               value={effectivePeerId}
               onChange={setPeerId}
               options={peerOptions}
-              disabled={!workspaceId}
+              disabled={!workspaceId || busy}
               placeholder="select a peer…"
             />
           </Field>
@@ -238,13 +253,14 @@ export function ChatPage() {
             value={effectiveBoundary}
             onChange={setBoundary}
             options={boundaryOptions}
-            disabled={!workspaceId}
+            disabled={!workspaceId || busy}
             placeholder="— all available memory —"
           />
         </Field>
         <Field label="REASONING_LEVEL" hint="Higher levels reason harder but cost more.">
           <Select
             value={level}
+            disabled={busy}
             onChange={(v) => setLevel(v as ReasoningLevel)}
             options={REASONING_LEVELS.map((l) => ({ value: l, label: l }))}
           />
@@ -277,6 +293,13 @@ export function ChatPage() {
           Named scopes are unavailable on this connection. Workspace, peer, and session chat still work; scope recall requires a workspace- or admin-level key.
         </div>
       ) : null}
+
+      <div className="space-y-2">
+        <Checkbox checked={includeEvidence && evidenceAvailable} onChange={setIncludeEvidence}
+          disabled={busy || !evidenceAvailable} label={<span className="text-xs">INCLUDE_EVIDENCE</span>}
+          hint="Collect the conclusions, message references, and tool calls accessed for the next answer." />
+        <HonchoFeatureNotice state={capabilities.evidence} minimum="3.2" feature="Chat evidence" />
+      </div>
 
       <Panel title="TRANSCRIPT" status={busy ? "processing" : "active"}>
         <div ref={scrollRef} className="max-h-[460px] min-h-[200px] overflow-y-auto space-y-3 pr-1">
@@ -343,13 +366,14 @@ function Bubble({ turn }: { turn: Turn }) {
       transition={{ duration: 0.2, ease: EASE }}
       className={cn("flex", isUser ? "justify-end" : "justify-start")}
     >
-      <div className={cn("max-w-[85%] border p-2.5", isUser ? "border-accent/40 bg-accent/5" : "border-border bg-void/40")}>
+      <div className={cn("min-w-0 max-w-full sm:max-w-[85%] border p-2.5", isUser ? "border-accent/40 bg-accent/5" : "border-border bg-void/40")}>
         <div className={cn("text-[9px] uppercase tracking-wider mb-1", isUser ? "text-accent" : "text-text-muted")}>
           {isUser ? "YOU" : turn.label ?? "PEER"}
         </div>
         <p className="text-[12px] text-text-primary whitespace-pre-wrap break-words leading-relaxed">
           {turn.content}
         </p>
+        {!isUser && turn.evidence !== undefined ? <ChatEvidence evidence={turn.evidence} /> : null}
       </div>
     </motion.div>
   );

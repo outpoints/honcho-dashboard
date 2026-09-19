@@ -29,35 +29,36 @@ export function Header({ current }: HeaderProps) {
 
   return (
     <header className="h-12 bg-surface border-b border-border flex items-center justify-between px-3 sm:px-4 relative gap-3 z-10">
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs min-w-0">
           <Icon name="terminal" className="text-accent shrink-0" size={14} />
           <button onClick={() => navigate("fleet")} className="text-text-muted hover:text-text-primary transition-colors duration-150">honcho</button>
           <span className="text-text-muted">/</span>
-          <button onClick={() => navigate("workspaces")} className="text-text-muted hover:text-text-primary transition-colors duration-150">
+          <button onClick={() => navigate("workspaces")} title={workspaceId ?? "self-hosted"} className="min-w-0 max-w-32 lg:max-w-56 truncate text-text-muted hover:text-text-primary transition-colors duration-150">
             {workspaceId ?? "self-hosted"}
           </button>
           <span className="text-text-muted">/</span>
           <span className="text-accent">{current}</span>
         </div>
 
-        <div className="flex-1 max-w-md mx-4">
+        <div className="shrink-0 sm:flex-1 min-w-0 max-w-md sm:mx-4">
           <button
             onClick={() => navigate("search")}
+            aria-label="Search workspace"
             className="w-full relative flex items-center gap-2 bg-void border border-border hover:border-border-light px-2.5 py-1.5 transition-colors duration-150 text-left"
           >
             <Icon name="search" className="text-text-muted shrink-0" size={12} />
-            <span className="text-text-muted text-xs flex-1 whitespace-nowrap">
+            <span className="hidden sm:block min-w-0 truncate text-text-muted text-xs flex-1">
               search {workspaceId ? `in ${workspaceId}` : "workspace"}…
             </span>
-            <span className="flex items-center gap-1">
+            <span className="hidden lg:flex items-center gap-1">
               <kbd className="px-1.5 py-0.5 bg-border text-[10px] text-text-muted leading-none">⌘</kbd>
               <kbd className="px-1.5 py-0.5 bg-border text-[10px] text-text-muted leading-none">K</kbd>
             </span>
           </button>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
-          <span className="hidden sm:flex text-[10px] text-text-muted font-mono">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <span className="hidden xl:block max-w-60 truncate text-[10px] text-text-muted font-mono" title={apiOpts?.baseUrl}>
             {apiOpts?.baseUrl ?? "no instance"}
           </span>
           <ThemeToggle />

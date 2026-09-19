@@ -17,9 +17,21 @@ export function normalizeHonchoVersion(raw: string | undefined): string | null {
 
 function numericVersion(raw: string | undefined): [number, number, number] | null {
   const version = normalizeHonchoVersion(raw);
-  const match = version?.match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+  const match = version?.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
   if (!match) return null;
   return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)];
+}
+
+/** New optional features fail closed when version metadata is unavailable. */
+export function capabilityAtVersion(raw: string | undefined, minimum: [number, number, number]): HonchoCapabilityState {
+  const parsed = numericVersion(raw);
+  if (!parsed) return "unknown";
+  for (let i = 0; i < 3; i++) {
+    if (parsed[i] > minimum[i]) return "available";
+    if (parsed[i] < minimum[i]) return "unsupported";
+  }
+  // A prerelease of the minimum version need not include its final API.
+  return normalizeHonchoVersion(raw)?.split("+", 1)[0].includes("-") ? "unsupported" : "available";
 }
 
 /** Return null when OpenAPI did not provide a comparable semantic version. */

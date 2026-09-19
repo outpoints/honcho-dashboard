@@ -56,6 +56,10 @@ export interface ApiConclusion {
   observed_id: string;
   session_id?: string | null;
   level?: ConclusionLevel;
+  /** Honcho 3.2+: parent conclusion IDs, not message IDs. Absent on 3.1. */
+  source_ids?: string[] | null;
+  /** Honcho 3.2+: number of independent derivations. Absent on 3.1. */
+  times_derived?: number;
   created_at: string;
 }
 

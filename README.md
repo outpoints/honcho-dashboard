@@ -7,22 +7,29 @@ The Next.js app lives in [`site/`](./site).
 
 ![Honcho Self-Hosted Dashboard — Overview](docs/overview.png)
 
-> The dashboard wired to a live Honcho instance, in the dark "Memory Console" theme.
-> Every workspace, peer, session, and message shown is synthetic demo data.
+> The current dashboard in the dark "Memory Console" theme, using synthetic Honcho 3.2 fixtures.
+> All displayed data, including messages, conclusions, and traces, is generated demo data.
 > See [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) for the repository's capture and
 > privacy checklist.
 
-|  Fleet — cross-workspace queue monitor  |  Reasoning — deriver queue with expandable tasks  |
+|  Fleet — workspace queues and instance backlog  |  Reasoning — backlog and expandable tasks  |
 | :-------------------------------------: | :-----------------------------------------------: |
 |        ![Fleet](docs/fleet.png)         |          ![Reasoning](docs/reasoning.png)         |
 
-|  Chat — memory-augmented dialectic over a peer  |  Conclusions — browse + semantic search  |
+|  Chat — peer/workspace modes and answer evidence  |  Conclusions — browsing, search, and provenance  |
 | :---------------------------------------------: | :--------------------------------------: |
 |             ![Chat](docs/chat.png)              |   ![Conclusions](docs/conclusions.png)   |
 
-|  Search — native hybrid retrieval + ordering  |  Session upload — attributed document ingestion  |
+|  Search — hybrid retrieval within a named scope  |  Session upload — attributed document ingestion  |
 | :--------------------------------------------: | :------------------------------------------------: |
 |          ![Search](docs/search.png)            |       ![Session upload](docs/session-upload.png)    |
+
+|  Provenance — parent premises and derived conclusions  |  Diagnostics — optional LLM and embedding call traces  |
+| :---------------------------------------------------: | :---------------------------------------------------: |
+| ![Conclusion provenance](docs/provenance.png) | ![Call traces in Diagnostics](docs/diagnostics.png) |
+
+Chat evidence and provenance require Honcho 3.2+; backlog requires 3.1.2+.
+Call traces use an optional collector export configured on the dashboard host.
 
 ## Features
 
@@ -30,10 +37,10 @@ Organized into four sections that mirror the sidebar.
 
 **Monitor** — read-only operator dashboards.
 
-- **Fleet** — every workspace on the instance at a glance, with live deriver-queue status (total / done / active / pending) across the whole fleet, polled every 10s. The default landing screen.
+- **Fleet** — every workspace on the instance at a glance, with live deriver-queue status (total / done / active / pending) across the whole fleet, polled every 10s, plus service-wide backlog metrics on Honcho 3.1.2+. The default landing screen.
 - **Overview** — per-workspace dashboard: peer / session / workspace / conclusion counts, a message-throughput chart (1H / 6H / 24H / 7D), a 52-week conclusion-activity heatmap, recent sessions, and instance status.
 - **Instance** — live server state: health, endpoint, workspace age, runtime, database (size, connections, pgvector), vector columns, largest tables, and per-workspace queue status.
-- **Diagnostics** — composite health probes (Honcho API + database + operator), a config readout, and a tail of recent server logs.
+- **Diagnostics** — composite health probes (Honcho API + database + operator), a config readout, recent server logs, and filtered LLM/embedding call traces from an optional collector export.
 
 **Explore**
 
@@ -43,17 +50,17 @@ Organized into four sections that mirror the sidebar.
 - **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
 - **Scopes** — create named visibility boundaries, add or remove member sessions, and monitor asynchronous backfill/reconciliation state and copied-document counts. Requires Honcho 3.1.0+ and a workspace- or admin-level key.
 - **Search** — Honcho-native hybrid keyword/vector search across a workspace, named scope, session, or peer, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
-- **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions.
+- **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions. On Honcho 3.2+, inspect parent conclusions, derivation counts, and backlinks to other derived conclusions.
 
 **Memory**
 
 - **Reasoning** — the deriver queue that builds peer representations: queued / processing / completed / failed tiles, expandable tasks with parsed and raw payloads, a task-type breakdown, and a config readout; filter by status / type, retry failed tasks, or schedule a dream.
 - **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, a live preview, and optional scope-backed representation/card recall.
-- **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level.
+- **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level. Opt into Honcho 3.2 evidence to inspect accessed conclusions, messages, tool calls, and the reasoning trace ID for each answer.
 
 **Setup**
 
-- **Webhooks** — register and remove webhook endpoints, send a test emit, and view delivery activity.
+- **Webhooks** — register and remove webhook endpoints, queue a test event, and view event processing activity. Confirm delivery at your receiver; queue completion alone is not a delivery receipt. Honcho needs `WEBHOOK_SECRET` configured on its server and a reachable public receiver.
 - **Integrations** — reference guides for connecting agents (MCP, Claude Code, and others) to Honcho, with config examples pre-filled with your live endpoint.
 - **Config** — manage multiple Honcho connections (stored in `localStorage`), test a connection, switch the active instance, and flip the write-actions master toggle.
 
@@ -61,7 +68,7 @@ Organized into four sections that mirror the sidebar.
 
 - **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth.
 - **Safe by default** — a master **write-actions** toggle (off by default) hides the create / update / delete controls on the workspace, peer, session, conclusion, reasoning, and webhook screens; each confirms before writing to the live instance. Reads never confirm.
-- **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook deliveries, log tail) come from a read-only operator database connection, and degrade gracefully to the Honcho API when it isn't configured.
+- **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook queue activity, log tail) come from an optional operator database connection, and degrade gracefully to the Honcho API when it isn't configured. Reads work with read-only credentials; retrying reasoning tasks requires queue update permission.
 - **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme.
 
 ## Architecture
@@ -71,7 +78,7 @@ Three layers, each with a single job:
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
    status, dream scheduling, scopes, scope-aware recall, workspace chat, and search use
-   the SDK directly. The dashboard currently targets SDK 2.4.x.
+   the SDK directly. The dashboard currently targets SDK 2.5.x.
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
@@ -81,8 +88,11 @@ Three layers, each with a single job:
      get-or-creates on first use, which is the wrong UX for management screens
    - Workspace-wide conclusion `list / query / delete` — SDK organizes
      conclusions by `(observer, observed)` peer pair
-   - Session file upload — SDK 2.4 multipart requests omit the per-instance
+   - Session file upload — SDK multipart requests omit the per-instance
      proxy header, so the raw transport preserves the selected upstream safely
+   - Evidence message lookup — a direct GET avoids the SDK session helper's
+     get-or-create side effect when reading a deleted session's history
+   - Instance backlog — `/deriver/metrics` is not exposed by the SDK
    - One read-only scope-list compatibility probe — deliberately bypasses the
      SDK's workspace get-or-create behavior when version metadata is unavailable
    - Webhook `list / create / delete / test` — no SDK methods
@@ -100,6 +110,7 @@ Three layers, each with a single job:
    | `runtime`               | none (`HONCHO_RUNTIME_START_TS` optional) | dashboard uptime, Node version, optional Honcho uptime |
    | `db`                    | `HONCHO_DATABASE_URL`         | db size, pgvector status, table sizes, throughput buckets, 52-week heatmap, conclusion stats |
    | `logs`                  | `HONCHO_LOG_FILE`             | tail of Honcho log file (JSON or plain) |
+   | `traces`                | `HONCHO_TRACE_FILE`           | bounded, metadata-only LLM and embedding CloudEvents records |
    | `config`                | none                          | safe env-var snapshot (secrets redacted) |
    | `diagnostics`           | combines all of the above     | composite probe with timings and per-category status |
 
@@ -195,7 +206,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 ## Stack
 
 - **Next.js 16** (App Router, React 19, TypeScript strict, standalone output)
-- **`@honcho-ai/sdk`** v2.4 for native Honcho data flows
+- **`@honcho-ai/sdk`** v2.5 for native Honcho data flows
 - **`pg`** for the read-only operator DB connection
 - **Tailwind CSS v4** with custom `@theme` tokens
 - **Framer Motion** for entrance / hover / tap / layout animations
@@ -215,7 +226,7 @@ The dashboard preserves its established workspace, peer, session, message,
 conclusion, search, peer-chat, and unscoped-context flows on Honcho 3.0.x.
 Features introduced by Honcho 3.1 are capability-gated:
 
-- Dashboard 1.1.1 uses `@honcho-ai/sdk` 2.4.0 and has been exercised end to
+- Released dashboard 1.1.1 used `@honcho-ai/sdk` 2.4.0 and was exercised end to
   end against a live self-hosted Honcho 3.1.0 instance, including search, chat,
   context assembly, scope membership, and scope backfill/reconciliation.
 - A parseable `/openapi.json` version is authoritative. Known pre-3.1 servers
@@ -227,6 +238,67 @@ Features introduced by Honcho 3.1 are capability-gated:
   active key needs workspace- or admin-level access.
 - Network failures and other ambiguous responses fail conservatively: 3.1-only
   controls remain disabled without affecting older dashboard workflows.
+
+The working tree upgrades to `@honcho-ai/sdk` 2.5.0 for **Honcho 3.2.0** while
+retaining the existing 3.1 workflows. Conclusion responses now retain optional
+`source_ids` (parent conclusion IDs) and `times_derived` attribution, including
+semantic-search results. On verified 3.2+ servers, **INCLUDE_EVIDENCE** collects
+evidence for the next peer or workspace answer. **SHOW_EVIDENCE** expands the
+conclusions, message references (with on-demand text), successful tool calls, and
+trace ID that Honcho returned. These are accessed records, not proof that an answer
+used them. Default chat still works on 3.1 without requesting evidence.
+
+**PROVENANCE** on a conclusion or evidence record opens a read-only inspector with
+derivation count, parent conclusions, and workspace-wide derived conclusions.
+Links navigate one level at a time, with Back navigation, paginated parents and
+children, and explicit unavailable/deleted-parent states. Neither provenance nor
+evidence requests run when the server version is unknown or below 3.2.
+
+**INSTANCE_BACKLOG** on Fleet and Reasoning reads `/deriver/metrics` on verified
+3.1.2+ servers. It shows service-wide work estimates, oldest pending age, eligible
+and claimed units, pending items/embeddings, dreams due, and measurement age. Do
+not add these values across workspaces or replicas; the work estimate is not an ETA.
+
+Compatibility is checked against the tagged
+[Honcho 3.2.0 release](https://github.com/plastic-labs/honcho/blob/v3.2.0/CHANGELOG.md)
+and its API schemas. Automated contract fixtures cover 3.1/3.2 chat and
+conclusions, proxy-routing headers, missing attribution fields, restricted-key
+errors, and provider-unavailable responses (`503`). Evidence and provenance were
+also verified through the dashboard against an isolated real Honcho 3.2.0 server,
+using a mock model and synthetic data. See [verification details](docs/HONCHO_3_2_VALIDATION.md).
+After upgrading your server, smoke-test Fleet, Conclusions/search, Chat,
+Scopes/context, and the operator DB panels against your migrated data and model.
+
+For the **server upgrade**, apply Honcho's Alembic migrations using its deployment
+procedure before starting the upgraded services. The 3.2 tag adds the
+`document_sources` table with a background reconciler backfill; the dashboard's
+existing SQL queries do not depend on the legacy source-link storage. Source
+installs also require Python 3.13+ (changed in Honcho 3.1.1). The dashboard update
+does not upgrade the server or run its migrations. Honcho 3.2 also tightens
+peer/session-key permissions on peer and session creation; use a workspace/admin
+key for the operator dashboard's management workflows.
+
+### Optional call traces
+
+Diagnostics **CALL_TRACES** reads `HONCHO_TRACE_FILE`: a collector's CloudEvents
+JSONL export on the dashboard host. Configure Honcho's trace collector separately;
+ordinary application logs and reasoning JSONL are not this stream. Each line must
+contain a CloudEvent or a compact array of CloudEvents. Supported event types are
+`llm.call.traced` and `embedding.call.traced`, schema v1/v2.
+
+For Docker, set `HONCHO_TRACE_FILE=/honcho-traces.jsonl` and add a read-only bind
+mount from your collector export to that path (see `docker-compose-example.yml`).
+For local development, set the path in `site/.env.local`. Restart the dashboard
+after changing server environment variables. This source stays fixed when the
+selected Honcho instance changes; inspect SOURCE and WORKSPACE for attribution.
+
+Search by workspace/session/trace/source-message ID, filter call type or outcome,
+and inspect duration, retry attempts, provider/model, agent, correlation IDs, and
+content references. The server returns only allowlisted metadata, never prompts,
+content events, signatures, or tool arguments. Reads are capped at the last 2 MiB
+and 200 records; filters operate within that window. The panel works with v1
+archives, displays missing fields as unrecorded, and reports malformed/omitted
+records. This optional collector setup is independent of chat evidence/provenance.
 
 ## Known quirks
 
@@ -240,7 +312,7 @@ Features introduced by Honcho 3.1 are capability-gated:
 - **Operator panels degrade without a DB connection.** Metrics Honcho's REST
   API doesn't expose — throughput chart, 52-week heatmap, db size/uptime,
   per-session message/token counts, per-task reasoning records, webhook
-  delivery history, and per-peer message/conclusion stats — come from the
+  queue history, and per-peer message/conclusion stats — come from the
   read-only `HONCHO_DATABASE_URL` operator layer. Without it those panels show
   an "operator DB unavailable" state; everything backed by the SDK still works.
 - **`conclusions` is not a physical table.** Honcho's REST `conclusions`
@@ -354,7 +426,7 @@ live Honcho `v3` instance (no more mock data).
   cover (health, `/openapi.json`, workspace create/list/delete, workspace-wide
   conclusions, webhooks, and the side-effect-free compatibility probe) or
   cannot safely route through the selected-instance proxy (multipart session
-  uploads in SDK 2.4).
+  uploads in SDK 2.5).
 - **[Honcho](https://honcho.dev)** — the self-hosted memory server this is
   a dashboard for.
 

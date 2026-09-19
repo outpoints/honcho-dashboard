@@ -1,4 +1,5 @@
 import type {
+  Conclusion,
   Peer,
   Session,
   Message,
@@ -8,6 +9,7 @@ import type {
   SessionQueueStatus,
 } from "@honcho-ai/sdk";
 import type {
+  ApiConclusion,
   ApiPeer,
   ApiSession,
   ApiMessage,
@@ -16,6 +18,20 @@ import type {
   ApiQueueStatus,
   ApiSessionQueueStatus,
 } from "./types";
+
+export function toApiConclusion(c: Conclusion): ApiConclusion {
+  return {
+    id: c.id,
+    content: c.content,
+    observer_id: c.observerId,
+    observed_id: c.observedId,
+    session_id: c.sessionId,
+    level: c.level,
+    source_ids: c.sourceIds,
+    times_derived: c.timesDerived,
+    created_at: c.createdAt,
+  };
+}
 
 export function toApiPeer(p: Peer): ApiPeer {
   return {

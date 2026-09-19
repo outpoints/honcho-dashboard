@@ -7,6 +7,9 @@ import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, RefreshButton, TextInput } from "@/components/atoms";
 import { Modal } from "@/components/Modal";
+import { ConclusionInspector } from "@/components/ConclusionInspector";
+import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
+import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -16,13 +19,19 @@ import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config"
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { honcho } from "@/lib/honcho/client";
 import { getSdk } from "@/lib/honcho/sdk";
-import { toApiPeer } from "@/lib/honcho/adapters";
+import { toApiConclusion, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiConclusion, ApiPeer, Page } from "@/lib/honcho/types";
 
 const EASE = [0.25, 0.46, 0.45, 0.94] as const;
 const PAGE_SIZE = 25;
 
 export function ConclusionsPage() {
+  const opts = useActiveHonchoOptions();
+  const { workspaceId } = useActiveWorkspace();
+  return <ConclusionsSession key={`${opts?.baseUrl}/${opts?.token}/${workspaceId}`} />;
+}
+
+function ConclusionsSession() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
@@ -35,6 +44,8 @@ export function ConclusionsPage() {
   const [observed, setObserved] = useState(""); // "" = self (observer about itself)
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const [inspected, setInspected] = useState<string | null>(null);
+  const { provenance } = useHonchoCapabilities();
 
   // Honcho's conclusion semantic search is scoped to an (observer, observed)
   // pair — `/conclusions/query` 422s without it. So a query needs an observer.
@@ -53,15 +64,7 @@ export function ConclusionsPage() {
       const scope =
         observedId === observer ? observerPeer.conclusions : observerPeer.conclusionsOf(observedId);
       const found = await scope.query(query.trim(), 50);
-      const mapped: ApiConclusion[] = found.map((c) => ({
-        id: c.id,
-        content: c.content,
-        observer_id: c.observerId,
-        observed_id: c.observedId,
-        session_id: c.sessionId,
-        level: c.level,
-        created_at: c.createdAt,
-      }));
+      const mapped = found.map(toApiConclusion);
       return { items: mapped, total: mapped.length, page: 1, size: mapped.length, pages: 1 };
     }
     return honcho.conclusions.list(o, workspaceId!, { page, size: PAGE_SIZE });
@@ -109,6 +112,7 @@ export function ConclusionsPage() {
     try {
       await honcho.conclusions.delete(apiOpts, workspaceId, c.id);
       invalidate("conclusions/");
+      invalidate(`provenance/${workspaceId}/`);
       results.refetch();
       push({ type: "success", message: "Conclusion deleted" });
     } catch (err) {
@@ -197,6 +201,8 @@ export function ConclusionsPage() {
         </div>
       </Panel>
 
+      <HonchoFeatureNotice state={provenance} minimum="3.2" feature="Conclusion provenance" />
+
       <Panel
         title={searching ? "SEARCH_RESULTS" : "ALL_CONCLUSIONS"}
         status={results.isLoading ? "processing" : "active"}
@@ -225,7 +231,8 @@ export function ConclusionsPage() {
         ) : (
           <div className="space-y-2">
             {items.map((c, i) => (
-              <ConclusionRow key={c.id} c={c} index={i} canWrite={canWrite} onDelete={() => onDelete(c)} />
+              <ConclusionRow key={c.id} c={c} index={i} canWrite={canWrite} onDelete={() => onDelete(c)}
+                onInspect={provenance === "available" ? () => setInspected(c.id) : undefined} />
             ))}
           </div>
         )}
@@ -264,12 +271,14 @@ export function ConclusionsPage() {
           peers={peers.data?.items ?? []}
           onCreated={() => {
             invalidate("conclusions/");
+            invalidate(`provenance/${workspaceId}/`);
             results.refetch();
           }}
         />
       ) : null}
 
       <StatusBar />
+      {inspected && provenance === "available" ? <ConclusionInspector key={inspected} id={inspected} onClose={() => setInspected(null)} /> : null}
     </div>
   );
 }
@@ -279,11 +288,13 @@ function ConclusionRow({
   index,
   canWrite,
   onDelete,
+  onInspect,
 }: {
   c: ApiConclusion;
   index: number;
   canWrite: boolean;
   onDelete: () => void;
+  onInspect?: () => void;
 }) {
   return (
     <motion.div
@@ -301,7 +312,14 @@ function ConclusionRow({
             {c.session_id ? <Chip tone="cyan">{c.session_id}</Chip> : null}
           </div>
           <p className="text-[12px] text-text-primary leading-relaxed break-words">{c.content}</p>
-          <div className="mt-1.5 text-[9px] text-text-muted tabular-nums">{c.created_at}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-text-muted tabular-nums">
+            <span>{new Date(c.created_at).toLocaleString()}</span>
+            {onInspect ? <>
+              <Chip tone="purple">{c.level ?? "explicit"}</Chip>
+              <span>{c.times_derived ?? 1} derivations · {c.source_ids?.length ?? 0} parents</span>
+              <Button size="sm" variant="ghost" onClick={onInspect}>PROVENANCE</Button>
+            </> : null}
+          </div>
         </div>
         {canWrite ? (
           <button

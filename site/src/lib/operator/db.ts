@@ -1,5 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
+import { webhookQueueStatus, type WebhookQueueStatus } from "./webhookStatus";
 
 let pool: Pool | null = null;
 let lastUrl: string | null = null;
@@ -764,19 +765,25 @@ export async function dbRetryAllFailedReasoningTasks(
 }
 
 /**
- * Webhook delivery stats from the `queue` table (task_type='webhook'). Honcho's
- * REST API exposes webhook *endpoints* (url only) but no delivery history; the
- * deliver/fail records and event types live in the queue.
+ * Webhook queue activity, not confirmed delivery. Honcho can complete these
+ * tasks even when signing or delivery fails; receiver receipts are unavailable.
  */
 export interface WebhookStatsResult {
   available: boolean;
   reason?: string;
   total?: number;
+  processed?: number;
+  pending?: number;
+  /** @deprecated Legacy name for processed queue tasks, not confirmed deliveries. */
   delivered?: number;
   failed?: number;
+  last_event?: string | null;
+  /** @deprecated Legacy name for the most recently created queue event. */
   last_delivery?: string | null;
   byEvent?: { event_type: string; n: number }[];
-  recent?: { id: string; event_type: string; status: "delivered" | "failed"; created_at: string }[];
+  recent?: { id: string; event_type: string; queue_status: WebhookQueueStatus;
+    /** @deprecated Use queue_status; this legacy field does not confirm delivery. */
+    status: "delivered" | "failed"; created_at: string }[];
 }
 
 export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsResult> {
@@ -793,13 +800,14 @@ export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsR
     const hasError = await columnExists(p, "queue", "error");
     const hasProcessed = await columnExists(p, "queue", "processed");
     const errorCol = hasError ? "error" : "NULL::text";
-    const processedCol = hasProcessed ? "processed" : "true";
+    const processedCol = hasProcessed ? "processed" : "NULL::boolean";
     const filter = `${qWs} = $1 AND task_type = 'webhook'`;
 
     const [agg, byEvent, recent] = await Promise.all([
-      p.query<{ total: string; delivered: string; failed: string; last: string | null }>(
+      p.query<{ total: string; delivered: string; pending: string; failed: string; last: string | null }>(
         `SELECT count(*)::bigint AS total,
                 count(*) FILTER (WHERE ${errorCol} IS NULL AND ${processedCol})::bigint AS delivered,
+                count(*) FILTER (WHERE ${errorCol} IS NULL AND NOT ${processedCol})::bigint AS pending,
                 count(*) FILTER (WHERE ${errorCol} IS NOT NULL)::bigint AS failed,
                 max(created_at)::text AS last
            FROM queue WHERE ${filter}`,
@@ -810,10 +818,11 @@ export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsR
            FROM queue WHERE ${filter} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`,
         [workspaceId],
       ),
-      p.query<{ id: string; event_type: string; error: string | null; created_at: string }>(
+      p.query<{ id: string; event_type: string; error: string | null; processed: boolean | null; created_at: string }>(
         `SELECT id::text AS id,
                 coalesce(payload->>'event_type', '(unknown)') AS event_type,
                 ${errorCol} AS error,
+                ${processedCol} AS processed,
                 created_at::text AS created_at
            FROM queue WHERE ${filter} ORDER BY id DESC LIMIT 15`,
         [workspaceId],
@@ -823,14 +832,18 @@ export async function dbWebhookStats(workspaceId: string): Promise<WebhookStatsR
     return {
       available: true,
       total: Number(agg.rows[0]?.total ?? 0),
+      processed: hasProcessed ? Number(agg.rows[0]?.delivered ?? 0) : undefined,
+      pending: hasProcessed ? Number(agg.rows[0]?.pending ?? 0) : undefined,
       delivered: Number(agg.rows[0]?.delivered ?? 0),
       failed: Number(agg.rows[0]?.failed ?? 0),
       last_delivery: agg.rows[0]?.last ?? null,
+      last_event: agg.rows[0]?.last ?? null,
       byEvent: byEvent.rows.map((r) => ({ event_type: r.event_type, n: Number(r.n) })),
       recent: recent.rows.map((r) => ({
         id: r.id,
         event_type: r.event_type,
         status: r.error ? "failed" : "delivered",
+        queue_status: webhookQueueStatus(r.error, r.processed),
         created_at: r.created_at,
       })),
     };

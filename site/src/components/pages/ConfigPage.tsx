@@ -162,7 +162,8 @@ export function ConfigPage() {
             <div className="text-[11px] text-text-muted space-y-2 leading-relaxed">
               <p>
                 Instances are stored in <span className="text-accent">localStorage</span> — no
-                server-side persistence. Tokens never leave this browser.
+                server-side persistence. Authentication tokens are sent through the dashboard proxy
+                to your selected Honcho instance when making API requests.
               </p>
               <p>
                 The Honcho server config (LLM providers, workers, DB) is set via environment

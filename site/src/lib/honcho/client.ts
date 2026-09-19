@@ -25,6 +25,7 @@ import {
   type ApiWorkspace,
   type Page,
 } from "./types.ts";
+import { parseDeriverMetrics } from "./deriverMetrics.ts";
 
 export interface HonchoClientOptions {
   baseUrl: string;
@@ -164,6 +165,10 @@ function ws(workspaceId: string) {
 // === VERIFIED GAPS ===
 
 export const honcho = {
+  /** Gap: SDK does not expose instance-wide operational backlog metrics. */
+  async deriverMetrics(opts: HonchoClientOptions) {
+    return parseDeriverMetrics(await request<unknown>(opts, "GET", "/deriver/metrics"));
+  },
   /** Gap: SDK has no `/health` endpoint. */
   health(opts: HonchoClientOptions) {
     return request<{ status: string }>(opts, "GET", "/health");
@@ -250,6 +255,16 @@ export const honcho = {
         "POST",
         `${ws(workspaceId)}/scopes/list?page=1&size=1`,
       );
+    },
+  },
+
+  /** Gap: SDK session(id) get-or-creates the session even for message reads. */
+  messages: {
+    async get(opts: HonchoClientOptions, workspaceId: string, sessionId: string, messageId: string) {
+      const message = await request<ApiMessage>(opts, "GET",
+        `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`);
+      if (!message || typeof message.content !== "string") throw new Error("Invalid message response from Honcho");
+      return message;
     },
   },
 

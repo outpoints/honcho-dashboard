@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
+import { DeriverBacklog } from "@/components/DeriverBacklog";
+import { useDeriverMetrics } from "@/lib/honcho/useDeriverMetrics";
 import { StatusBar } from "@/components/StatusBar";
 import { StatTile, Chip, Button, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
@@ -50,6 +52,7 @@ const STATUS_RANK: Record<WorkspaceStatus, number> = {
 export function FleetPage() {
   const { navigate } = useNav();
   const { workspaceId: activeWorkspaceId, setWorkspaceId } = useActiveWorkspace();
+  const metrics = useDeriverMetrics();
 
   const fleet = useHonchoQuery<FleetData>(
     "fleet/queue-status",
@@ -124,7 +127,7 @@ export function FleetPage() {
                 {wsTotal.toLocaleString()} workspaces
               </Chip>
             ) : null}
-            <RefreshButton label="REFRESH" onClick={() => fleet.refetch()} />
+            <RefreshButton label="REFRESH" onClick={() => { fleet.refetch(); metrics.refetch(); }} />
           </div>
         }
       />
@@ -229,6 +232,7 @@ export function FleetPage() {
         </Panel>
       )}
 
+      <DeriverBacklog metrics={metrics} />
       <StatusBar />
     </div>
   );

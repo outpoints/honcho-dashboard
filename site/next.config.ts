@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Project guidance is maintained in the repository-root CLAUDE.md.
+  agentRules: false,
 
   // The Honcho SDK calls `new URL("/v3/...", baseURL)` which discards any path
   // on the baseURL. Rewriting browser-side `/v3/...` and `/health` to our proxy

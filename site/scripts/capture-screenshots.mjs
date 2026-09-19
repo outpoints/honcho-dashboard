@@ -1,11 +1,19 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "../..");
-const outputDirectory = resolve(repositoryRoot, "docs");
+const releaseSet = process.env.SCREENSHOT_SET === "honcho32";
+const overviewOnly = process.env.SCREENSHOT_SET === "overview";
+const outputDirectory = releaseSet
+  ? resolve(process.env.SCREENSHOT_OUTPUT_DIR || resolve(tmpdir(), "honcho-dashboard-v1.2.0/images"))
+  : resolve(repositoryRoot, "docs");
+if (releaseSet && (outputDirectory === repositoryRoot || outputDirectory.startsWith(`${repositoryRoot}/`))) {
+  throw new Error("Release/social captures must be saved outside the Git repository.");
+}
 const baseUrl = process.env.SCREENSHOT_BASE_URL ?? "http://localhost:3000";
 const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined;
 const workspaceId = "acme_support";
@@ -119,6 +127,32 @@ const conclusions = [
   conclusion("conclusion-demo-002", "support_bot", "demo_user", "Search results can preserve relevance or use stable chronological ordering.", 45),
   conclusion("conclusion-demo-001", "demo_agent", "docs_reviewer", "Unmocked API requests are blocked during screenshot capture.", 70),
 ];
+
+// A complete, generated provenance chain for the release screenshots.
+const demoConclusion = { ...conclusions[0], level: "deductive", times_derived: 4,
+  source_ids: [conclusions[1].id], content: "Use generated demo data when sharing dashboard screenshots." };
+const demoParent = { ...conclusions[1], level: "explicit", times_derived: 2,
+  source_ids: null, content: "The demo user wants private memories kept out of public screenshots." };
+const demoDerived = { ...conclusions[2], level: "deductive", times_derived: 1,
+  source_ids: [demoConclusion.id], content: "Release images should be captured in an isolated synthetic workspace." };
+const provenance = [demoConclusion, demoParent, demoDerived];
+const demoEvidence = {
+  conclusions: [demoConclusion],
+  messages: [{ id: "msg-demo-007", session_id: "support-intake-001", peer_id: "demo_user", created_at: messages[1].created_at }],
+  tool_calls: [{ tool_name: "search_messages", tool_input: { query: "screenshot privacy preferences" } }],
+  reasoning_trace_id: "demo-trace-001",
+};
+const demoTraces = ["llm.call.traced", "embedding.call.traced"].map((type, index) => ({
+  id: `demo-trace-00${index + 1}`, type, schema_version: 2,
+  metadata: { timestamp: isoHoursAgo(index), source: "/honcho/synthetic-demo", workspace_name: workspaceId,
+    session_id: "support-intake-001", model: index ? "demo-embedding-model" : "demo-chat-model",
+    outcome: "success", duration_ms: index ? 180 : 1420, attempt: 1, retry_attempts: 3,
+    agent_type: index ? "embedding" : "dialectic", call_purpose: index ? "Index session messages" : "Answer with memory evidence",
+    transport: "http", provider: "demo-provider", provider_label: "Synthetic Demo", is_final_attempt: true,
+    was_fallback: false, was_stream: false, was_truncated: false, finish_reason: "stop",
+    trace_id: "demo-trace-001", source_message_ids: ["msg-demo-007"], honcho_version: "3.2.0",
+    system_prompt_ref: "sha256:demo-prompt", provider_input_tokens: 840, provider_output_tokens: 120 },
+}));
 
 const queueByWorkspace = {
   acme_support: queue(128, 112, 2, 14),
@@ -241,14 +275,16 @@ function normalizedHonchoPath(pathname) {
 
 function throughputResponse() {
   const end = now.getTime();
-  const buckets = Array.from({ length: 48 }, (_, index) => {
-    const wave = Math.sin(index / 4) * 12;
-    return {
-      ts: new Date(end - (47 - index) * 30 * 60_000).toISOString(),
-      reads: Math.max(8, Math.round(38 + wave + (index % 7) * 3)),
-      writes: Math.max(4, Math.round(22 + wave / 2 + (index % 5) * 2)),
-    };
-  });
+  // Generated hourly activity: read-heavy bursts, quieter intervals, and
+  // occasional write spikes. Keep both series positive for the demo image.
+  // These values are illustrative, not copied from a production time series.
+  const reads = [310, 310, 560, 190, 210, 450, 58, 44, 36, 32, 46, 124, 286, 286, 52, 42, 56, 284, 58, 58, 82, 88, 88, 326];
+  const writes = [14, 14, 28, 105, 26, 18, 14, 12, 10, 10, 12, 30, 22, 22, 12, 12, 16, 142, 20, 20, 54, 48, 48, 62];
+  const buckets = reads.map((count, index) => ({
+    ts: new Date(end - (reads.length - 1 - index) * 60 * 60_000).toISOString(),
+    reads: count,
+    writes: writes[index],
+  }));
   return { available: true, buckets };
 }
 
@@ -311,6 +347,20 @@ function reasoningTask(id, taskType, taskPeer, sessionId, status, hoursAgo, toke
 }
 
 async function mockOperator(route, url) {
+  if (url.pathname === "/api/operator/traces") return json(route, {
+    available: true, entries: demoTraces, bytes_read: 2400, truncated: false, skipped: 0, malformed: 0, generated_at: now.toISOString(),
+  });
+  if (url.pathname === "/api/operator/diagnostics") return json(route, {
+    generated_at: now.toISOString(), probes: [
+      { id: "demo-api", category: "honcho", label: "Honcho API", status: "ok", timing_ms: 12 },
+      { id: "demo-db", category: "database", label: "Database connection", status: "ok", timing_ms: 4 },
+      { id: "demo-operator", category: "operator", label: "Operator runtime", status: "ok", timing_ms: 2 },
+    ],
+  });
+  if (url.pathname === "/api/operator/config") return json(route, { available: true, entries: [
+    { key: "HONCHO_TRACE_FILE", value: "Synthetic collector export", redacted: false, set: true },
+  ] });
+  if (url.pathname === "/api/operator/logs") return json(route, { available: true, entries: [] });
   if (url.pathname !== "/api/operator/db") {
     return json(route, { available: true, synthetic: true });
   }
@@ -347,8 +397,16 @@ async function mockHoncho(route, request, url) {
 
   if (path === "/health") return json(route, { status: "ok" });
   if (path === "/openapi.json") {
-    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.1" } });
+    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.0" } });
   }
+  if (path === "/deriver/metrics") return json(route, {
+    outstanding_work_seconds: 125, eligible_work_units: 18, claimed_work_units: 3, pending_items: 24,
+    oldest_pending_age_seconds: 90, embeddings_pending: 8, embeddings_pending_due: 3, dreams_due: 2,
+    measured_at: Math.floor(Date.now() / 1000), measurement_age_seconds: 2,
+  });
+  if (path.endsWith("/scopes/list")) return json(route, page([
+    { id: "demo_documentation", workspace_id: workspaceId, created_at: isoDaysAgo(7) },
+  ]));
   if (path === "/v3/workspaces/list") return json(route, page(workspaces));
   if (path === "/v3/workspaces" && method === "POST") {
     return json(route, workspaceFor(body.id ?? workspaceId));
@@ -385,6 +443,7 @@ async function mockHoncho(route, request, url) {
     const id = decodeURIComponent(messageListMatch[2]);
     return json(route, page(messages.filter((item) => item.session_id === id)));
   }
+  if (path.endsWith("/messages/msg-demo-007")) return json(route, messages[1]);
 
   const summariesMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/sessions\/([^/]+)\/summaries$/);
   if (summariesMatch) {
@@ -409,12 +468,19 @@ async function mockHoncho(route, request, url) {
   if (chatMatch) {
     return json(route, {
       content:
-        "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.",
+        releaseSet ? "Use generated demo data and keep private memories out of shared screenshots. Capture an isolated workspace, then review each image before posting." : "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.",
+      ...(body.include_evidence ? { evidence: demoEvidence } : {}),
     });
   }
 
   const conclusionListMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/conclusions\/list$/);
-  if (conclusionListMatch) return json(route, page(conclusions, 482));
+  if (conclusionListMatch) {
+    if (body.filters?.id) return json(route, page(provenance.filter((item) => body.filters.id.in.includes(item.id))));
+    if (body.filters?.source_ids) return json(route, page(provenance.filter((item) => item.source_ids?.includes(body.filters.source_ids.contains))));
+    return json(route, page(releaseSet ? provenance : conclusions, releaseSet ? provenance.length : 482));
+  }
+  const detail = provenance.find((item) => path.endsWith(`/conclusions/${item.id}`));
+  if (detail) return json(route, detail);
 
   const conclusionQueryMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/conclusions\/query$/);
   if (conclusionQueryMatch) return json(route, conclusions.slice(0, 4));
@@ -449,8 +515,8 @@ async function main() {
   });
   try {
   const context = await browser.newContext({
-    viewport: { width: 1600, height: 1180 },
-    deviceScaleFactor: 2,
+    viewport: releaseSet ? { width: 1440, height: 1080 } : { width: 1600, height: 1180 },
+    deviceScaleFactor: releaseSet ? 1 : 2,
     colorScheme: "dark",
     reducedMotion: "reduce",
     locale: "en-US",
@@ -507,32 +573,78 @@ async function main() {
     if (message.type() === "error") pageErrors.push(message.text());
   });
 
-  await openRoute(page, "fleet", "QUEUE_STATUS");
+  if (overviewOnly) {
+    await openRoute(page, "overview", "52 weeks · 7 days");
+    await capture(page, "overview.png");
+  } else if (releaseSet) {
+    await openRoute(page, "chat?peer=demo_agent", "TRANSCRIPT");
+    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
+    await page.locator('input[placeholder^="ask demo_agent"]').fill("How should I prepare screenshots for sharing?");
+    await page.getByRole("button", { name: "SEND", exact: true }).click();
+    await page.getByRole("button", { name: /SHOW_EVIDENCE/ }).click();
+    await page.getByRole("button", { name: "READ_MESSAGE", exact: true }).click();
+    await page.getByText(messages[1].content, { exact: true }).waitFor();
+    await capture(page, "01-chat-evidence.png");
+    await page.getByRole("button", { name: "PROVENANCE", exact: true }).click();
+    await page.getByText(demoParent.content, { exact: true }).waitFor();
+    await page.getByText(demoDerived.content, { exact: true }).waitFor();
+    await capture(page, "02-conclusion-provenance.png");
+    await page.setViewportSize({ width: 430, height: 932 });
+    await capture(page, "05-mobile-provenance.png");
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await page.keyboard.press("Escape");
+    await openRoute(page, "fleet", "2m 5s");
+    await page.getByText("acme_support", { exact: true }).last().waitFor();
+    await capture(page, "03-instance-backlog.png");
+    await openRoute(page, "diagnostics", "demo-chat-model");
+    await capture(page, "04-call-traces.png");
+    await page.getByRole("button", { name: "Inspect trace demo-trace-001", exact: true }).click();
+    await page.getByRole("dialog", { name: "[ TRACE_DETAILS ]", exact: true }).waitFor();
+    await capture(page, "06-trace-details.png");
+  } else {
+  await openRoute(page, "fleet", "2m 5s");
   await capture(page, "fleet.png");
 
   await openRoute(page, "overview", "52 weeks · 7 days");
   await capture(page, "overview.png");
 
   await openRoute(page, "reasoning", "operator/db · queue table");
+  await page.getByText("2m 5s", { exact: true }).waitFor();
   const firstTask = page.locator('button[aria-expanded]').filter({ hasText: "representation" }).first();
   if (await firstTask.count()) await firstTask.click();
   await capture(page, "reasoning.png");
 
   await openRoute(page, "chat?peer=demo_agent&session=support-intake-001", "TRANSCRIPT");
   const chatInput = page.locator('input[placeholder^="ask demo_agent"]');
+  await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
   await chatInput.fill("How is this screenshot kept privacy-safe?");
   await page.getByRole("button", { name: "SEND", exact: true }).click();
   await page.getByText("This is a synthetic demo answer.", { exact: false }).waitFor();
+  await page.getByRole("button", { name: /SHOW_EVIDENCE/ }).click();
+  await page.getByRole("button", { name: "READ_MESSAGE", exact: true }).click();
+  await page.getByText(messages[1].content, { exact: true }).waitFor();
   await capture(page, "chat.png");
+
+  await page.getByRole("button", { name: "PROVENANCE", exact: true }).click();
+  await page.getByText(demoParent.content, { exact: true }).waitFor();
+  await page.getByText(demoDerived.content, { exact: true }).waitFor();
+  await capture(page, "provenance.png");
+  await page.keyboard.press("Escape");
 
   await openRoute(page, "conclusions", "Repository screenshots must contain synthetic fixture data only.");
   await capture(page, "conclusions.png");
 
   await openRoute(page, "search", "Search the selected workspace");
+  await page.getByRole("button", { name: "SCOPE", exact: true }).click();
+  await page.getByRole("button", { name: "select a scope…", exact: true }).click();
+  await page.getByRole("option", { name: "demo_documentation", exact: true }).click();
   await page.locator('input[placeholder^="search acme_support"]').fill("privacy-safe screenshots");
   await page.getByRole("button", { name: "SEARCH", exact: true }).click();
   await page.getByText("5 MATCHES", { exact: true }).waitFor();
   await capture(page, "search.png");
+
+  await openRoute(page, "diagnostics", "demo-chat-model");
+  await capture(page, "diagnostics.png");
 
   await page.evaluate(() => {
     localStorage.setItem("honcho-dashboard:writeActions", "true");
@@ -556,6 +668,7 @@ async function main() {
     '{"source":"synthetic-screenshot"}',
   );
   await capture(page, "session-upload.png");
+  }
 
   if (unexpectedRequests.size > 0) {
     throw new Error(`Capture blocked unexpected requests:\n${[...unexpectedRequests].join("\n")}`);
@@ -564,7 +677,7 @@ async function main() {
     throw new Error(`Browser errors during capture:\n${pageErrors.join("\n")}`);
   }
 
-  process.stdout.write(`Captured 8 synthetic screenshots in ${outputDirectory}\n`);
+  process.stdout.write(`Captured ${overviewOnly ? 1 : releaseSet ? 6 : 10} synthetic screenshots in ${outputDirectory}\n`);
   } finally {
     await browser.close();
   }
