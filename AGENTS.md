@@ -1,4 +1,4 @@
-# CLAUDE.md — honcho-dashboard
+# AGENTS.md — honcho-dashboard
 
 ## North star
 
@@ -26,7 +26,7 @@ Every page talks to a real Honcho `v3` API. The product is mature: beyond a basi
 │   │   └── types/         # honcho.ts (domain types)
 │   ├── docs/research/     # BEHAVIORS / COLOR_AUDIT / DROPDOWN specs (read before changing UX)
 │   └── public/            # images, fonts, seo
-└── CLAUDE.md              # this file
+└── AGENTS.md              # this file
 ```
 
 Routing is **hash-based inside `AppShell`** (`#/overview`, `#/workspaces`, …). Add new top-level screens by appending to `NAV_ITEMS` in `src/lib/data.ts`, adding a `RouteKey` in `src/types/honcho.ts`, and registering a page in `RENDER` inside `src/components/AppShell.tsx`. Don't switch to file-based routing without discussion — too much UI is wired through `AppShell`.
@@ -119,7 +119,7 @@ before replacing any image referenced by the README.
 ## Working rules
 
 - **Real before pretty.** Wire a page to the API before adding new UI flourishes. A working CRUD beats another mock dashboard tile.
-- **Loading / empty / error states are not optional.** Every fetch path renders all three. CLAUDE.md global rules apply: AI-generated code defaults to happy path — audit each new page for failure modes.
+- **Loading / empty / error states are not optional.** Every fetch path renders all three. AGENTS.md global rules apply: AI-generated code defaults to happy path — audit each new page for failure modes.
 - **Don't delete the mocks.** Keep `src/lib/data.ts` until each page no longer imports from it; remove per-section as you migrate.
 - **Follow the design guide.** `site/docs/research/DESIGN_GUIDE.md` is binding for every UI change — read it before touching components. Key rules: reuse `Panel`/`Modal`/atoms (never raw HTML controls or hand-rolled overlays), **all popups use `Modal`/`ConfirmModal` (never `window.prompt/confirm/alert`)**, booleans use `Checkbox` (not the broken `Toggle`), colors/type come from `@theme` tokens only, labels in `SCREAMING_SNAKE` and hints in sentence case. The `site-clone` branch is the canonical design baseline.
 - **Mutations confirm before write.** Every create/update/delete/save against the live instance funnels through `useConfirm()` (`src/components/confirm.tsx`) and is gated by the `useWriteActions()` master toggle (`src/lib/writeActions.ts`, default off, set in CONFIG). Reads never confirm. New mutating UI must follow this — see DESIGN_GUIDE.md §4.

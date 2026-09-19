@@ -185,7 +185,7 @@ Docker network, the proxy can talk to Honcho via the internal service name.
 │   └── package.json
 ├── docker-compose-example.yml  # template → copy to docker-compose.yml (gitignored)
 ├── docs/                        # PII-free product screenshots + capture policy
-├── CLAUDE.md
+├── AGENTS.md
 ├── .github/workflows/          # CI runs inside site/
 └── LICENSE                     # GPL-3.0
 ```

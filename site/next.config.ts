@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // Project guidance is maintained in the repository-root CLAUDE.md.
+  // Project guidance is maintained in the repository-root AGENTS.md.
   agentRules: false,
 
   // The Honcho SDK calls `new URL("/v3/...", baseURL)` which discards any path
