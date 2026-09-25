@@ -1,6 +1,6 @@
 "use client";
 
-import type { Evidence, Scope } from "@honcho-ai/sdk";
+import type { Scope } from "@honcho-ai/sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,7 +10,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { Button, Checkbox, Field, PillTabs, TextInput } from "@/components/atoms";
 import { ChatEvidence } from "@/components/ChatEvidence";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
-import { chatWithEvidence } from "@/lib/honcho/chat";
+import { chatWithEvidence, type DashboardEvidence } from "@/lib/honcho/chat";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -38,7 +38,7 @@ interface Turn {
   role: "user" | "assistant";
   content: string;
   label?: string;
-  evidence?: Evidence | null;
+  evidence?: DashboardEvidence | null;
 }
 
 function recallBoundary(value: string): { sessionId?: string; scopeId?: string } {

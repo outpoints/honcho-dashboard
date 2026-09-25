@@ -46,15 +46,16 @@ Routing is **hash-based inside `AppShell`** (`#/overview`, `#/workspaces`, …).
 ## Releasing
 
 Versioned with semver. The single source of truth is `site/package.json` (`version`);
-keep it in sync with the README `## Changelog`.
+keep the package lockfile version in sync.
 
 To cut a release:
 
-1. Bump `site/package.json` `version` and add a matching `## Changelog` entry in the
-   README — in the **same commit** as the work being released.
-2. Add `.github/release-notes/vX.Y.Z.md` with **What changed**, **Compatibility**,
-   **Upgrade**, and any applicable **Known limitation** section. The release workflow
-   publishes this file verbatim after the container image succeeds.
+1. Bump `site/package.json` and its lockfile version in the **same commit** as the
+   work being released.
+2. Keep new changelog and release-note drafts in a temporary directory **outside
+   the repository**. Do not add them to the README or `.github/release-notes/`.
+   Include **What changed**, **Compatibility**, **Upgrade**, and any applicable
+   **Known limitation** section. Existing historical changelogs can remain.
 3. Run `npm run check` and commit.
 4. After the commit is on `main`, tag it `vX.Y.Z` (strict semver, leading `v`) and push
    the tag. The GHCR workflow (`.github/workflows/docker-release.yml`) builds and
@@ -63,6 +64,10 @@ To cut a release:
    and never reuse or move a published tag. If infrastructure interrupts a build,
    manually dispatch the same workflow with the existing immutable tag; it checks out
    that tag rather than rebuilding from the current branch.
+5. Once the image succeeds, the GitHub Release workflow creates the release with
+   generated notes. Apply the reviewed external draft with
+   `gh release edit vX.Y.Z --notes-file /path/outside/repo/release-notes.md` and
+   verify the published body. Never move the draft into Git to feed the workflow.
 
 `1.0.0` is the first stable release. From here, use
 standard semver: patch for fixes, minor for backward-compatible features, major for
@@ -88,7 +93,7 @@ Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
-Use `@honcho-ai/sdk` 2.5+ for scopes, scope-aware search/context, peer scope
+Use `@honcho-ai/sdk` 2.5.1+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the
 side-effect-free compatibility probe; do not reintroduce raw 3.1 feature paths.
 
@@ -99,6 +104,11 @@ the SDK supplies null/1 defaults for older servers. Preserve it with
 conclusion/reasoning-tree APIs require 3.2+; do not enable them unconditionally.
 Use `chatWithEvidence` to normalize the SDK's string/evidence response overloads.
 Evidence is opt-in, tied to its answer, and means accessed records, not citations.
+SDK 2.5.1 types evidence `observer_id`/`observed_id` as required, but Honcho 3.2.0
+omits them. Keep the dashboard's `DashboardEvidence` compatibility type and validate
+these fields only when present; never infer missing attribution from the chat target.
+Honcho 3.2.1 returns `source_ids: []` for explicit conclusions; older servers can
+return null or omit attribution. Preserve both and treat either as no parents.
 Use `honcho.messages.get` for evidence text: SDK `session(id)` get-or-creates
 the session and must not be used for this read-only lookup.
 Use `provenance.ts` for one-level, paginated parent/backlink reads; do not recursively

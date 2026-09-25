@@ -273,8 +273,8 @@ export function ContextPage() {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
-        <Field label="SCOPE" hint="Optional visibility boundary for the representation.">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 items-start">
+        <Field label="SCOPE" hint="Optional visibility boundary for the representation." className="row-span-3 grid grid-rows-subgrid gap-y-1.5 space-y-0">
           <Select
             value={effectiveScopeId}
             onChange={(next) => {
@@ -293,7 +293,7 @@ export function ContextPage() {
             }
           />
         </Field>
-        <Field label="SESSION">
+        <Field label="SESSION" className="row-span-3 grid grid-rows-subgrid gap-y-1.5 space-y-0">
           <Select
             value={effectiveSessionId}
             onChange={setSessionId}
@@ -308,7 +308,7 @@ export function ContextPage() {
             }
           />
         </Field>
-        <Field label="PEER">
+        <Field label="PEER" className="row-span-3 grid grid-rows-subgrid gap-y-1.5 space-y-0">
           <Select
             value={peerId}
             onChange={setPeerId}
@@ -317,7 +317,7 @@ export function ContextPage() {
             placeholder="select a peer…"
           />
         </Field>
-        <Field label="TOKEN_LIMIT" hint={<span className="tabular-nums">{tokenLimit}</span>}>
+        <Field label="TOKEN_LIMIT" hint={<span className="tabular-nums">{tokenLimit}</span>} className="row-span-3 grid grid-rows-subgrid gap-y-1.5 space-y-0">
           <input
             type="range"
             min={500}
@@ -325,18 +325,20 @@ export function ContextPage() {
             step={250}
             value={tokenLimit}
             onChange={(e) => setTokenLimit(parseInt(e.target.value))}
-            className="w-full accent-accent"
+            className="h-full w-full accent-accent"
           />
         </Field>
-        <Button
-          variant="primary"
-          icon="sparkles"
-          className="self-end"
-          onClick={generate}
-          disabled={!canGenerate}
-        >
-          {busy ? "GENERATING…" : "GENERATE_CONTEXT"}
-        </Button>
+        <div className="row-span-3 grid grid-rows-subgrid gap-y-1.5">
+          <Button
+            variant="primary"
+            icon="sparkles"
+            className="row-start-2 self-center"
+            onClick={generate}
+            disabled={!canGenerate}
+          >
+            {busy ? "GENERATING…" : "GENERATE_CONTEXT"}
+          </Button>
+        </div>
       </div>
 
       {!scopesAvailable ? (

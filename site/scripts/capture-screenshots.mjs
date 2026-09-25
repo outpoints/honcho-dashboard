@@ -6,10 +6,11 @@ import { chromium } from "playwright";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "../..");
-const releaseSet = process.env.SCREENSHOT_SET === "honcho32";
+const honcho321Set = process.env.SCREENSHOT_SET === "honcho321";
+const releaseSet = honcho321Set || process.env.SCREENSHOT_SET === "honcho32";
 const overviewOnly = process.env.SCREENSHOT_SET === "overview";
 const outputDirectory = releaseSet
-  ? resolve(process.env.SCREENSHOT_OUTPUT_DIR || resolve(tmpdir(), "honcho-dashboard-v1.2.0/images"))
+  ? resolve(process.env.SCREENSHOT_OUTPUT_DIR || resolve(tmpdir(), `honcho-dashboard-v${honcho321Set ? "1.2.1" : "1.2.0"}/images`))
   : resolve(repositoryRoot, "docs");
 if (releaseSet && (outputDirectory === repositoryRoot || outputDirectory.startsWith(`${repositoryRoot}/`))) {
   throw new Error("Release/social captures must be saved outside the Git repository.");
@@ -132,7 +133,7 @@ const conclusions = [
 const demoConclusion = { ...conclusions[0], level: "deductive", times_derived: 4,
   source_ids: [conclusions[1].id], content: "Use generated demo data when sharing dashboard screenshots." };
 const demoParent = { ...conclusions[1], level: "explicit", times_derived: 2,
-  source_ids: null, content: "The demo user wants private memories kept out of public screenshots." };
+  source_ids: [], content: "The demo user wants private memories kept out of public screenshots." };
 const demoDerived = { ...conclusions[2], level: "deductive", times_derived: 1,
   source_ids: [demoConclusion.id], content: "Release images should be captured in an isolated synthetic workspace." };
 const provenance = [demoConclusion, demoParent, demoDerived];
@@ -142,6 +143,7 @@ const demoEvidence = {
   tool_calls: [{ tool_name: "search_messages", tool_input: { query: "screenshot privacy preferences" } }],
   reasoning_trace_id: "demo-trace-001",
 };
+const demoWorkspaceEvidence = { ...demoEvidence, conclusions: [demoConclusion, demoDerived] };
 const demoTraces = ["llm.call.traced", "embedding.call.traced"].map((type, index) => ({
   id: `demo-trace-00${index + 1}`, type, schema_version: 2,
   metadata: { timestamp: isoHoursAgo(index), source: "/honcho/synthetic-demo", workspace_name: workspaceId,
@@ -150,7 +152,7 @@ const demoTraces = ["llm.call.traced", "embedding.call.traced"].map((type, index
     agent_type: index ? "embedding" : "dialectic", call_purpose: index ? "Index session messages" : "Answer with memory evidence",
     transport: "http", provider: "demo-provider", provider_label: "Synthetic Demo", is_final_attempt: true,
     was_fallback: false, was_stream: false, was_truncated: false, finish_reason: "stop",
-    trace_id: "demo-trace-001", source_message_ids: ["msg-demo-007"], honcho_version: "3.2.0",
+    trace_id: "demo-trace-001", source_message_ids: ["msg-demo-007"], honcho_version: "3.2.1",
     system_prompt_ref: "sha256:demo-prompt", provider_input_tokens: 840, provider_output_tokens: 120 },
 }));
 
@@ -397,7 +399,7 @@ async function mockHoncho(route, request, url) {
 
   if (path === "/health") return json(route, { status: "ok" });
   if (path === "/openapi.json") {
-    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.0" } });
+    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.1" } });
   }
   if (path === "/deriver/metrics") return json(route, {
     outstanding_work_seconds: 125, eligible_work_units: 18, claimed_work_units: 3, pending_items: 24,
@@ -407,6 +409,7 @@ async function mockHoncho(route, request, url) {
   if (path.endsWith("/scopes/list")) return json(route, page([
     { id: "demo_documentation", workspace_id: workspaceId, created_at: isoDaysAgo(7) },
   ]));
+  if (path.endsWith("/scopes/demo_documentation/sessions/list")) return json(route, page(sessions.slice(0, 2)));
   if (path === "/v3/workspaces/list") return json(route, page(workspaces));
   if (path === "/v3/workspaces" && method === "POST") {
     return json(route, workspaceFor(body.id ?? workspaceId));
@@ -445,6 +448,21 @@ async function mockHoncho(route, request, url) {
   }
   if (path.endsWith("/messages/msg-demo-007")) return json(route, messages[1]);
 
+  const contextMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/sessions\/([^/]+)\/context$/);
+  if (contextMatch) {
+    const id = decodeURIComponent(contextMatch[2]);
+    return json(route, {
+      id,
+      peer_card: ["Demo user reviews dashboard documentation.", "Prefers concise, practical answers."],
+      peer_representation: `${demoParent.content}\n${demoConclusion.content}`,
+      summary: {
+        content: "The demo workspace is preparing release screenshots using generated data and an isolated browser.",
+        message_id: "msg-demo-008", summary_type: "short", created_at: isoHoursAgo(1), token_count: 20,
+      },
+      messages: messages.filter((item) => item.session_id === id),
+    });
+  }
+
   const summariesMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/sessions\/([^/]+)\/summaries$/);
   if (summariesMatch) {
     const id = decodeURIComponent(summariesMatch[2]);
@@ -464,12 +482,12 @@ async function mockHoncho(route, request, url) {
   const searchMatch = path.match(/^\/v3\/workspaces\/([^/]+)(?:\/sessions\/[^/]+|\/peers\/[^/]+)?\/search$/);
   if (searchMatch) return json(route, messages.slice(0, 5));
 
-  const chatMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/peers\/([^/]+)\/chat$/);
+  const chatMatch = path.match(/^\/v3\/workspaces\/([^/]+)(?:\/peers\/([^/]+))?\/chat$/);
   if (chatMatch) {
     return json(route, {
       content:
-        releaseSet ? "Use generated demo data and keep private memories out of shared screenshots. Capture an isolated workspace, then review each image before posting." : "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.",
-      ...(body.include_evidence ? { evidence: demoEvidence } : {}),
+        honcho321Set ? "Use synthetic data in an isolated workspace. Review every image before sharing." : releaseSet ? "Use generated demo data and keep private memories out of shared screenshots. Capture an isolated workspace, then review each image before posting." : "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.",
+      ...(body.include_evidence ? { evidence: chatMatch[2] ? demoEvidence : demoWorkspaceEvidence } : {}),
     });
   }
 
@@ -496,7 +514,7 @@ async function capture(page, fileName) {
     path: resolve(outputDirectory, fileName),
     animations: "disabled",
     caret: "hide",
-    fullPage: false,
+    fullPage: honcho321Set,
   });
 }
 
@@ -504,6 +522,15 @@ async function openRoute(page, route, readyText) {
   await page.goto(`${baseUrl}/#/${route}`, { waitUntil: "domcontentloaded" });
   await page.getByText(readyText, { exact: false }).first().waitFor({ state: "visible" });
   await page.waitForTimeout(450);
+}
+
+async function captureContext(page, fileName) {
+  await openRoute(page, "context?session=support-intake-001&peer=demo_user", "CONTEXT_LAYERS");
+  await page.getByRole("button", { name: "— global representation —", exact: true }).click();
+  await page.getByRole("option", { name: "demo_documentation", exact: true }).click();
+  await page.getByRole("button", { name: "GENERATE_CONTEXT", exact: true }).click();
+  await page.getByText("Demo user reviews dashboard documentation.", { exact: false }).first().waitFor();
+  await capture(page, fileName);
 }
 
 async function main() {
@@ -519,6 +546,7 @@ async function main() {
     deviceScaleFactor: releaseSet ? 1 : 2,
     colorScheme: "dark",
     reducedMotion: "reduce",
+    serviceWorkers: "block",
     locale: "en-US",
     timezoneId: "UTC",
   });
@@ -576,6 +604,32 @@ async function main() {
   if (overviewOnly) {
     await openRoute(page, "overview", "52 weeks · 7 days");
     await capture(page, "overview.png");
+  } else if (honcho321Set) {
+    await openRoute(page, "chat", "TRANSCRIPT");
+    await page.getByRole("button", { name: "WORKSPACE", exact: true }).click();
+    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
+    await page.locator('input[placeholder^="ask across"]').fill("How should this workspace prepare screenshots for sharing?");
+    await page.getByRole("button", { name: "SEND", exact: true }).click();
+    await page.getByRole("button", { name: /SHOW_EVIDENCE/ }).click();
+    await page.getByText("demo_agent → demo_user", { exact: true }).waitFor();
+    await page.getByText("docs_reviewer → demo_agent", { exact: true }).waitFor();
+    await page.locator("div.justify-start").filter({ has: page.getByRole("region", { name: "Evidence conclusions" }) })
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await capture(page, "01-evidence-attribution.png");
+
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.getByRole("region", { name: "Evidence conclusions", exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await capture(page, "04-mobile-evidence.png");
+    await page.setViewportSize({ width: 1440, height: 1080 });
+
+    await page.getByRole("button", { name: "PROVENANCE", exact: true }).first().click();
+    await page.getByRole("button", { name: `Inspect conclusion ${demoParent.id}`, exact: true }).click();
+    await page.getByText("No parent conclusions recorded", { exact: false }).waitFor();
+    await page.getByRole("button", { name: `Inspect conclusion ${demoConclusion.id}`, exact: true }).waitFor();
+    await capture(page, "03-explicit-conclusion.png");
+    await page.keyboard.press("Escape");
+    await captureContext(page, "02-context-alignment.png");
   } else if (releaseSet) {
     await openRoute(page, "chat?peer=demo_agent", "TRANSCRIPT");
     await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
@@ -646,6 +700,8 @@ async function main() {
   await openRoute(page, "diagnostics", "demo-chat-model");
   await capture(page, "diagnostics.png");
 
+  await captureContext(page, "context.png");
+
   await page.evaluate(() => {
     localStorage.setItem("honcho-dashboard:writeActions", "true");
     window.dispatchEvent(new Event("honcho-dashboard:writeActions-change"));
@@ -677,7 +733,7 @@ async function main() {
     throw new Error(`Browser errors during capture:\n${pageErrors.join("\n")}`);
   }
 
-  process.stdout.write(`Captured ${overviewOnly ? 1 : releaseSet ? 6 : 10} synthetic screenshots in ${outputDirectory}\n`);
+  process.stdout.write(`Captured ${overviewOnly ? 1 : honcho321Set ? 4 : releaseSet ? 6 : 11} synthetic screenshots in ${outputDirectory}\n`);
   } finally {
     await browser.close();
   }

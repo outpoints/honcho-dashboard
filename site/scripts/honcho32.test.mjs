@@ -8,7 +8,7 @@ import { parseDeriverMetrics, formatDuration } from "../src/lib/honcho/deriverMe
 import { honcho } from "../src/lib/honcho/client.ts";
 
 const conclusion = (id, sources = null) => ({ id, content: `Fact ${id}`, observer_id: "alice", observed_id: "alice", session_id: null,
-  level: sources ? "deductive" : "explicit", source_ids: sources, times_derived: 3, created_at: "2026-09-18T00:00:00Z" });
+  level: sources?.length ? "deductive" : "explicit", source_ids: sources, times_derived: 3, created_at: "2026-09-18T00:00:00Z" });
 const evidence = { conclusions: [{ ...conclusion("child", ["parent"]), source_ids: ["parent"] }],
   messages: [{ id: "message-1", session_id: "session-1", peer_id: "alice", created_at: "2026-09-18T00:00:00Z" }],
   tool_calls: [{ tool_name: "query_memory", tool_input: { query: "meetings" } }], reasoning_trace_id: "trace-1" };
@@ -89,6 +89,52 @@ test("provenance uses batched ordered premises, missing markers and workspace-wi
   assert.equal(new URL(requests.at(-1).url).searchParams.get("page"), "2");
 });
 
+for (const version of ["3.2.0", "3.2.1"]) {
+  test(`SDK 2.5.1 preserves ${version} evidence attribution and explicit conclusion provenance`, async (t) => {
+    const { observer_id, observed_id, ...legacyRecord } = evidence.conclusions[0];
+    const records = version === "3.2.0" ? [legacyRecord] : [
+      { ...legacyRecord, observer_id, observed_id },
+      { ...legacyRecord, id: "other-pair", observer_id: "assistant", observed_id: "bob" },
+    ];
+    const returnedEvidence = { ...evidence, conclusions: records };
+    const explicit = conclusion("explicit", version === "3.2.0" ? null : []);
+    const calls = [];
+    t.mock.method(globalThis, "fetch", async (url, init) => {
+      const path = new URL(url).pathname;
+      calls.push(path);
+      if (path === "/v3/workspaces") return json({ id: "test" });
+      if (path.endsWith("/peers")) return json({ id: "alice", workspace_id: "test" });
+      if (path.endsWith("/chat")) {
+        assert.equal(JSON.parse(init.body).include_evidence, true);
+        return json({ content: "Answer", evidence: returnedEvidence });
+      }
+      if (path.endsWith("/conclusions/explicit")) return json(explicit);
+      assert.fail(`Unexpected request: ${path}`);
+    });
+    const sdk = new Honcho({ baseURL: "http://honcho.test", workspaceId: "test", apiKey: "synthetic", maxRetries: 0 });
+    for (const peerId of ["alice", undefined]) {
+      const reply = await chatWithEvidence(sdk, "When?", { ...options, peerId });
+      assert.deepEqual(reply.evidence, returnedEvidence);
+      if (version === "3.2.0") assert.equal(Object.hasOwn(reply.evidence.conclusions[0], "observer_id"), false);
+    }
+    const detail = await getConclusion(sdk, "explicit", "available");
+    assert.deepEqual(detail, explicit);
+    const before = calls.length;
+    assert.deepEqual(await getPremises(sdk, detail.source_ids ?? [], 1, "available"), { items: [], pages: 1 });
+    assert.equal(calls.length, before, "No parent reads for either null or empty source IDs");
+  });
+}
+
+test("missing, null and partial evidence attribution remains usable on older responses", async () => {
+  for (const attribution of [{}, { observer_id: null, observed_id: null }, { observer_id: "alice" }, { observed_id: "bob" }]) {
+    const legacyRecord = { ...evidence.conclusions[0] };
+    delete legacyRecord.observer_id;
+    delete legacyRecord.observed_id;
+    const result = { content: "Answer", evidence: { ...evidence, conclusions: [{ ...legacyRecord, ...attribution }] } };
+    assert.deepEqual((await chatWithEvidence({ chat: async () => result }, "hello", options)).evidence, result.evidence);
+  }
+});
+
 test("evidence and provenance propagate permission and missing-resource failures", async (t) => {
   let status = 403;
   t.mock.method(globalThis, "fetch", async (url) => new URL(url).pathname === "/v3/workspaces"
@@ -140,6 +186,8 @@ test("malformed chat content and evidence fail in the service instead of crashin
   for (const bad of [null, {}, {content: {}, evidence: null},
     ...[{}, {...evidence, conclusions: null}, {...evidence, conclusions: [{content: {}}]},
       {...evidence, messages: [null]}, {...evidence, tool_calls: [{tool_name: {}}]},
+      ...["observer_id", "observed_id"].flatMap(key => [42, {}, []].map(value =>
+        ({...evidence, conclusions: [{...evidence.conclusions[0], [key]: value}]}))),
       {...evidence, reasoning_trace_id: {}}].map(evidence => ({content: "Answer", evidence}))]) {
     await assert.rejects(chatWithEvidence({chat: async () => bad}, "hello", options), /Invalid chat response/);
   }

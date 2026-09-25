@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { Evidence, EvidenceMessageRef } from "@honcho-ai/sdk";
+import type { EvidenceMessageRef } from "@honcho-ai/sdk";
+import type { DashboardEvidence } from "@/lib/honcho/chat";
 import { Button, Chip } from "@/components/atoms";
 import { ConclusionInspector, ReadError } from "@/components/ConclusionInspector";
 import { useActiveWorkspace } from "@/lib/honcho/config";
 import { useHonchoQuery } from "@/lib/honcho/useQuery";
 import { honcho } from "@/lib/honcho/client";
 
-export function ChatEvidence({ evidence }: { evidence: Evidence | null }) {
+export function ChatEvidence({ evidence }: { evidence: DashboardEvidence | null }) {
   const [open, setOpen] = useState(false);
   const [inspected, setInspected] = useState<string | null>(null);
   return <div className="mt-3 pt-3 border-t border-border space-y-3">
@@ -23,6 +24,10 @@ export function ChatEvidence({ evidence }: { evidence: Evidence | null }) {
           <h3 className="text-[10px] tracking-wider">CONCLUSIONS · {evidence.conclusions.length}</h3>
           {evidence.conclusions.length ? evidence.conclusions.map((item) => <div key={item.id} className="border border-border p-2 space-y-2">
             <p className="whitespace-pre-wrap break-words leading-relaxed">{item.content}</p>
+            {item.observer_id || item.observed_id ? <dl className="space-y-1">
+              <dt className="text-text-muted">OBSERVER → OBSERVED</dt>
+              <dd className="break-all">{item.observer_id || "Unrecorded"} → {item.observed_id || "Unrecorded"}</dd>
+            </dl> : <p className="text-text-muted">Peer attribution was not returned for this record.</p>}
             <div className="flex flex-wrap items-center gap-2"><Chip tone="purple">{item.level}</Chip>
               <Button size="sm" variant="ghost" onClick={() => setInspected(item.id)}>PROVENANCE</Button>
               <span className="break-all text-text-muted">{item.id}</span>

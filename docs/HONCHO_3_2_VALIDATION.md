@@ -1,5 +1,9 @@
 # Honcho 3.2 feature verification
 
+For the SDK 2.5.1 / Honcho 3.2.1 update, see
+[the patch verification and upgrade guide](HONCHO_3_2_1_VALIDATION.md).
+The results below describe the original 3.2.0 rollout.
+
 Verified 2026-09-18 against the tagged Honcho `v3.2.0` API and SDK `2.5.0`.
 The dashboard remains deployable before the server upgrade: evidence/provenance
 require a verified 3.2+ version; backlog requires 3.1.2+. Older/unknown servers

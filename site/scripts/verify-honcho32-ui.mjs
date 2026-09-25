@@ -21,6 +21,10 @@ const evidence = {conclusions:[root],messages:[{id:'message-1',session_id:'sessi
 const trace = {id:'synthetic-trace',type:'llm.call.traced',schema_version:2,metadata:{timestamp:date,source:'/honcho/synthetic/trace',workspace_name:ws.id,session_id:'session-1',model:'synthetic-model',outcome:'success',duration_ms:1420,attempt:1,retry_attempts:3,agent_type:'dialectic',system_prompt_ref:'sha256:synthetic-prompt',source_message_ids:['message-1']}};
 const pageOf = items => ({items,total:items.length,page:1,size:25,pages:1});
 async function contextFor(version, viewport) {
+ const attributed = version === '3.2.1';
+ const explicit = {...parent,source_ids:attributed?[]:null};
+ const {observer_id,observed_id,...legacyEvidence} = root;
+ const returnedEvidence = {...evidence,conclusions:[attributed?{...legacyEvidence,observer_id,observed_id}:legacyEvidence]};
  const context = await browser.newContext({viewport,reducedMotion:'reduce'});
  await context.addInitScript(({ws}) => {
   localStorage.setItem('honcho-dashboard:instances',JSON.stringify([{id:'synthetic',name:'Synthetic fixture',baseUrl:'http://synthetic.invalid:8000'}]));
@@ -29,7 +33,7 @@ async function contextFor(version, viewport) {
   localStorage.setItem('honcho-dashboard:theme','dark');
  },{ws:ws.id});
  const calls=[];
- const state={evidence,conclusionStatus:200,metricsStatus:200,messageStatus:200,traceStatus:'ready'};
+ const state={evidence:returnedEvidence,conclusionStatus:200,metricsStatus:200,messageStatus:200,traceStatus:'ready'};
  await context.route('**/*', async route => {
   const req=route.request(); const url=new URL(req.url());
   if(url.origin!==new URL(base).origin) {unexpected.push(url.href);return route.abort();}
@@ -54,10 +58,10 @@ async function contextFor(version, viewport) {
   if(path.endsWith('/messages/message-1')) return reply({...evidence.messages[0],workspace_id:ws.id,content:'Please schedule planning before noon.',token_count:8,metadata:{}});
   if(path.endsWith('/conclusions/list')) {
    const filters=body?.filters;
-   return reply(pageOf(filters?.id ? [parent] : filters?.source_ids ? filters.source_ids.contains===parent.id?[root]:[] : [root,parent]));
+   return reply(pageOf(filters?.id ? [explicit] : filters?.source_ids ? filters.source_ids.contains===parent.id?[root]:[] : [root,explicit]));
   }
   if(path.endsWith('/conclusions/conclusion-derived')||path.endsWith('/conclusions/conclusion-parent')) {
-   return state.conclusionStatus===200 ? reply(path.endsWith(root.id)?root:parent) : reply({detail:'Conclusion unavailable'},state.conclusionStatus);
+   return state.conclusionStatus===200 ? reply(path.endsWith(root.id)?root:explicit) : reply({detail:'Conclusion unavailable'},state.conclusionStatus);
   }
   if(path==='/deriver/metrics') return state.metricsStatus===200 ? reply({outstanding_work_seconds:125,eligible_work_units:3,claimed_work_units:1,pending_items:6,oldest_pending_age_seconds:90,embeddings_pending:2,embeddings_pending_due:1,dreams_due:2,measured_at:1789747200,measurement_age_seconds:2}) : reply({detail:'No measurement'},state.metricsStatus);
   if(path==='/api/operator/traces') return state.traceStatus==='error'?reply({detail:'fixture error'},500):reply({available:state.traceStatus!=='unconfigured',reason:'Set HONCHO_TRACE_FILE on the dashboard host.',entries:state.traceStatus==='empty'?[]:[trace],bytes_read:300,truncated:false,skipped:0,malformed:0,generated_at:date});
@@ -78,14 +82,16 @@ async function shot(page,name) {
  if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) overflows.push(name);
 }
 try {
+ for(const version of ['3.2.0','3.2.1']) {
  for(const [label,viewport] of [['desktop',{width:1440,height:1050}],['mobile',{width:390,height:844}]]) {
-  const {context,page,calls,state}=await contextFor('3.2.0',viewport);
+  const {context,page,calls,state}=await contextFor(version,viewport);
   await page.goto(`${base}/#/chat?peer=alice`);
   await page.getByRole('checkbox').click();
   await page.locator('input[placeholder="ask alice…"]').fill('When should we plan?');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
   await page.getByText(root.content,{exact:true}).waitFor();
+  await page.getByText(version==='3.2.1'?'alice → alice':'Peer attribution was not returned for this record.',{exact:true}).waitFor();
   state.messageStatus=404;
   const beforeMessage=calls.length;
   await page.getByRole('button',{name:'READ_MESSAGE',exact:true}).click();
@@ -97,23 +103,37 @@ try {
   assert.equal(messageCalls.length,2);
   assert.ok(messageCalls.every(c=>c.method==='GET'&&c.path.endsWith('/messages/message-1')));
   await page.getByText('query_memory',{exact:true}).click();
-  await shot(page,`${label}-chat-evidence`);
+  await shot(page,`${version}-${label}-chat-evidence`);
   await page.getByRole('button',{name:'PROVENANCE',exact:true}).click();
   await page.getByText('deleted-parent · unavailable or deleted').waitFor();
   await shot(page,`${label}-provenance`);
   await page.keyboard.press('Tab');
   assert.ok(await page.evaluate(()=>document.activeElement?.closest('[role="dialog"]')));
   await page.getByRole('button',{name:'Inspect conclusion conclusion-parent'}).click();
+  await page.getByText('No parent conclusions recorded — explicit facts are extracted directly from messages.').waitFor();
   await page.getByRole('button',{name:'Inspect conclusion conclusion-derived'}).waitFor();
   await page.getByRole('button',{name:'Inspect conclusion conclusion-derived'}).click();
   await page.getByText('deleted-parent · unavailable or deleted').waitFor();
   await page.keyboard.press('Escape');
   await page.getByRole('dialog').waitFor({state:'hidden'});
   await page.getByRole('button',{name:'WORKSPACE',exact:true}).click();
+  if(version==='3.2.1') {
+   const longObserver='workspace-observer-with-a-long-peer-identifier-that-must-wrap-on-mobile';
+   state.evidence={...evidence,conclusions:[root,{...root,id:'cross-peer',content:'Bob prefers afternoon planning.',observer_id:longObserver,observed_id:'bob'}]};
+   await page.locator('input[placeholder^="ask across"]').fill('Compare planning preferences');
+   const beforeEvidence=calls.length;
+   await page.getByRole('button',{name:'SEND',exact:true}).click();
+   await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
+   await page.getByText('alice → alice',{exact:true}).waitFor();
+   await page.getByText(`${longObserver} → bob`,{exact:true}).waitFor();
+   await page.getByText(`${longObserver} → bob`,{exact:true}).scrollIntoViewIfNeeded();
+   assert.equal(calls.slice(beforeEvidence).some(c=>c.path.includes('/conclusions/')),false,'Attribution needs no extra conclusion lookup');
+   await shot(page,`${version}-${label}-workspace-attribution`);
+  }
   state.evidence={conclusions:[],messages:[],tool_calls:[],reasoning_trace_id:null};
   await page.locator('input[placeholder^="ask across"]').fill('What is happening?');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
-  await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
+  await page.getByRole('button',{name:/SHOW_EVIDENCE/}).last().click();
   await page.getByText('No conclusions were recorded.').waitFor();
   assert.ok(calls.some(c=>c.path===`/v3/workspaces/${ws.id}/chat`&&c.body.include_evidence));
   await page.goto(`${base}/#/conclusions`);
@@ -182,6 +202,7 @@ try {
   await page.keyboard.press('Escape');
   await context.close();
  }
+ }
  {
   const {context,page,state}=await contextFor('3.2.0',{width:1200,height:900});
   state.conclusionStatus=403;
@@ -214,7 +235,7 @@ try {
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
   await page.getByText('No evidence was returned by the server for this answer.').waitFor();
-  state.evidence={conclusions:null};
+  state.evidence={...evidence,conclusions:[{...root,observer_id:{invalid:'peer'}}]};
   await page.locator('input[placeholder="ask alice…"]').fill('Malformed evidence');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByText('Invalid chat response from Honcho. Please retry.',{exact:false}).waitFor();
@@ -228,7 +249,7 @@ try {
   assert.equal(await page.getByRole('button',{name:/SHOW_EVIDENCE|HIDE_EVIDENCE/}).count(),0);
   await context.close();
  }
- for(const version of ['3.1.0','unknown']) {
+ for(const version of ['3.0.12','3.1.0','unknown']) {
   const {context,page,calls}=await contextFor(version,{width:1100,height:800});
   await page.goto(`${base}/#/chat?peer=alice`);
   await page.locator('input[placeholder="ask alice…"]').waitFor();
@@ -248,5 +269,5 @@ try {
   await context.close();
  }
  assert.deepEqual(unexpected,[]);assert.deepEqual(errors,[]);assert.deepEqual(overflows,[]);
- console.log(JSON.stringify({passed:true,checks:'desktop/mobile evidence, read-only message retrieval and retry, malformed evidence, dropdown/modal focus, provenance cycles/missing parents, workspace empty evidence, backlog, trace details, 3.1/unknown gating',output}));
+ console.log(JSON.stringify({passed:true,checks:'3.2.0/3.2.1 desktop/mobile evidence and workspace peer attribution, null/empty parents, read-only message retrieval and retry, malformed attribution, dropdown/modal focus, provenance cycles/missing parents, workspace empty evidence, backlog, trace details, 3.0/3.1/unknown gating',output}));
 } finally {await browser.close();}

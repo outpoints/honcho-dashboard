@@ -28,7 +28,12 @@ The Next.js app lives in [`site/`](./site).
 | :---------------------------------------------------: | :---------------------------------------------------: |
 | ![Conclusion provenance](docs/provenance.png) | ![Call traces in Diagnostics](docs/diagnostics.png) |
 
-Chat evidence and provenance require Honcho 3.2+; backlog requires 3.1.2+.
+**Context — scope-aware assembly with aligned controls**
+
+![Context layers and preview using synthetic Honcho 3.2.1 data](docs/context.png)
+
+Chat evidence and provenance require Honcho 3.2+; evidence peer attribution requires
+3.2.1+. Backlog requires 3.1.2+.
 Call traces use an optional collector export configured on the dashboard host.
 
 ## Features
@@ -78,7 +83,7 @@ Three layers, each with a single job:
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
    status, dream scheduling, scopes, scope-aware recall, workspace chat, and search use
-   the SDK directly. The dashboard currently targets SDK 2.5.x.
+   the SDK directly. The dashboard currently targets SDK 2.5.1+ (locked to 2.5.1).
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
@@ -239,14 +244,20 @@ Features introduced by Honcho 3.1 are capability-gated:
 - Network failures and other ambiguous responses fail conservatively: 3.1-only
   controls remain disabled without affecting older dashboard workflows.
 
-The working tree upgrades to `@honcho-ai/sdk` 2.5.0 for **Honcho 3.2.0** while
-retaining the existing 3.1 workflows. Conclusion responses now retain optional
+The dashboard uses `@honcho-ai/sdk` 2.5.1 for **Honcho 3.2.1** while
+retaining the existing 3.0.x/3.1 workflows and 3.2.0 evidence/provenance. Conclusion responses retain optional
 `source_ids` (parent conclusion IDs) and `times_derived` attribution, including
 semantic-search results. On verified 3.2+ servers, **INCLUDE_EVIDENCE** collects
 evidence for the next peer or workspace answer. **SHOW_EVIDENCE** expands the
 conclusions, message references (with on-demand text), successful tool calls, and
 trace ID that Honcho returned. These are accessed records, not proof that an answer
 used them. Default chat still works on 3.1 without requesting evidence.
+
+On Honcho 3.2.1+, evidence conclusions display **OBSERVER → OBSERVED** directly
+from each returned record, including different peer pairs in workspace chat.
+Older responses remain usable and explicitly identify missing attribution; the
+dashboard never infers a pair from the chat target. Both legacy `null` and 3.2.1's
+empty `source_ids: []` are accepted as no recorded parents for explicit conclusions.
 
 **PROVENANCE** on a conclusion or evidence record opens a read-only inspector with
 derivation count, parent conclusions, and workspace-wide derived conclusions.
@@ -260,12 +271,15 @@ and claimed units, pending items/embeddings, dreams due, and measurement age. Do
 not add these values across workspaces or replicas; the work estimate is not an ETA.
 
 Compatibility is checked against the tagged
-[Honcho 3.2.0 release](https://github.com/plastic-labs/honcho/blob/v3.2.0/CHANGELOG.md)
-and its API schemas. Automated contract fixtures cover 3.1/3.2 chat and
-conclusions, proxy-routing headers, missing attribution fields, restricted-key
+[Honcho 3.2.1 release](https://github.com/plastic-labs/honcho/blob/v3.2.1/CHANGELOG.md)
+and its API schemas. Automated contract fixtures cover 3.0.x/3.1/3.2.0/3.2.1 chat and
+conclusions, proxy-routing headers, missing or malformed attribution fields, restricted-key
 errors, and provider-unavailable responses (`503`). Evidence and provenance were
 also verified through the dashboard against an isolated real Honcho 3.2.0 server,
-using a mock model and synthetic data. See [verification details](docs/HONCHO_3_2_VALIDATION.md).
+using a mock model and synthetic data. Post-upgrade live 3.2.1 checks passed for
+peer/workspace chat, evidence attribution, message reads, provenance, and backlog.
+See [3.2 verification details](docs/HONCHO_3_2_VALIDATION.md)
+and the [3.2.1 verification and upgrade guide](docs/HONCHO_3_2_1_VALIDATION.md).
 After upgrading your server, smoke-test Fleet, Conclusions/search, Chat,
 Scopes/context, and the operator DB panels against your migrated data and model.
 

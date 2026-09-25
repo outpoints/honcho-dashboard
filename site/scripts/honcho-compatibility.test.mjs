@@ -5,7 +5,7 @@ import { toApiConclusion } from "../src/lib/honcho/adapters.ts";
 import { honcho } from "../src/lib/honcho/client.ts";
 import { HonchoApiError } from "../src/lib/honcho/types.ts";
 
-// Response contracts from plastic-labs/honcho v3.1.0 and v3.2.0,
+// Response contracts from plastic-labs/honcho v3.1.0, v3.2.0, and v3.2.1,
 // src/schemas/api.py (Conclusion) and the peer/workspace chat routes.
 const baseConclusion = {
   id: "conclusion-1",
@@ -22,13 +22,16 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
   headers: { "content-type": "application/json" },
 });
 
-for (const version of ["3.1.0", "3.2.0"]) {
+for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1"]) {
   test(`dashboard SDK and raw client preserve Honcho ${version} contracts`, async (t) => {
     invalidateSdk();
     t.after(invalidateSdk);
-    const conclusion = version === "3.2.0"
+    const conclusion = version.startsWith("3.2.")
       ? { ...baseConclusion, source_ids: ["source-1", "source-2"], times_derived: 4 }
       : baseConclusion;
+    const explicit = { ...conclusion, id: "explicit-1", level: "explicit" };
+    if (version.startsWith("3.2.")) explicit.source_ids = version === "3.2.1" ? [] : null;
+    const conclusions = [conclusion, explicit];
     const calls = [];
     t.mock.method(globalThis, "fetch", async (url, init = {}) => {
       const path = new URL(String(url), "http://localhost").pathname.replace(/^\/api\/honcho/, "");
@@ -41,9 +44,9 @@ for (const version of ["3.1.0", "3.2.0"]) {
         assert.equal(Object.hasOwn(body, "include_evidence"), false);
         return json({ content: "Morning is best" });
       }
-      if (path.endsWith("/conclusions/query")) return json([conclusion]);
+      if (path.endsWith("/conclusions/query")) return json(conclusions);
       if (path.endsWith("/conclusions/list")) {
-        return json({ items: [conclusion], page: 1, size: 25, total: 1, pages: 1 });
+        return json({ items: conclusions, page: 1, size: 25, total: 2, pages: 1 });
       }
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -51,19 +54,19 @@ for (const version of ["3.1.0", "3.2.0"]) {
     const sdk = getSdk(opts, "workspace-1");
     const peer = await sdk.peer("user-1");
     assert.equal(await peer.chat("When?", { reasoningLevel: "low" }), "Morning is best");
-    assert.equal(await sdk.chat("When?", { reasoningLevel: "low" }), "Morning is best");
+    if (!version.startsWith("3.0.")) assert.equal(await sdk.chat("When?", { reasoningLevel: "low" }), "Morning is best");
     const queried = (await peer.conclusions.query("meetings", 50)).map(toApiConclusion);
-    assert.deepEqual(queried, [{
-      ...conclusion,
-      source_ids: conclusion.source_ids ?? null,
-      times_derived: conclusion.times_derived ?? 1,
-    }]);
+    assert.deepEqual(queried, conclusions.map((item) => ({
+      ...item,
+      source_ids: item.source_ids ?? null,
+      times_derived: item.times_derived ?? 1,
+    })));
     const listed = await honcho.conclusions.list(opts, "workspace-1", { size: 25 });
-    assert.deepEqual(listed.items, [conclusion]);
+    assert.deepEqual(listed.items, conclusions);
     assert.ok(calls.every(({ headers }) => headers.get("X-Honcho-Base-Url") === opts.baseUrl));
     const sdkCalls = calls.filter(({ path }) => !path.endsWith("/conclusions/list"));
     assert.ok(sdkCalls.every(({ headers }) => headers.get("authorization") === `Bearer ${opts.token}`));
-    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.5.0")));
+    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.5.1")));
     const query = calls.find(({ path }) => path.endsWith("/conclusions/query"));
     assert.deepEqual(query.body, {
       query: "meetings", top_k: 50,

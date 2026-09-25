@@ -80,7 +80,7 @@ checks above after capture and before sharing.
 
 ## README image set
 
-The default capture produces ten synthetic-data views. The README embeds nine;
+The default capture produces eleven synthetic-data views. The README embeds ten;
 `dashboard.png` documents the expanded session used to open the upload view.
 
 | File | Purpose |
@@ -95,3 +95,24 @@ The default capture produces ten synthetic-data views. The README embeds nine;
 | `session-upload.png` | Session file-upload modal with a generated fixture file |
 | `provenance.png` | A conclusion with its parent premise and derived backlink |
 | `diagnostics.png` | Optional LLM and embedding call-trace inspection |
+| `context.png` | Aligned scope/session/peer controls, generated context layers, and preview |
+
+## Honcho 3.2.1 release image set
+
+```bash
+SCREENSHOT_BASE_URL=http://localhost:3000 SCREENSHOT_SET=honcho321 npm run capture:screenshots
+```
+
+This captures four synthetic views from the working tree: workspace evidence with
+two observer/observed pairs, the aligned Context toolbar with generated layers,
+an explicit conclusion with no parents, and mobile evidence. Capture uses desktop
+1440 × 1080 and mobile 430 × 932 viewports, with full-page output to include the
+footer when the content is taller. Chat's scrollable transcript is positioned to
+show the peer pairs. The server fixtures identify as Honcho 3.2.1.
+
+The default output is the operating system's temporary directory at
+`honcho-dashboard-v1.2.1/images/`. Set `SCREENSHOT_OUTPUT_DIR` to keep the images in
+a persistent directory outside the repository. The same isolation, metadata,
+visual/OCR review, and no-publication rules above apply. Reviewed captures may
+also refresh the README's Chat and Context images locally; committing or
+publishing them requires explicit authorization.
