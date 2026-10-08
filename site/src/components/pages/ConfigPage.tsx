@@ -8,7 +8,7 @@ import { Button, Checkbox, Field, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { honcho } from "@/lib/honcho/client";
-import { useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
+import { defaultHonchoBaseUrl, useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
 import { TITLE_BASE, sectionTitle, useAppendSectionToTitle } from "@/lib/title";
 import { useNav } from "@/lib/nav";
@@ -245,7 +245,7 @@ function InstanceEditor({
   const { push } = useToast();
   const confirm = useConfirm();
   const [name, setName] = useState(editing?.name ?? "");
-  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "http://localhost:8000");
+  const [baseUrl, setBaseUrl] = useState(() => editing?.baseUrl ?? defaultHonchoBaseUrl());
   const [token, setToken] = useState(editing?.token ?? "");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
 

@@ -12,11 +12,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# NEXT_PUBLIC_* vars are inlined into the browser bundle at build time, not
-# runtime. Pass --build-arg NEXT_PUBLIC_HONCHO_BASE_URL=... to docker build
-# (or use docker-compose `build.args`) so the dashboard ships pointed at your
-# Honcho instance. HONCHO_PROXY_BASE_URL / HONCHO_PROXY_ALLOWED_BASES stay
-# runtime-only and can be overridden via `-e` flags.
+# NEXT_PUBLIC_* vars are inlined at build time. The server also reads
+# NEXT_PUBLIC_HONCHO_BASE_URL (and HONCHO_PROXY_BASE_URL /
+# HONCHO_PROXY_ALLOWED_BASES) at runtime via `-e`, so the build arg below is
+# only the fallback when no runtime value is set.
 ARG NEXT_PUBLIC_HONCHO_BASE_URL=http://localhost:8000
 ARG NEXT_PUBLIC_HONCHO_TOKEN=
 ENV NEXT_PUBLIC_HONCHO_BASE_URL=$NEXT_PUBLIC_HONCHO_BASE_URL

@@ -1,4 +1,12 @@
 import "server-only";
+import {
+  advertisedBaseUrl,
+  canonicalize,
+  defaultBaseUrl,
+  implicitAllowedBases,
+  readRuntimeEnv,
+  type DefaultTargetSources,
+} from "./defaultTarget";
 
 /**
  * Shared Honcho-target resolution + allowlist enforcement.
@@ -18,6 +26,29 @@ import "server-only";
  * allowlist is the operator's explicit choice — that's the trust boundary.
  */
 
+export { canonicalize };
+
+/**
+ * Where the default target can come from. `NEXT_PUBLIC_HONCHO_BASE_URL` is read
+ * twice on purpose: the literal member expression is the copy `next build`
+ * inlined, and the computed read is the value set on the running container.
+ */
+function defaultTargetSources(): DefaultTargetSources {
+  return {
+    proxyBaseUrl: process.env.HONCHO_PROXY_BASE_URL,
+    runtimePublicBaseUrl: readRuntimeEnv(process.env, "NEXT_PUBLIC_HONCHO_BASE_URL"),
+    buildPublicBaseUrl: process.env.NEXT_PUBLIC_HONCHO_BASE_URL,
+  };
+}
+
+/**
+ * The default Honcho origin to advertise to browsers that have no saved
+ * instance yet. Must be called during dynamic rendering to see runtime env.
+ */
+export function serverAdvertisedBaseUrl(): string | null {
+  return advertisedBaseUrl(defaultTargetSources());
+}
+
 export function parseAllowlist(): string[] {
   const raw = process.env.HONCHO_PROXY_ALLOWED_BASES;
   const fromList = raw
@@ -26,29 +57,12 @@ export function parseAllowlist(): string[] {
         .map((s) => s.trim())
         .filter(Boolean)
     : [];
-  const single =
-    process.env.HONCHO_PROXY_BASE_URL ?? process.env.NEXT_PUBLIC_HONCHO_BASE_URL;
-  if (single && !fromList.includes(single)) fromList.push(single);
+  for (const implicit of implicitAllowedBases(defaultTargetSources())) {
+    if (!fromList.includes(implicit)) fromList.push(implicit);
+  }
   return fromList
     .map((u) => canonicalize(u))
     .filter((u): u is string => !!u);
-}
-
-/**
- * Reduce a candidate URL to its origin (`scheme://host[:port]`). Returns null
- * if the URL is unparsable, non-HTTP, has userinfo, or has a fragment.
- */
-export function canonicalize(url: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-  if (parsed.username || parsed.password) return null;
-  if (parsed.hash) return null;
-  return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, "");
 }
 
 export interface ResolveOk {
@@ -79,8 +93,7 @@ export function resolveHonchoTarget(headers: Headers): ResolveOk | ResolveErr {
   }
 
   const headerUrl = headers.get("x-honcho-base-url");
-  const fallback =
-    process.env.HONCHO_PROXY_BASE_URL ?? process.env.NEXT_PUBLIC_HONCHO_BASE_URL;
+  const fallback = defaultBaseUrl(defaultTargetSources());
   const candidate = headerUrl ?? fallback;
   if (!candidate) {
     return {
