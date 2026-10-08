@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Honcho-Dashboard</Name>
+  <Repository>ghcr.io/outpoints/honcho-dashboard:latest</Repository>
+  <Registry>https://github.com/outpoints/honcho-dashboard/pkgs/container/honcho-dashboard</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/outpoints/honcho-dashboard/issues</Support>
+  <Project>https://github.com/outpoints/honcho-dashboard</Project>
+  <Overview>Honcho Dashboard is a self-hosted operator dashboard for Plastic Labs' Honcho memory service. It provides full observability into workspaces, sessions, memory reasoning queues, peer cards, and derived conclusions with a clean dark terminal UI.&#xD;
+&#xD;
+[b]Requirements:[/b] A running instance of Honcho API (e.g. honcho-aio or the distributed Honcho stack). If using container hostnames (like http://honcho-aio:8000), make sure both containers share a custom Docker network.</Overview>
+  <Category>AI: Productivity: Tools: Status:Beta</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/outpoints/honcho-dashboard/main/templates/honcho-dashboard.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/outpoints/honcho-dashboard/main/templates/honcho-dashboard.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <!-- 1. WebUI Port -->
+  <Config Name="WebUI Port" Target="3000" Default="3002" Mode="tcp" Description="Host port for the dashboard web interface (container listens on 3000 internally). Default is 3002 to avoid collision with other web services on 3000." Type="Port" Display="always" Required="true" Mask="false">3002</Config>
+
+  <!-- 2. Upstream Honcho Proxy Base URL -->
+  <Config Name="Honcho Proxy Base URL" Target="HONCHO_PROXY_BASE_URL" Default="http://honcho:8000" Mode="" Description="Server-side default upstream Honcho API URL. The dashboard proxies calls to this endpoint, and new browsers start on it (e.g. http://honcho-aio:8000 or http://192.168.1.x:8000)." Type="Variable" Display="always" Required="true" Mask="false">http://honcho:8000</Config>
+
+  <!-- 3. Honcho Proxy Allowed Origins (Optional) -->
+  <Config Name="Proxy Allowed Bases" Target="HONCHO_PROXY_ALLOWED_BASES" Default="http://honcho:8000,http://honcho-aio:8000" Mode="" Description="(Optional) Comma-separated Honcho origins the server-side proxy may forward to, for other Honcho servers you add under CONFIG. The Honcho Proxy Base URL is always allowed." Type="Variable" Display="always" Required="false" Mask="false">http://honcho:8000,http://honcho-aio:8000</Config>
+
+  <!-- 4. Operator Database Connection (Advanced) -->
+  <Config Name="Operator Database URL" Target="HONCHO_DATABASE_URL" Default="" Mode="" Description="(Optional) Read-only Postgres DSN to the SAME database Honcho uses (e.g. postgresql+psycopg://postgres:secret@honcho-aio:5432/honcho). Enables throughput charts, 52-week heatmap, db size / vector-count / top-tables, and PostgreSQL diagnostics." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <!-- 5. Honcho Log File Host Mount (Advanced) -->
+  <Config Name="Honcho Log File Mount" Target="/honcho.log" Default="" Mode="ro" Description="(Optional) Host path to Honcho's log file (e.g. /mnt/user/appdata/honcho-aio/logs/honcho.log). Mounts read-only into the container to enable the log tail panel on Diagnostics." Type="Path" Display="always" Required="false" Mask="false"></Config>
+
+  <!-- 6. Honcho Log File Container Path (Advanced) -->
+  <Config Name="Honcho Log File Container Path" Target="HONCHO_LOG_FILE" Default="" Mode="" Description="(Optional) Set to /honcho.log when you mount a log file above. Leave empty otherwise, or Diagnostics reports a missing file." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+
+  <!-- 7. Start Timestamp (Advanced) -->
+  <Config Name="Honcho Runtime Start Timestamp" Target="HONCHO_RUNTIME_START_TS" Default="" Mode="" Description="(Optional) ISO-8601 timestamp of when your Honcho process started to report Honcho uptime alongside dashboard uptime." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- 8. Operator Config Keys (Advanced) -->
+  <Config Name="Operator Config Keys" Target="HONCHO_OPERATOR_CONFIG_KEYS" Default="" Mode="" Description="(Optional) Comma-separated extra env keys to expose on /api/operator/config. Secrets matching token/secret/password/key are auto-redacted." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>
