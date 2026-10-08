@@ -1,6 +1,6 @@
 {
   "name": "honcho-dashboard",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "description": "Self-hosted Honcho dashboard — Next.js + Tailwind v4 + Framer Motion",
   "license": "GPL-3.0",
