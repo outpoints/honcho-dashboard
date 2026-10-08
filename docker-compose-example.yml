@@ -22,10 +22,9 @@ services:
 
     # ---- Prefer to build from source instead of pulling? Comment out the
     # `image:` line above and uncomment this block, then `docker compose up --build`.
-    # NEXT_PUBLIC_* values are inlined into the browser bundle at build time and
-    # cannot be changed at runtime, so they live here as build args. (The published
-    # image bakes a http://localhost:8000 fallback; either way the active instance
-    # is chosen in-app, so most users can simply pull.) ----
+    # The published image reads HONCHO_BASE_URL at runtime (see `environment:`),
+    # so most users can simply pull. Build args only change the fallback used
+    # when that runtime value is unset. ----
     # build:
     #   context: ./site
     #   dockerfile: Dockerfile
@@ -39,8 +38,8 @@ services:
 
     environment:
       # ---- Same-origin proxy (server-side, runtime) ----
-      # Default upstream when the browser doesn't pin a specific instance via
-      # X-Honcho-Base-Url. Must match (or be a subset of) the allowlist below.
+      # Default upstream, read at runtime: the proxy uses it when a request pins
+      # no instance, and new browsers start on it. It is implicitly allowlisted.
       NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:-http://localhost:8000}
 
       # Comma-separated allowlist of upstream Honcho origins the proxy will

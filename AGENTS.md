@@ -93,6 +93,12 @@ Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
+`next build` inlines `process.env.NEXT_PUBLIC_*` into server code too, so the published
+image cannot get runtime config that way. The default target comes from
+`src/lib/honcho/defaultTarget.ts`: the server reads it at request time and `app/layout.tsx`
+passes it to the browser in a meta tag. Keep that module's compatibility rules: the implicit
+allowlist only grows, and only the untouched `default`/`local` seed is ever rewritten.
+
 Use `@honcho-ai/sdk` 2.5.1+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the
 side-effect-free compatibility probe; do not reintroduce raw 3.1 feature paths.

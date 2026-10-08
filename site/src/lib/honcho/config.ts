@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import {
+  DEFAULT_BASE_URL_META,
+  LEGACY_DEFAULT_BASE_URL,
+  SEED_INSTANCE_ID,
+  SEED_INSTANCE_NAME,
+  canonicalize,
+  upgradeLegacySeed,
+} from "./defaultTarget";
 
 export interface HonchoInstance {
   id: string;
@@ -21,11 +29,24 @@ interface Snapshot {
 
 const EMPTY_SNAPSHOT: Snapshot = { instances: [], activeId: null, activeWorkspaceId: null };
 
-function defaultBaseUrl(): string {
+/** The default inlined at build time. Older releases seeded new browsers with it. */
+function buildTimeBaseUrl(): string {
   if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_HONCHO_BASE_URL) {
     return process.env.NEXT_PUBLIC_HONCHO_BASE_URL;
   }
-  return "http://localhost:8000";
+  return LEGACY_DEFAULT_BASE_URL;
+}
+
+/** The runtime default the server rendered into the page (see app/layout.tsx). */
+function serverAdvertisedBaseUrl(): string | null {
+  if (typeof document === "undefined") return null;
+  const meta = document.querySelector<HTMLMetaElement>(`meta[name="${DEFAULT_BASE_URL_META}"]`);
+  return meta?.content ? canonicalize(meta.content) : null;
+}
+
+/** Base URL for new instances: the server's runtime default, else the build-time one. */
+export function defaultHonchoBaseUrl(): string {
+  return serverAdvertisedBaseUrl() ?? buildTimeBaseUrl();
 }
 
 function defaultToken(): string | undefined {
@@ -57,9 +78,9 @@ function readRaw(): Snapshot {
 
   if (instances.length === 0) {
     const seed: HonchoInstance = {
-      id: "default",
-      name: "local",
-      baseUrl: defaultBaseUrl(),
+      id: SEED_INSTANCE_ID,
+      name: SEED_INSTANCE_NAME,
+      baseUrl: defaultHonchoBaseUrl(),
       token: defaultToken(),
     };
     try {
@@ -69,6 +90,22 @@ function readRaw(): Snapshot {
       // localStorage unavailable
     }
     return { instances: [seed], activeId: seed.id, activeWorkspaceId };
+  }
+
+  // Browsers seeded by an older build still hold the build-time default. Move
+  // that untouched seed to the server's runtime default; leave edits alone.
+  const upgraded = upgradeLegacySeed(
+    instances,
+    { baseUrl: buildTimeBaseUrl(), token: defaultToken() },
+    serverAdvertisedBaseUrl(),
+  );
+  if (upgraded) {
+    instances = upgraded;
+    try {
+      window.localStorage.setItem(INSTANCES_KEY, JSON.stringify(upgraded));
+    } catch {
+      // localStorage unavailable
+    }
   }
 
   return { instances, activeId, activeWorkspaceId };
