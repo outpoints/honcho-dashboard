@@ -17,4 +17,4 @@
   Animation:   Framer Motion
   Icons:       Lucide React
   Fonts:       JetBrains Mono + VT323 (next/font/google)
-  Postgres:    pg (read-only, operator/db module only)
+  Postgres:    pg (operator/db module; read-only unless HONCHO_OPERATOR_WRITES=true)
