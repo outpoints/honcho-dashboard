@@ -31,6 +31,7 @@ import { NavContext } from "@/lib/nav";
 import { buildTitle, useAppendSectionToTitle } from "@/lib/title";
 import { ToastProvider } from "@/components/toast";
 import { ConfirmProvider } from "@/components/confirm";
+import { AuthGate } from "@/components/AuthGate";
 
 const RENDER: Record<RouteKey, React.ComponentType> = {
   overview: OverviewPage,
@@ -67,6 +68,14 @@ function subscribeHash(notify: () => void) {
 const SERVER_HASH: RouteKey = "fleet";
 
 export function AppShell() {
+  return (
+    <AuthGate>
+      <AppShellContent />
+    </AuthGate>
+  );
+}
+
+function AppShellContent() {
   const current = useSyncExternalStore<RouteKey>(
     subscribeHash,
     readHashRoute,
