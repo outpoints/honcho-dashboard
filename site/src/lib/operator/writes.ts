@@ -37,13 +37,17 @@ export function requireOperatorWrites(
 
 /**
  * CSRF check for bodyless POSTs that carry no custom header. Browsers send
- * Sec-Fetch-Site (and Origin on cross-origin POSTs); non-browser clients such
+ * Sec-Fetch-Site (and Origin on cross-origin POSTs). Sec-Fetch-Site decides when
+ * present; Origin is compared with Host/X-Forwarded-Host only when it is absent; non-browser clients such
  * as curl send neither and are allowed, since CSRF only concerns browsers.
  */
 export function isSameOriginRequest(headers: Headers, requestUrl: string): boolean {
+  // Sec-Fetch-Site is set by the browser and cannot be forged by page script, and
+  // it stays correct behind proxies that rewrite Host. Decide on it alone.
   const site = headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") return false;
+  if (site !== null) return site === "same-origin" || site === "none";
 
+  // Older browsers: fall back to comparing Origin with the Host we were reached on.
   const origin = headers.get("origin");
   if (origin !== null) {
     let originHost: string;

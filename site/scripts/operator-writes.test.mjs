@@ -108,11 +108,23 @@ test("same-origin: falls back to the request URL host, honours x-forwarded-host"
   );
 });
 
-test("same-origin: either header failing rejects", () => {
+test("same-origin: Sec-Fetch-Site decides alone when present (Host rewritten by a proxy)", () => {
+  // nginx `proxy_pass http://dashboard:3000;` rewrites Host and sends no X-Forwarded-Host.
+  assert.equal(
+    isSameOriginRequest(
+      h({ "sec-fetch-site": "same-origin", origin: "https://dash.example", host: "dashboard:3000" }),
+      "http://dashboard:3000/api/operator/db",
+    ),
+    true,
+  );
   assert.equal(
     isSameOriginRequest(h({ "sec-fetch-site": "same-origin", origin: "http://evil.test", host: "dash.test:3000" }), URL_),
-    false,
+    true,
+    "Origin is not consulted when Sec-Fetch-Site says same-origin",
   );
+});
+
+test("same-origin: cross-site Sec-Fetch-Site rejects even when Origin matches Host", () => {
   assert.equal(
     isSameOriginRequest(h({ "sec-fetch-site": "cross-site", origin: "http://dash.test:3000", host: "dash.test:3000" }), URL_),
     false,
