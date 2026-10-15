@@ -91,6 +91,13 @@ Honcho v3 uses **POST for list endpoints** (filter body in JSON), not GET. Endpo
 
 Auth is `Authorization: Bearer <token>` header — optional in local dev (`AUTH_USE_AUTH=false`).
 
+The dashboard itself can optionally require a shared password (`DASHBOARD_PASSWORD` +
+`DASHBOARD_SESSION_SECRET`, default off). It is cookie based because reverse-proxy basic auth
+collides with the SDK's same-origin `Authorization` header. Pure logic lives in `src/lib/auth/`
+(import-free, tested by `scripts/auth-*.test.mjs`); `src/proxy.ts` (Next 16's renamed
+middleware) guards `/api/*`, `/v3/*`, `/health`, `/openapi.json` and must stay free of Node-only
+imports. Keep `/api/healthz` and `/api/auth/*` unguarded; the Docker health check uses `/api/healthz`.
+
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
 `next build` inlines `process.env.NEXT_PUBLIC_*` into server code too, so the published
@@ -145,7 +152,7 @@ before replacing any image referenced by the README.
 ## Out-of-scope (for now)
 
 - Tauri / desktop wrapper
-- Auth UX beyond bearer token (no signup / org management)
+- Auth UX beyond the bearer token and the optional single shared dashboard password (`DASHBOARD_PASSWORD`; no signup, users, roles, SSO or org management)
 - New animations on pages still using mock data
 - Switching to file-based routing or pnpm/Turbo monorepo
 

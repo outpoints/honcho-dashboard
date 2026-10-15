@@ -68,6 +68,14 @@ services:
       # standard set is always included; secrets are automatically redacted.
       HONCHO_OPERATOR_CONFIG_KEYS: ${HONCHO_OPERATOR_CONFIG_KEYS:-}
 
+      # ---- Optional dashboard login (uncomment both to require a password) ----
+      # DASHBOARD_SESSION_SECRET is required when DASHBOARD_PASSWORD is set, at
+      # least 32 characters, no default. Generate with: openssl rand -base64 48
+      # DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      # DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:-}
+      # Session lifetime in hours (default 168).
+      # DASHBOARD_SESSION_TTL_HOURS: ${DASHBOARD_SESSION_TTL_HOURS:-}
+
     # Uncomment if you set HONCHO_LOG_FILE above. The left-hand path is the
     # log on your host; the right-hand path must match HONCHO_LOG_FILE exactly.
     # volumes:
@@ -75,7 +83,7 @@ services:
     #   - /var/log/honcho/traces.jsonl:/honcho-traces.jsonl:ro
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/operator/runtime"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

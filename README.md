@@ -169,6 +169,9 @@ HONCHO_RUNTIME_START_TS=2026-05-22T00:00:00Z    # optional, lets us report Honch
 HONCHO_PROXY_ALLOWED_BASES=http://honcho:8000   # multi-instance allowlist
 ```
 
+To require a login, also set `DASHBOARD_PASSWORD` and `DASHBOARD_SESSION_SECRET`; see
+[Authentication (optional)](#authentication-optional).
+
 The dashboard container exposes port `3000`. If you co-locate it with Honcho on the same
 Docker network, the proxy can talk to Honcho via the internal service name.
 
@@ -206,6 +209,57 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
   - Container Path: `/honcho.log` (Read-only)
   - `Honcho Log File Container Path`: `/honcho.log`
+
+## Authentication (optional)
+
+By default the dashboard has no login of its own: anyone who can reach its port can use the
+proxy and the operator routes (`/api/operator/*`, which can expose Postgres statistics, log
+tails and the redacted environment). Set a single shared password to protect all of it.
+
+| Variable | Meaning |
+| --- | --- |
+| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behaviour. |
+| `DASHBOARD_SESSION_SECRET` | **Required** when the password is set, at least 32 characters. Signs the session cookie. There is no default and it is never derived from the password. |
+| `DASHBOARD_SESSION_TTL_HOURS` | Optional session lifetime in hours. Default `168` (7 days). |
+
+Generate a secret with:
+
+```bash
+openssl rand -base64 48
+```
+
+If `DASHBOARD_PASSWORD` is set but the secret is missing or shorter than 32 characters, the
+server logs the problem once and every protected request fails with HTTP `500`
+(`DASHBOARD_SESSION_SECRET must be set (>=32 chars) when DASHBOARD_PASSWORD is set`).
+
+**Why not reverse-proxy basic auth?** The dashboard's Honcho SDK client sends
+`Authorization: Bearer <token>` to the same origin, which collides with a basic-auth
+`Authorization` header. The guard is therefore cookie based: the login screen posts the
+password to `/api/auth/login`, which sets an `HttpOnly`, `SameSite=Lax` cookie
+(`honcho_dashboard_session`, `Secure` when the request arrives over HTTPS or with
+`X-Forwarded-Proto: https`). The cookie is never forwarded to Honcho.
+
+What is protected when a password is set:
+
+- `/api/*` (including the Honcho proxy and every operator route), `/v3/*`, `/health` and
+  `/openapi.json` answer `401 {"error":"authentication required"}` without a valid session.
+- The page itself (`/`) still loads so it can show the login screen; it contains no data.
+- Always reachable: `/api/auth/status`, `/api/auth/login`, `/api/auth/logout`,
+  `/api/healthz` (unauthenticated `{"ok":true}`, used by the container health check),
+  `/_next/*` and `/favicon.ico`.
+- **CONFIG** shows a **LOGOUT** button while authentication is enabled.
+
+Limits to know about:
+
+- Failed logins are rate limited to 10 per client IP per 15 minutes (then `429`). The limiter
+  is **in memory and per process**: it resets on restart and is not shared between replicas.
+  The client IP is the first `X-Forwarded-For` hop, else `X-Real-IP`, else `unknown`, so it
+  is only meaningful behind a reverse proxy that sets those headers; a directly exposed
+  dashboard can have the limit evaded by spoofing them.
+- Sessions are stateless. Logging out clears the cookie in that browser only; to invalidate
+  every session at once, change `DASHBOARD_SESSION_SECRET` and restart.
+- This is one shared password, not user accounts, roles or SSO. Serve the dashboard over
+  HTTPS when it is reachable beyond a trusted network.
 
 ## Repo layout
 
