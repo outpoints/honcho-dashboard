@@ -55,4 +55,7 @@
 
   <!-- 11. Dashboard Session Lifetime (Optional) -->
   <Config Name="Dashboard Session Hours" Target="DASHBOARD_SESSION_TTL_HOURS" Default="" Mode="" Description="(Optional) Login session lifetime in hours. Defaults to 168 (7 days)." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- 12. Reverse Proxies In Front (Optional) -->
+  <Config Name="Dashboard Trusted Proxies" Target="DASHBOARD_TRUSTED_PROXIES" Default="" Mode="" Description="(Optional) Number of reverse proxies in front of the dashboard (default 1). Picks the client address for the login rate limiter from the right of X-Forwarded-For." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 </Container>

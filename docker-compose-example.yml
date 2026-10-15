@@ -75,6 +75,8 @@ services:
       # DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:-}
       # Session lifetime in hours (default 168).
       # DASHBOARD_SESSION_TTL_HOURS: ${DASHBOARD_SESSION_TTL_HOURS:-}
+      # Reverse proxies in front of the dashboard (default 1), for the login rate limiter.
+      # DASHBOARD_TRUSTED_PROXIES: ${DASHBOARD_TRUSTED_PROXIES:-}
 
     # Uncomment if you set HONCHO_LOG_FILE above. The left-hand path is the
     # log on your host; the right-hand path must match HONCHO_LOG_FILE exactly.
