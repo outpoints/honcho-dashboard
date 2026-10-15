@@ -11,6 +11,9 @@ import {
   verifySession,
 } from "../src/lib/auth/session.ts";
 import { LoginLimiter, clientKey } from "../src/lib/auth/rateLimit.ts";
+import { processLogin } from "../src/lib/auth/login.ts";
+import { readAuthConfig } from "../src/lib/auth/config.ts";
+import { AUTH_REQUIRED_HEADER, isAuthRequiredResponse } from "../src/lib/auth/constants.ts";
 
 const SECRET = "k".repeat(48);
 const OTHER = "z".repeat(48);
@@ -124,36 +127,141 @@ test("isSecureRequest honours x-forwarded-proto first, then the URL", () => {
   assert.equal(isSecureRequest(undefined, "http:"), false);
 });
 
-test("login limiter blocks after 10 failures and releases after 15 minutes", () => {
+test("limiter: reserve counts attempts synchronously, 10 allowed then blocked", () => {
   const l = new LoginLimiter();
   const t0 = 1_000_000;
-  for (let i = 0; i < 9; i++) l.fail("1.1.1.1", t0 + i);
-  assert.equal(l.check("1.1.1.1", t0 + 10).limited, false);
-  l.fail("1.1.1.1", t0 + 9);
+  const results = Array.from({ length: 50 }, () => l.reserve("1.1.1.1", t0));
+  assert.equal(results.filter((r) => !r.limited).length, 10);
+  assert.equal(results.filter((r) => r.limited).length, 40);
   const blocked = l.check("1.1.1.1", t0 + 1000);
   assert.equal(blocked.limited, true);
   assert.ok(blocked.retryAfterSeconds > 0 && blocked.retryAfterSeconds <= 900);
-  assert.equal(l.check("2.2.2.2", t0 + 1000).limited, false, "other clients unaffected");
-  assert.equal(l.check("1.1.1.1", t0 + 15 * 60 * 1000 + 10).limited, false);
+  assert.equal(l.check("2.2.2.2", t0).limited, false, "other clients unaffected");
+  assert.equal(l.check("1.1.1.1", t0 + 15 * 60 * 1000 + 10).limited, false, "window passes");
 });
 
-test("login limiter: old failures age out and reset clears", () => {
-  const l = new LoginLimiter(3, 1000);
-  l.fail("a", 0);
-  l.fail("a", 100);
-  l.fail("a", 2000); // first two are outside the window now
-  assert.equal(l.check("a", 2001).limited, false);
-  l.fail("a", 2002);
-  l.fail("a", 2003);
-  assert.equal(l.check("a", 2004).limited, true);
-  l.reset("a");
-  assert.equal(l.check("a", 2005).limited, false);
+test("limiter: blocked reservations are not recorded and release frees one slot", () => {
+  const l = new LoginLimiter(2, 1000);
+  const a = l.reserve("k", 0);
+  const b = l.reserve("k", 1);
+  assert.equal(l.reserve("k", 2).limited, true);
+  a.release();
+  a.release(); // idempotent
+  assert.equal(l.check("k", 3).limited, false);
+  const c = l.reserve("k", 3);
+  assert.equal(c.limited, false);
+  assert.equal(l.reserve("k", 4).limited, true);
+  b.release();
+  c.release();
+  assert.equal(l.check("k", 5).limited, false);
+  l.reserve("k", 6); // old failures age out
+  assert.equal(l.check("k", 2000).limited, false);
 });
 
-test("clientKey: first x-forwarded-for hop, then x-real-ip, then unknown", () => {
+test("clientKey: last x-forwarded-for hop by default, n-th from the right when configured", () => {
   const h = (o) => new Headers(o);
-  assert.equal(clientKey(h({ "x-forwarded-for": "9.9.9.9, 10.0.0.1", "x-real-ip": "8.8.8.8" })), "9.9.9.9");
+  // The client-supplied value is on the left; the proxy appended the right-most.
+  assert.equal(clientKey(h({ "x-forwarded-for": "6.6.6.6, 9.9.9.9" })), "9.9.9.9");
+  assert.equal(clientKey(h({ "x-forwarded-for": "9.9.9.9" })), "9.9.9.9");
+  assert.equal(clientKey(h({ "x-forwarded-for": "6.6.6.6, 9.9.9.9, 10.0.0.1" }), 2), "9.9.9.9");
+  assert.equal(clientKey(h({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" }), 5), "9.9.9.9", "fewer hops than configured");
+  assert.equal(clientKey(h({ "x-forwarded-for": "a, ,b," })), "b");
   assert.equal(clientKey(h({ "x-real-ip": "8.8.8.8" })), "8.8.8.8");
-  assert.equal(clientKey(h({ "x-forwarded-for": "  " , "x-real-ip": "8.8.8.8" })), "8.8.8.8");
+  assert.equal(clientKey(h({ "x-forwarded-for": "  ", "x-real-ip": "8.8.8.8" })), "8.8.8.8");
   assert.equal(clientKey(h({})), "unknown");
+});
+
+test("clientKey: spoofing the left of x-forwarded-for does not change the key", () => {
+  const key = (spoof) => clientKey(new Headers({ "x-forwarded-for": `${spoof}, 203.0.113.9` }));
+  assert.equal(key("1.1.1.1"), key("2.2.2.2"));
+});
+
+const cfg = readAuthConfig({ DASHBOARD_PASSWORD: "pw", DASHBOARD_SESSION_SECRET: SECRET });
+const loginReq = (password, ip, delayMs = 0) => ({
+  url: "http://dash.test/api/auth/login",
+  headers: new Headers({ "x-forwarded-for": `spoof, ${ip}` }),
+  json: async () => {
+    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+    return { password };
+  },
+});
+
+test("processLogin: 50 concurrent slow wrong-password attempts yield 10 x 401 and 40 x 429", async () => {
+  const limiter = new LoginLimiter();
+  const res = await Promise.all(
+    Array.from({ length: 50 }, () => processLogin(loginReq("bad", "5.5.5.5", 25), cfg, limiter)),
+  );
+  const count = (s) => res.filter((r) => r.status === s).length;
+  assert.equal(count(401), 10);
+  assert.equal(count(429), 40);
+  assert.ok(Number(res.find((r) => r.status === 429).headers.get("retry-after")) > 0);
+  // Even the correct password is refused while blocked; another client still works.
+  assert.equal((await processLogin(loginReq("pw", "5.5.5.5"), cfg, limiter)).status, 429);
+  assert.equal((await processLogin(loginReq("pw", "6.6.6.6"), cfg, limiter)).status, 204);
+});
+
+test("processLogin: success sets the cookie and does not consume the budget", async () => {
+  const limiter = new LoginLimiter();
+  for (let i = 0; i < 30; i++) {
+    const res = await processLogin(loginReq("pw", "7.7.7.7"), cfg, limiter);
+    assert.equal(res.status, 204);
+  }
+  const ok = await processLogin(loginReq("pw", "7.7.7.7"), cfg, limiter);
+  assert.match(ok.headers.get("set-cookie"), /^honcho_dashboard_session=\d+\.[\w-]+\.[\w-]+; Path=\/; Max-Age=604800; HttpOnly; SameSite=Lax$/);
+  assert.equal((await processLogin(loginReq("bad", "7.7.7.7"), cfg, limiter)).status, 401);
+});
+
+test("processLogin: concurrent mix of correct and wrong passwords from one IP", async () => {
+  const limiter = new LoginLimiter();
+  const res = await Promise.all(
+    Array.from({ length: 30 }, (_, i) => processLogin(loginReq(i % 2 ? "pw" : "bad", "4.4.4.4", 10), cfg, limiter)),
+  );
+  // 10 reservations pass; 15 wrong ones are only partly admitted, never more than 10 attempts in total.
+  const admitted = res.filter((r) => r.status !== 429).length;
+  assert.equal(admitted, 10);
+});
+
+test("processLogin: malformed bodies and non-string passwords count as failures", async () => {
+  const limiter = new LoginLimiter();
+  const bad = [
+    { ...loginReq("x", "3.3.3.3"), json: async () => { throw new Error("bad json"); } },
+    { ...loginReq("x", "3.3.3.3"), json: async () => null },
+    loginReq(12345, "3.3.3.3"),
+    loginReq(undefined, "3.3.3.3"),
+    loginReq(["pw"], "3.3.3.3"),
+  ];
+  for (const r of bad) assert.equal((await processLogin(r, cfg, limiter)).status, 401);
+});
+
+test("processLogin: disabled -> 404, misconfigured -> 500 and neither counts attempts", async () => {
+  const limiter = new LoginLimiter();
+  assert.equal((await processLogin(loginReq("pw", "1.2.3.4"), readAuthConfig({}), limiter)).status, 404);
+  const broken = readAuthConfig({ DASHBOARD_PASSWORD: "pw" });
+  const res = await processLogin(loginReq("pw", "1.2.3.4"), broken, limiter);
+  assert.equal(res.status, 500);
+  assert.match((await res.json()).error, /DASHBOARD_SESSION_SECRET must be set/);
+  assert.equal(limiter.check("1.2.3.4").limited, false);
+});
+
+test("trusted proxy count from config selects the right hop", async () => {
+  const two = readAuthConfig({ DASHBOARD_PASSWORD: "pw", DASHBOARD_SESSION_SECRET: SECRET, DASHBOARD_TRUSTED_PROXIES: "2" });
+  const limiter = new LoginLimiter(1, 60_000);
+  const req = (edge) => ({
+    url: "http://dash.test/api/auth/login",
+    headers: new Headers({ "x-forwarded-for": `1.1.1.1, 9.9.9.9, ${edge}` }),
+    json: async () => ({ password: "bad" }),
+  });
+  assert.equal((await processLogin(req("10.0.0.1"), two, limiter)).status, 401);
+  // Same client (second from the right), different edge proxy address: same bucket.
+  assert.equal((await processLogin(req("10.0.0.2"), two, limiter)).status, 429);
+});
+
+test("guard 401 marker: only the dashboard's own 401 counts as auth-required", () => {
+  const res = (status, marker) =>
+    new Response("{}", { status, headers: marker ? { [AUTH_REQUIRED_HEADER]: marker } : {} });
+  assert.equal(isAuthRequiredResponse(res(401, "required")), true);
+  assert.equal(isAuthRequiredResponse(res(401)), false, "Honcho 401 has no marker");
+  assert.equal(isAuthRequiredResponse(res(403, "required")), false);
+  assert.equal(isAuthRequiredResponse(res(200, "required")), false);
+  assert.equal(isAuthRequiredResponse(res(401, "nope")), false);
 });
