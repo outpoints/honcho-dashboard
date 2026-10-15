@@ -12,7 +12,7 @@ import {
   dbWebhookStats,
   dbPeerDetail,
 } from "@/lib/operator/db";
-import { OPERATOR_WRITES_DISABLED_REASON, operatorWritesEnabled } from "@/lib/operator/writes";
+import { requireOperatorWrites, requireSameOrigin } from "@/lib/operator/writes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,9 +68,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   // Checked before anything else: this is the only mutating endpoint, and the
   // client-side write toggle is not a security boundary.
-  if (!operatorWritesEnabled()) {
-    return Response.json({ ok: false, reason: OPERATOR_WRITES_DISABLED_REASON }, { status: 403 });
-  }
+  const disabled = requireOperatorWrites();
+  if (disabled) return disabled;
+  // Bodyless POST with no custom header: refuse cross-site browser requests (CSRF).
+  const crossSite = requireSameOrigin(req.headers, req.url);
+  if (crossSite) return crossSite;
   const action = req.nextUrl.searchParams.get("action");
   if (action === "retry_reasoning") {
     const ws = req.nextUrl.searchParams.get("workspace_id");

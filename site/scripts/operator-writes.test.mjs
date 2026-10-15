@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CROSS_SITE_REJECTED_REASON,
   OPERATOR_WRITES_DISABLED_REASON,
   OPERATOR_WRITES_ENV,
+  isSameOriginRequest,
   operatorWritesEnabled,
+  requireOperatorWrites,
+  requireSameOrigin,
 } from "../src/lib/operator/writes.ts";
 
 const withValue = (value) => ({ [OPERATOR_WRITES_ENV]: value });
-
-test("env var name is HONCHO_OPERATOR_WRITES", () => {
-  assert.equal(OPERATOR_WRITES_ENV, "HONCHO_OPERATOR_WRITES");
-});
 
 test("writes are disabled when the variable is unset", () => {
   assert.equal(operatorWritesEnabled({}), false);
@@ -51,9 +51,77 @@ test("defaults to process.env", () => {
   }
 });
 
-test("disabled reason names the variable", () => {
+test("disabled reason names the env var", () => {
+  assert.ok(OPERATOR_WRITES_DISABLED_REASON.includes(OPERATOR_WRITES_ENV));
+});
+
+test("requireOperatorWrites returns a 403 Response when disabled", async () => {
+  for (const env of [{}, withValue("false"), withValue("")]) {
+    const res = requireOperatorWrites(env);
+    assert.ok(res instanceof Response);
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { ok: false, reason: OPERATOR_WRITES_DISABLED_REASON });
+  }
+});
+
+test("requireOperatorWrites returns null when enabled", () => {
+  assert.equal(requireOperatorWrites(withValue("true")), null);
+  assert.equal(requireOperatorWrites(withValue("1")), null);
+});
+
+const URL_ = "http://dash.test:3000/api/operator/db?action=retry_all_failed_reasoning";
+const h = (o) => new Headers(o);
+
+test("same-origin: Sec-Fetch-Site same-origin or none is allowed", () => {
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "same-origin" }), URL_), true);
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "none" }), URL_), true);
+});
+
+test("same-origin: cross-site and same-site Sec-Fetch-Site are rejected", () => {
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "cross-site" }), URL_), false);
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "same-site" }), URL_), false);
+});
+
+test("same-origin: missing headers (curl, server-to-server) are allowed", () => {
+  assert.equal(isSameOriginRequest(h({}), URL_), true);
+  assert.equal(isSameOriginRequest(h({ host: "dash.test:3000" }), URL_), true);
+});
+
+test("same-origin: Origin host must match the Host header", () => {
+  const host = "dash.test:3000";
+  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3000", host }), URL_), true);
+  assert.equal(isSameOriginRequest(h({ origin: "http://evil.test", host }), URL_), false);
+  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3001", host }), URL_), false);
+  assert.equal(isSameOriginRequest(h({ origin: "null", host }), URL_), false);
+  assert.equal(isSameOriginRequest(h({ origin: "not a url", host }), URL_), false);
+});
+
+test("same-origin: falls back to the request URL host, honours x-forwarded-host", () => {
+  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3000" }), URL_), true);
+  assert.equal(isSameOriginRequest(h({ origin: "http://evil.test" }), URL_), false);
   assert.equal(
-    OPERATOR_WRITES_DISABLED_REASON,
-    "operator writes are disabled; set HONCHO_OPERATOR_WRITES=true to allow retrying reasoning tasks",
+    isSameOriginRequest(
+      h({ origin: "https://dash.example", host: "internal:3000", "x-forwarded-host": "dash.example" }),
+      URL_,
+    ),
+    true,
   );
+});
+
+test("same-origin: either header failing rejects", () => {
+  assert.equal(
+    isSameOriginRequest(h({ "sec-fetch-site": "same-origin", origin: "http://evil.test", host: "dash.test:3000" }), URL_),
+    false,
+  );
+  assert.equal(
+    isSameOriginRequest(h({ "sec-fetch-site": "cross-site", origin: "http://dash.test:3000", host: "dash.test:3000" }), URL_),
+    false,
+  );
+});
+
+test("requireSameOrigin returns null or a 403 with the cross-site reason", async () => {
+  assert.equal(requireSameOrigin(h({}), URL_), null);
+  const res = requireSameOrigin(h({ "sec-fetch-site": "cross-site" }), URL_);
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { ok: false, reason: CROSS_SITE_REJECTED_REASON });
 });

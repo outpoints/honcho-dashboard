@@ -17,6 +17,7 @@ import { useWriteActions } from "@/lib/writeActions";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
+import type { RuntimeInfo } from "@/lib/operator/runtime-types";
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
@@ -67,13 +68,19 @@ export function ReasoningPage() {
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
   const confirm = useConfirm();
-  const { enabled: writeToggle } = useWriteActions();
-  // The retry actions also need the server-side gate (HONCHO_OPERATOR_WRITES);
-  // while the runtime probe is loading we assume off so we never offer a refused write.
-  const runtime = useOperatorQuery<{ writesEnabled?: boolean }>("/api/operator/runtime");
-  const serverWrites = runtime.data?.writesEnabled === true;
-  const canWrite = writeToggle;
-  const serverWritesHint = "server: HONCHO_OPERATOR_WRITES off";
+  const { enabled: canWrite } = useWriteActions();
+  // The retry actions also need the server-side gate (HONCHO_OPERATOR_WRITES).
+  // Anything but a confirmed "on" (loading, probe failed, off) keeps them disabled
+  // so we never offer a write the server will refuse.
+  const runtime = useOperatorQuery<Pick<RuntimeInfo, "writes_enabled">>("/api/operator/runtime");
+  const serverWrites = runtime.data?.writes_enabled === true;
+  const serverWritesHint = serverWrites
+    ? undefined
+    : runtime.data
+      ? "server: HONCHO_OPERATOR_WRITES off"
+      : runtime.error
+        ? "server write gate unknown (runtime probe failed)"
+        : "checking server write gate…";
   const metrics = useDeriverMetrics();
 
   const [statusFilter, setStatusFilter] = useState("all");
@@ -262,6 +269,7 @@ export function ReasoningPage() {
                 queue.refetch();
                 conclusions.refetch();
                 metrics.refetch();
+                runtime.refetch();
               }}
             />
             {canWrite ? (
@@ -271,7 +279,7 @@ export function ReasoningPage() {
                 onClick={doRetryAll}
                 disabled={!workspaceId || !counts?.failed || retryAllBusy || !serverWrites}
                 title={
-                  !serverWrites
+                  serverWritesHint
                     ? serverWritesHint
                     : counts?.failed
                       ? `Retry all ${counts.failed} failed tasks`
@@ -281,7 +289,7 @@ export function ReasoningPage() {
                 RETRY_FAILED
               </Button>
             ) : null}
-            {canWrite && !serverWrites ? (
+            {canWrite && serverWritesHint ? (
               <span className="text-[10px] text-text-muted">{serverWritesHint}</span>
             ) : null}
             {canWrite ? (
@@ -395,7 +403,7 @@ export function ReasoningPage() {
                           t={t}
                           index={i}
                           canRetry={canWrite}
-                          retryDisabledHint={serverWrites ? undefined : serverWritesHint}
+                          retryDisabledHint={serverWritesHint}
                           onRetry={() => doRetry(t)}
                         />
                       ))}
