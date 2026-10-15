@@ -96,7 +96,7 @@ The dashboard itself can optionally require a shared password (`DASHBOARD_PASSWO
 collides with the SDK's same-origin `Authorization` header. Pure logic lives in `src/lib/auth/`
 (import-free, tested by `scripts/auth-*.test.mjs`); `src/proxy.ts` (Next 16's renamed
 middleware) guards `/api/*`, `/v3/*`, `/health`, `/openapi.json` and must stay free of Node-only
-imports. Keep `/api/healthz` and `/api/auth/*` unguarded; the Docker health check uses `/api/healthz`.
+imports and, because Next applies rewrites case-insensitively, matches every path (guard logic lowercases). Every data route handler also calls `requireSession()` from `src/lib/auth/server.ts`: new API routes must do the same. Keep `/api/healthz` and `/api/auth/*` unguarded; the Docker health check uses `/api/healthz`.
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
 
