@@ -267,11 +267,17 @@ Limits to know about:
   `X-Forwarded-For` (the address your reverse proxy appended), or the n-th from the right when
   `DASHBOARD_TRUSTED_PROXIES=n` (use `2` for e.g. Cloudflare in front of Traefik). Everything
   to the left of that entry is supplied by the client and ignored. Falls back to `X-Real-IP`,
-  then to a single shared `unknown` bucket. This is only reliable if your proxy appends to or
-  overwrites the forwarded headers (nginx, Traefik and Caddy do). With **no** reverse proxy
-  the header is attacker-controlled, so the limit can be evaded by rotating it, and clients
-  that send no header all share one bucket (anyone can then lock everyone out for 15 minutes
-  by guessing). Put the dashboard behind a proxy, or rely on a strong password.
+  then to a single shared `unknown` bucket. The limiter is only as good as the header your
+  proxy sets:
+  - Traefik and Caddy append to `X-Forwarded-For` by default. **nginx does not**: plain
+    `proxy_pass` sends no `X-Forwarded-For`, so every client reaches the dashboard from the
+    proxy's own address and shares one bucket, and a single attacker can lock everyone out for
+    15 minutes by guessing. Add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+    to the `location` block.
+  - With **no** reverse proxy, a client that sends no `X-Forwarded-For` is keyed on its real
+    connection address (Next.js fills the header from the socket), but a client can send its
+    own header and rotate the value to evade the limit. Put the dashboard behind a correctly
+    configured proxy, or rely on a strong password.
 - **Sessions are stateless.** Logging out only clears the cookie in that browser: a captured
   cookie stays valid until it expires. Changing `DASHBOARD_PASSWORD` does **not** invalidate
   existing sessions. To invalidate every session at once, rotate `DASHBOARD_SESSION_SECRET`
