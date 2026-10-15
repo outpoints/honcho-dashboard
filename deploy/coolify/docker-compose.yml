@@ -1,0 +1,72 @@
+# Honcho Self-Hosted Dashboard - Coolify "Service" (raw compose).
+#
+# In Coolify: Project -> + New -> Service -> Docker Compose Empty, paste this
+# file, Save, then set the domain on the `dashboard` service and fill in the
+# variables Coolify lists. Full walkthrough: README, "Deploying behind Coolify / Traefik".
+#
+# Lines marked "Coolify:" rely on Coolify conventions and mean nothing to plain
+# `docker compose`. For a non-Coolify Traefik setup see the README labels block.
+services:
+  dashboard:
+    # Track :latest, or pin a release tag (or a sha256 digest) so a redeploy
+    # never changes the version underneath you.
+    image: ghcr.io/outpoints/honcho-dashboard:latest
+    # No `ports:` on purpose. Coolify: its Traefik proxy reaches the container
+    # over the Service's Docker network and terminates TLS.
+    environment:
+      # Coolify: this magic variable makes Coolify create the Traefik router and
+      # TLS certificate for the domain you type in the UI, forwarding to port 3000.
+      # The `_3000` suffix is the container port; `DASHBOARD` is the service name.
+      SERVICE_FQDN_DASHBOARD_3000: ${SERVICE_FQDN_DASHBOARD_3000}
+
+      # Coolify: `${VAR:?}` makes the variable required; Coolify lists it in the
+      # UI and refuses to deploy until it is set.
+      # Default Honcho upstream, e.g. https://honcho.example.com. To reach a Honcho
+      # Service on the same server by name, see the `networks:` block at the bottom
+      # and use http://api:8000.
+      NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:?}
+      # Comma-separated origins the same-origin proxy may forward to. Required: the
+      # proxy fails closed when empty. Usually the same value as HONCHO_BASE_URL.
+      HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:?}
+
+      # Optional read-only Postgres DSN for the operator modules. See the README
+      # for a dashboard_ro role. With the networks block below this can be
+      # postgresql://dashboard_ro:...@database:5432/postgres
+      HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}
+
+      # requires #16 (or a release that includes it)
+      # Set to true to allow the operator "retry reasoning" writes. Empty = read-only.
+      HONCHO_OPERATOR_WRITES: ${HONCHO_OPERATOR_WRITES:-}
+      # requires #17 (or a release that includes it)
+      # Shared dashboard password. Empty = no login, so set one on a public domain.
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      # requires #17 (or a release that includes it)
+      # Coolify: SERVICE_PASSWORD_64_<NAME> generates and stores a 64-character
+      # secret on first deploy; it signs the session cookie. Rotate it to log everyone out.
+      DASHBOARD_SESSION_SECRET: ${SERVICE_PASSWORD_64_DASHBOARDSESSION}
+      # requires #17 (or a release that includes it)
+      # Coolify's Traefik is exactly one proxy hop, so the login rate limiter keys
+      # on the last X-Forwarded-For entry. Raise it if you put e.g. Cloudflare in front of Traefik.
+      DASHBOARD_TRUSTED_PROXIES: "1"
+    healthcheck:
+      # requires #17 (or a release that includes it): /api/healthz does not exist
+      # before it, and Coolify does not route traffic to an unhealthy container.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    # Optional: join a sibling Honcho Coolify Service's network so the dashboard
+    # can use service names (`api`, `database`) instead of public URLs.
+    # Coolify: each Service gets a Docker network named after its uuid; find the
+    # uuid in the Honcho Service's URL. Keep `default` so Coolify's proxy still
+    # reaches this container. Uncomment this and the top-level block below.
+    # networks:
+    #   - default
+    #   - honcho
+
+# networks:
+#   honcho:
+#     external: true
+#     name: <honcho-service-uuid>

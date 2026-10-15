@@ -7,6 +7,8 @@
 
 # Local docker compose file (committed template is docker-compose-example.yml).
 docker-compose.yml
+# ...but the deployment recipes under deploy/ are committed.
+!deploy/**/docker-compose.yml
 
 # OS
 .DS_Store
