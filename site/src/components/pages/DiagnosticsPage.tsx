@@ -162,9 +162,9 @@ export function DiagnosticsPage() {
         <div className="text-[11px] text-text-muted leading-relaxed">
           Honcho v3 only exposes <span className="text-accent">/health</span> as a single boolean.
           The granular probes above are computed by the dashboard&apos;s operator modules
-          (read-only DB connection via <span className="text-accent">HONCHO_DATABASE_URL</span>,
-          log tail via <span className="text-accent">HONCHO_LOG_FILE</span>). Honcho itself is not
-          modified.
+          (DB connection via <span className="text-accent">HONCHO_DATABASE_URL</span>, read-only
+          unless <span className="text-accent">HONCHO_OPERATOR_WRITES</span> enables queue
+          retries; log tail via <span className="text-accent">HONCHO_LOG_FILE</span>).
         </div>
       </Panel>
 

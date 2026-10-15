@@ -162,3 +162,10 @@ before replacing any image referenced by the README.
 - `PRODUCT.md` (repo root) — strategic context: register (`product`), users, purpose, brand personality, anti-references, design principles, accessibility commitments. Read it before design work.
 - `DESIGN.md` (repo root) — visual system in impeccable format (palette, type, components), scanned from the real `@theme` tokens + components. The binding day-to-day contract is still `site/docs/research/DESIGN_GUIDE.md`; DESIGN.md is its strategic sibling for design tooling.
 - The `/impeccable` skill reads both. Run `/impeccable critique <surface>` or `/impeccable audit <area>` for reviews; `/impeccable live` for in-browser variants (configured in `.impeccable/live/config.json`).
+
+Operator DB writes are server-gated. The only mutating statements are the queue retry
+`UPDATE`s in `src/lib/operator/db.ts`, reached via `POST /api/operator/db`. That route calls
+`operatorWritesEnabled()` (`src/lib/operator/writes.ts`, env `HONCHO_OPERATOR_WRITES`, default
+off) first and returns 403 when disabled; the client write toggle is only UI. Any new write
+must go through the same gate, and `GET /api/operator/runtime` exposes `writesEnabled` so the
+UI never offers a refused action. Do not describe the operator DSN as strictly read-only.

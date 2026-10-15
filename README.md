@@ -73,7 +73,7 @@ Organized into four sections that mirror the sidebar.
 
 - **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth.
 - **Safe by default** — a master **write-actions** toggle (off by default) hides the create / update / delete controls on the workspace, peer, session, conclusion, reasoning, and webhook screens; each confirms before writing to the live instance. Reads never confirm.
-- **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook queue activity, log tail) come from an optional operator database connection, and degrade gracefully to the Honcho API when it isn't configured. Reads work with read-only credentials; retrying reasoning tasks requires queue update permission.
+- **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook queue activity, log tail) come from an optional operator database connection, and degrade gracefully to the Honcho API when it isn't configured. Reads work with read-only credentials; retrying reasoning tasks is off by default and requires `HONCHO_OPERATOR_WRITES=true` plus queue update permission.
 - **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme.
 
 ## Architecture
@@ -106,7 +106,11 @@ Three layers, each with a single job:
    `site/src/lib/operator/*` + `site/src/app/api/operator/*` route handlers.
    These are the metrics Honcho's REST API does not expose (uptime, db size,
    pgvector status, throughput timeseries, log tail, etc.). They read the same
-   Postgres database Honcho uses **read-only** — Honcho itself is not modified.
+   Postgres database Honcho uses, **read-only** except for one opt-in action:
+   retrying failed reasoning tasks runs `UPDATE` on Honcho's `queue` table. That
+   action is disabled unless `HONCHO_OPERATOR_WRITES=true` (enforced server-side)
+   and needs a DB role with `UPDATE` on `queue`; use a read-only role otherwise.
+   Nothing else in Honcho is modified.
    Every module degrades to `{ available: false, reason: ... }` when its
    configuration env var is not set, so the UI renders cleanly without them.
 
@@ -163,7 +167,8 @@ operator modules, set these in the environment that runs Compose:
 
 ```bash
 HONCHO_BASE_URL=http://honcho:8000              # base URL the dashboard proxies to
-HONCHO_DATABASE_URL=postgresql://...            # read-only Postgres DSN (operator/db)
+HONCHO_DATABASE_URL=postgresql://...            # Postgres DSN (operator/db); read-only role recommended
+HONCHO_OPERATOR_WRITES=false                    # true = allow retrying reasoning tasks (UPDATE on queue)
 HONCHO_LOG_FILE=/var/log/honcho/honcho.log      # mounted in container (operator/logs)
 HONCHO_RUNTIME_START_TS=2026-05-22T00:00:00Z    # optional, lets us report Honcho uptime
 HONCHO_PROXY_ALLOWED_BASES=http://honcho:8000   # multi-instance allowlist
@@ -202,6 +207,10 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
   postgresql+psycopg://postgres:<PASSWORD>@honcho-aio:5432/honcho
   ```
   *(Ensure `honcho-aio` has `POSTGRES_ALLOW_REMOTE=true` enabled).*
+- **Retrying reasoning tasks (optional):** Set `HONCHO_OPERATOR_WRITES=true` to let the
+  dashboard re-queue failed tasks. This is the only write the dashboard performs: an
+  `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave
+  it unset (and use a read-only role) if you only want to observe.
 - **Live Logs:** Set host path for `Honcho Log File Mount` to your `honcho-aio` log directory:
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
   - Container Path: `/honcho.log` (Read-only)
@@ -249,7 +258,7 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
 
 - **Next.js 16** (App Router, React 19, TypeScript strict, standalone output)
 - **`@honcho-ai/sdk`** v2.5 for native Honcho data flows
-- **`pg`** for the read-only operator DB connection
+- **`pg`** for the operator DB connection (read-only unless `HONCHO_OPERATOR_WRITES=true`)
 - **Tailwind CSS v4** with custom `@theme` tokens
 - **Framer Motion** for entrance / hover / tap / layout animations
 - **Lucide React** icons
@@ -376,7 +385,8 @@ records. This optional collector setup is independent of chat evidence/provenanc
   API doesn't expose — throughput chart, 52-week heatmap, db size/uptime,
   per-session message/token counts, per-task reasoning records, webhook
   queue history, and per-peer message/conclusion stats — come from the
-  read-only `HONCHO_DATABASE_URL` operator layer. Without it those panels show
+  `HONCHO_DATABASE_URL` operator layer (read-only except the opt-in retry
+  action, see `HONCHO_OPERATOR_WRITES`). Without it those panels show
   an "operator DB unavailable" state; everything backed by the SDK still works.
 - **`conclusions` is not a physical table.** Honcho's REST `conclusions`
   resource is stored in the `documents` table; conclusion *type* is the `level`
@@ -450,8 +460,8 @@ live Honcho `v3` instance (no more mock data).
 - **Live Honcho v3 integration** across workspaces, peers, sessions, messages,
   conclusions, context, and memory-augmented chat — via the official
   [`@honcho-ai/sdk`](https://www.npmjs.com/package/@honcho-ai/sdk), a thin raw
-  client for endpoints the SDK doesn't cover, and read-only Postgres *operator
-  modules* for metrics the REST API doesn't expose.
+  client for endpoints the SDK doesn't cover, and Postgres *operator
+  modules* (read-only unless writes are enabled) for metrics the REST API doesn't expose.
 - **Fleet** — cross-workspace queue monitor as the default landing page.
 - **Reasoning** — deriver-queue view with expandable tasks, retry, parsed
   payloads, and status-tile filtering, backed by direct `queue` table queries.
