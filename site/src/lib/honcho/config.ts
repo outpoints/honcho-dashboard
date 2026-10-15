@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import {
   DEFAULT_BASE_URL_META,
+  DEFAULT_TOKEN_MANAGED_META,
   LEGACY_DEFAULT_BASE_URL,
   SEED_INSTANCE_ID,
   SEED_INSTANCE_NAME,
@@ -42,6 +43,17 @@ function serverAdvertisedBaseUrl(): string | null {
   if (typeof document === "undefined") return null;
   const meta = document.querySelector<HTMLMetaElement>(`meta[name="${DEFAULT_BASE_URL_META}"]`);
   return meta?.content ? canonicalize(meta.content) : null;
+}
+
+/**
+ * True when the server supplies a bearer token for `baseUrl`: it advertised a
+ * token-managed default target and `baseUrl` is that target (see app/layout.tsx).
+ */
+export function hasServerManagedToken(baseUrl: string): boolean {
+  if (typeof document === "undefined") return false;
+  if (!document.querySelector(`meta[name="${DEFAULT_TOKEN_MANAGED_META}"]`)) return false;
+  const advertised = serverAdvertisedBaseUrl();
+  return !!advertised && canonicalize(baseUrl.trim()) === advertised;
 }
 
 /** Base URL for new instances: the server's runtime default, else the build-time one. */

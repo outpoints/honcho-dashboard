@@ -5,6 +5,8 @@ import {
   defaultBaseUrl,
   implicitAllowedBases,
   readRuntimeEnv,
+  resolveRequestToken,
+  serverManagedToken,
   type DefaultTargetSources,
 } from "./defaultTarget";
 
@@ -47,6 +49,22 @@ function defaultTargetSources(): DefaultTargetSources {
  */
 export function serverAdvertisedBaseUrl(): string | null {
   return advertisedBaseUrl(defaultTargetSources());
+}
+
+/**
+ * `HONCHO_PROXY_TOKEN`, read by computed key so `next build` cannot inline it.
+ * Server-only: it must never be rendered into a page or sent to the browser.
+ */
+function serverTokenEnv(): string | undefined {
+  return readRuntimeEnv(process.env, "HONCHO_PROXY_TOKEN");
+}
+
+/**
+ * Whether the server holds a bearer token for the default target. Only the
+ * fact is advertised to browsers, never the value.
+ */
+export function serverDefaultTokenManaged(): boolean {
+  return !!serverManagedToken(serverTokenEnv()) && !!advertisedBaseUrl(defaultTargetSources());
 }
 
 export function parseAllowlist(): string[] {
@@ -119,7 +137,14 @@ export function resolveHonchoTarget(headers: Headers): ResolveOk | ResolveErr {
     };
   }
 
-  const token = headers.get("x-honcho-token") ?? undefined;
+  // An explicit header token wins; otherwise HONCHO_PROXY_TOKEN applies, but
+  // only to the default target so it never reaches a second instance.
+  const token = resolveRequestToken(
+    headers.get("x-honcho-token"),
+    origin,
+    defaultTargetSources(),
+    serverTokenEnv(),
+  );
   return { ok: true, baseUrl: origin, token };
 }
 
