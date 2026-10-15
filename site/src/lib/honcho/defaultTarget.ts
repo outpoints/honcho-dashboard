@@ -16,6 +16,11 @@
 
 export const LEGACY_DEFAULT_BASE_URL = "http://localhost:8000";
 export const DEFAULT_BASE_URL_META = "honcho-dashboard:default-base-url";
+/**
+ * Present (content "1") when the server holds a bearer token for the default
+ * target (`HONCHO_PROXY_TOKEN`). Carries the fact only, never the token.
+ */
+export const DEFAULT_TOKEN_MANAGED_META = "honcho-dashboard:default-token-managed";
 export const SEED_INSTANCE_ID = "default";
 export const SEED_INSTANCE_NAME = "local";
 
@@ -92,6 +97,45 @@ export function implicitAllowedBases(sources: DefaultTargetSources): string[] {
 export function advertisedBaseUrl(sources: DefaultTargetSources): string | null {
   const url = defaultBaseUrl(sources);
   return url ? canonicalize(url) : null;
+}
+
+/**
+ * The server-managed token (`HONCHO_PROXY_TOKEN`), trimmed; undefined when the
+ * env is unset or blank.
+ */
+export function serverManagedToken(envToken: string | undefined): string | undefined {
+  return present(envToken);
+}
+
+/**
+ * The server-managed token to use for `origin`, or undefined. It applies only
+ * when `origin` is the canonicalized default base URL, so it is never sent to
+ * any other allowlisted instance.
+ */
+export function serverDefaultToken(
+  origin: string,
+  sources: DefaultTargetSources,
+  envToken: string | undefined,
+): string | undefined {
+  const token = serverManagedToken(envToken);
+  if (!token) return undefined;
+  const defaultOrigin = advertisedBaseUrl(sources);
+  return defaultOrigin && defaultOrigin === origin ? token : undefined;
+}
+
+/**
+ * The bearer token for a proxied request: an explicit `X-Honcho-Token` header
+ * always wins (a blank header counts as absent), else the server default for
+ * the default target.
+ */
+export function resolveRequestToken(
+  headerToken: string | null,
+  origin: string,
+  sources: DefaultTargetSources,
+  envToken: string | undefined,
+): string | undefined {
+  if (headerToken && headerToken.trim()) return headerToken;
+  return serverDefaultToken(origin, sources, envToken);
 }
 
 export interface StoredInstance {
