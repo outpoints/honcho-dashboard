@@ -43,6 +43,8 @@ Routing is **hash-based inside `AppShell`** (`#/overview`, `#/workspaces`, …).
 | `npm run test`      | Focused Node tests                          |
 | `npm run check`     | lint + typecheck + test + build (before commit) |
 
+`npm run build` fails at `/_global-error` with `Cannot read properties of null (reading 'useContext')`? Your shell exports `NODE_ENV=development`. Unset it or run `NODE_ENV=production npm run build`.
+
 ## Releasing
 
 Versioned with semver. The single source of truth is `site/package.json` (`version`);
