@@ -55,7 +55,7 @@ services:
       HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}
 
       # Opt-in (1/true/yes): allow retrying failed reasoning tasks. The only
-      # write the dashboard performs: UPDATE on Honcho's `queue` table, so the
+      # direct database write: UPDATE on Honcho's `queue` table, so the
       # role above needs UPDATE on `queue`. Unset = refused with HTTP 403.
       HONCHO_OPERATOR_WRITES: ${HONCHO_OPERATOR_WRITES:-}
 

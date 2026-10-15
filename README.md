@@ -110,14 +110,16 @@ Three layers, each with a single job:
    retrying failed reasoning tasks runs `UPDATE` on Honcho's `queue` table. That
    action is disabled unless `HONCHO_OPERATOR_WRITES=true` (enforced server-side)
    and needs a DB role with `UPDATE` on `queue`; use a read-only role otherwise.
-   Nothing else in Honcho is modified.
+   (This is about the database connection only; the dashboard's Honcho REST
+   screens still create/update/delete through the `/api/honcho` proxy when the
+   in-app write toggle is on.)
    Every module degrades to `{ available: false, reason: ... }` when its
    configuration env var is not set, so the UI renders cleanly without them.
 
    | Module                  | Env required                  | What it exposes |
    |-------------------------|-------------------------------|-----------------|
-   | `runtime`               | none (`HONCHO_RUNTIME_START_TS` optional) | dashboard uptime, Node version, optional Honcho uptime |
-   | `db`                    | `HONCHO_DATABASE_URL`         | db size, pgvector status, table sizes, throughput buckets, 52-week heatmap, conclusion stats |
+   | `runtime`               | none (`HONCHO_RUNTIME_START_TS` optional) | dashboard uptime, Node version, optional Honcho uptime, `writes_enabled` (state of `HONCHO_OPERATOR_WRITES`) |
+   | `db`                    | `HONCHO_DATABASE_URL` (`HONCHO_OPERATOR_WRITES` to allow queue retries) | db size, pgvector status, table sizes, throughput buckets, 52-week heatmap, conclusion stats |
    | `logs`                  | `HONCHO_LOG_FILE`             | tail of Honcho log file (JSON or plain) |
    | `traces`                | `HONCHO_TRACE_FILE`           | bounded, metadata-only LLM and embedding CloudEvents records |
    | `config`                | none                          | safe env-var snapshot (secrets redacted) |
@@ -168,7 +170,7 @@ operator modules, set these in the environment that runs Compose:
 ```bash
 HONCHO_BASE_URL=http://honcho:8000              # base URL the dashboard proxies to
 HONCHO_DATABASE_URL=postgresql://...            # Postgres DSN (operator/db); read-only role recommended
-HONCHO_OPERATOR_WRITES=false                    # true = allow retrying reasoning tasks (UPDATE on queue)
+HONCHO_OPERATOR_WRITES=                         # true = allow retrying reasoning tasks (UPDATE on queue)
 HONCHO_LOG_FILE=/var/log/honcho/honcho.log      # mounted in container (operator/logs)
 HONCHO_RUNTIME_START_TS=2026-05-22T00:00:00Z    # optional, lets us report Honcho uptime
 HONCHO_PROXY_ALLOWED_BASES=http://honcho:8000   # multi-instance allowlist
@@ -208,8 +210,8 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
   ```
   *(Ensure `honcho-aio` has `POSTGRES_ALLOW_REMOTE=true` enabled).*
 - **Retrying reasoning tasks (optional):** Set `HONCHO_OPERATOR_WRITES=true` to let the
-  dashboard re-queue failed tasks. This is the only write the dashboard performs: an
-  `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave
+  dashboard re-queue failed tasks. This is the only direct database write the dashboard
+  performs: an `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave
   it unset (and use a read-only role) if you only want to observe.
 - **Live Logs:** Set host path for `Honcho Log File Mount` to your `honcho-aio` log directory:
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
