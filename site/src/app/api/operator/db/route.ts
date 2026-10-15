@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireSession } from "@/lib/auth/server";
 import {
   dbStats,
   dbThroughput,
@@ -17,6 +18,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const denied = await requireSession(req);
+  if (denied) return denied;
   const view = req.nextUrl.searchParams.get("view") ?? "stats";
   if (view === "throughput") {
     const tf = (req.nextUrl.searchParams.get("timeframe") ?? "24H") as "1H" | "6H" | "24H" | "7D";
@@ -65,6 +68,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireSession(req);
+  if (denied) return denied;
   const action = req.nextUrl.searchParams.get("action");
   if (action === "retry_reasoning") {
     const ws = req.nextUrl.searchParams.get("workspace_id");

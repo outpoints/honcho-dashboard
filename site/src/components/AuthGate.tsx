@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Button, Field, TextInput } from "@/components/atoms";
 import { Panel } from "@/components/Panel";
-import { fetchAuthStatus, login, logout, type AuthStatus } from "@/lib/auth/client";
+import { fetchAuthStatus, installAuthFetchInterceptor, login, logout, type AuthStatus } from "@/lib/auth/client";
+import { AUTH_REQUIRED_EVENT } from "@/lib/auth/constants";
 import { invalidate } from "@/lib/honcho/useQuery";
 
 interface AuthContextValue {
@@ -30,7 +31,7 @@ type GateState =
 /**
  * Renders the app only when auth is off or the visitor holds a valid session;
  * otherwise renders the login screen. The app mounts after login, so no data
- * request is made before the session exists.
+ * request is made before the session exists. Logging in reloads the page.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GateState>({ kind: "loading" });
@@ -47,9 +48,22 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => controller.abort();
   }, [attempt]);
 
+  // Session expired or cleared while the app was open: the guard's 401 sends
+  // the visitor back to the login screen instead of surfacing "access denied".
+  useEffect(() => {
+    const uninstall = installAuthFetchInterceptor();
+    const onRequired = () => setState({ kind: "ready", status: { enabled: true, authenticated: false } });
+    window.addEventListener(AUTH_REQUIRED_EVENT, onRequired);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, onRequired);
+      uninstall();
+    };
+  }, []);
+
+  // Reload so the server renders the page with a session (the default Honcho
+  // URL meta tag is omitted for unauthenticated page loads).
   const onLoggedIn = useCallback(() => {
-    invalidate("");
-    setState({ kind: "ready", status: { enabled: true, authenticated: true } });
+    window.location.reload();
   }, []);
 
   const doLogout = useCallback(async () => {

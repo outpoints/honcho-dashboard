@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireSession } from "@/lib/auth/server";
 import { resolveHonchoTarget } from "@/lib/honcho/allowlist";
 
 export const runtime = "nodejs";
@@ -20,6 +21,8 @@ const HOP_BY_HOP = new Set([
 ]);
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
+  const denied = await requireSession(req);
+  if (denied) return denied;
   const resolved = resolveHonchoTarget(req.headers);
   if (!resolved.ok) {
     return Response.json({ detail: resolved.reason }, { status: resolved.status });

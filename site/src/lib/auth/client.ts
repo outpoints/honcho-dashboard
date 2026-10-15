@@ -1,5 +1,7 @@
 "use client";
 
+import { AUTH_REQUIRED_EVENT, isAuthRequiredResponse } from "./constants";
+
 /** Browser helpers for the optional dashboard login. Cookies ride along on same-origin fetches. */
 
 export interface AuthStatus {
@@ -40,4 +42,23 @@ export async function login(password: string): Promise<void> {
 export async function logout(): Promise<void> {
   const res = await fetch("/api/auth/logout", { method: "POST" });
   if (!res.ok) throw new Error(`Logout failed (HTTP ${res.status})`);
+}
+
+/**
+ * Wrap `window.fetch` so the guard's 401 (session expired or cleared) raises
+ * `AUTH_REQUIRED_EVENT`. Every same-origin call funnels through global fetch
+ * (raw client, Honcho SDK, operator routes), so one wrapper covers them all.
+ * Returns an uninstall function.
+ */
+export function installAuthFetchInterceptor(): () => void {
+  const original = window.fetch;
+  const wrapped: typeof window.fetch = async (...args) => {
+    const res = await original.apply(window, args);
+    if (isAuthRequiredResponse(res)) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    return res;
+  };
+  window.fetch = wrapped;
+  return () => {
+    if (window.fetch === wrapped) window.fetch = original;
+  };
 }
