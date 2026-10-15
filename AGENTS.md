@@ -26,6 +26,7 @@ Every page talks to a real Honcho `v3` API. The product is mature: beyond a basi
 │   │   └── types/         # honcho.ts (domain types)
 │   ├── docs/research/     # BEHAVIORS / COLOR_AUDIT / DROPDOWN specs (read before changing UX)
 │   └── public/            # images, fonts, seo
+├── deploy/coolify/        # Coolify Service compose (docs: README, "Deploying behind Coolify / Traefik")
 └── AGENTS.md              # this file
 ```
 
