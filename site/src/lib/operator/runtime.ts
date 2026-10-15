@@ -1,5 +1,7 @@
 import "server-only";
 
+import { operatorWritesEnabled } from "./writes";
+
 const DASHBOARD_START_MS = Date.now();
 
 export interface RuntimeInfo {
@@ -10,6 +12,8 @@ export interface RuntimeInfo {
   dashboard_version?: string;
   honcho_runtime_start_ts?: string | null;
   honcho_uptime_s?: number | null;
+  /** True when HONCHO_OPERATOR_WRITES allows the queue retry actions. */
+  writesEnabled: boolean;
 }
 
 export function runtimeInfo(): RuntimeInfo {
@@ -30,5 +34,6 @@ export function runtimeInfo(): RuntimeInfo {
     dashboard_version: process.env.npm_package_version,
     honcho_runtime_start_ts: honchoStart,
     honcho_uptime_s: honchoUptime,
+    writesEnabled: operatorWritesEnabled(),
   };
 }
