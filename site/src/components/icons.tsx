@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowRight,
   Bell,
   Brain,
   ChevronDown,
@@ -60,6 +61,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   bell: Bell,
   brain: Brain,
   "chevron-down": ChevronDown,
+  "arrow-right": ArrowRight,
   "chevron-right": ChevronRight,
   clock: Clock,
   database: Database,

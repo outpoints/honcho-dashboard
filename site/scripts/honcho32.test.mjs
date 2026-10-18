@@ -90,7 +90,7 @@ test("provenance uses batched ordered premises, missing markers and workspace-wi
 });
 
 for (const version of ["3.2.0", "3.2.1", "3.2.2"]) {
-  test(`SDK 2.5.1 preserves ${version} evidence attribution and explicit conclusion provenance`, async (t) => {
+  test(`SDK 2.5.1+ preserves ${version} evidence attribution and explicit conclusion provenance`, async (t) => {
     const { observer_id, observed_id, ...legacyRecord } = evidence.conclusions[0];
     const records = version === "3.2.0" ? [legacyRecord] : [
       { ...legacyRecord, observer_id, observed_id },

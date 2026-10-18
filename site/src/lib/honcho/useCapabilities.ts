@@ -44,6 +44,10 @@ export interface HonchoCapabilities {
   evidence: HonchoCapabilityState;
   provenance: HonchoCapabilityState;
   deriverMetrics: HonchoCapabilityState;
+  /** Shared and per-agent `custom_instructions` in workspace configuration (3.3.0+). */
+  customInstructions: HonchoCapabilityState;
+  /** Session clone resolves its source inside the workspace (fixed in 3.3.0). */
+  scopedSessionClone: HonchoCapabilityState;
 }
 
 export function useHonchoCapabilities(): HonchoCapabilities {
@@ -84,5 +88,7 @@ export function useHonchoCapabilities(): HonchoCapabilities {
     evidence: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 2, 0]),
     provenance: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 2, 0]),
     deriverMetrics: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 1, 2]),
+    customInstructions: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 3, 0]),
+    scopedSessionClone: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 3, 0]),
   };
 }

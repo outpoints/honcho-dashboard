@@ -11,7 +11,7 @@ import { filterTraces, type TraceRecord, type TraceResult } from "@/lib/operator
 const DETAIL_GROUPS = [
   ["EXECUTION", ["timestamp", "model", "transport", "provider", "provider_label", "outcome", "duration_ms", "attempt", "retry_attempts", "is_final_attempt", "was_fallback", "was_stream", "error_class", "finish_reason", "was_truncated"]],
   ["CORRELATION", ["source", "workspace_name", "session_id", "agent_type", "call_purpose", "track_name", "parent_category", "trace_id", "span_id", "parent_span_id", "run_id", "parent_event_id", "iteration", "step_seq", "peer_name", "observers", "observed", "source_message_ids", "queue_item_ids"]],
-  ["CONTENT_REFERENCES", ["system_prompt_ref", "system_prompt_refs", "input_message_refs", "tool_schema_refs", "output_content_ref", "output_thinking_ref", "output_reasoning_ref", "raw_response_ref"]],
+  ["CONTENT_REFERENCES", ["system_prompt_ref", "system_prompt_refs", "input_message_refs", "tool_schema_refs", "output_content_ref", "output_thinking_ref", "output_reasoning_ref", "raw_response_ref", "custom_instructions_ref"]],
   ["ACCOUNTING", ["provider_input_tokens", "provider_output_tokens", "cache_read_tokens", "cache_creation_tokens", "effective_max_output_tokens", "input_count", "honcho_version"]],
 ] as const;
 

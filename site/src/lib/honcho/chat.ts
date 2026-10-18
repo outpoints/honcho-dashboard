@@ -1,7 +1,7 @@
 import type { ChatResponse, Evidence, EvidenceObservation, Honcho } from "@honcho-ai/sdk";
 import type { HonchoCapabilityState } from "./capabilities.ts";
 
-// SDK 2.5.1 types these IDs as required, but Honcho 3.2.0 omits them.
+// SDK 2.5.1–2.6.0 types these IDs as required, but Honcho 3.2.0 omits them.
 type DashboardEvidenceObservation = Omit<EvidenceObservation, "observer_id" | "observed_id"> & {
   observer_id?: string | null;
   observed_id?: string | null;
