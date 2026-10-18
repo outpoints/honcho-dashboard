@@ -19,6 +19,8 @@ import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config"
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
 import { getSdk } from "@/lib/honcho/sdk";
+import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
+import type { HonchoCapabilityState } from "@/lib/honcho/capabilities";
 import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiSession, toApiMessage, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiSession, ApiMessage } from "@/lib/honcho/types";
@@ -82,6 +84,7 @@ export function SessionsPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
   const { push } = useToast();
+  const { scopedSessionClone } = useHonchoCapabilities();
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -348,6 +351,7 @@ export function SessionsPage() {
                   onToggle={() => setOpen(open === d.session.id ? null : d.session.id)}
                   resolvePeerType={resolvePeerType}
                   apiOpts={apiOpts}
+                  cloneScoped={scopedSessionClone}
                   onRemove={() => setRemoveTarget(d.session.id)}
                   onOpenMessages={() => {
                     window.location.hash = `#/messages?session=${encodeURIComponent(d.session.id)}`;
@@ -397,6 +401,7 @@ function SessionRow({
   onToggle,
   resolvePeerType,
   apiOpts,
+  cloneScoped,
   onRemove,
   onOpenMessages,
   onDataChanged,
@@ -408,6 +413,7 @@ function SessionRow({
   onToggle: () => void;
   resolvePeerType: (workspaceId: string, peerId: string) => PeerType;
   apiOpts: HonchoClientOptions | null;
+  cloneScoped: HonchoCapabilityState;
   onRemove: () => void;
   onOpenMessages: () => void;
   onDataChanged: () => void;
@@ -582,6 +588,15 @@ function SessionRow({
         <>
           Create a copy of session <span className="text-accent font-mono">{session.id}</span> (its
           peers and messages) on the live instance?
+          {cloneScoped === "available" ? null : (
+            <span className="block mt-2 text-text-muted">
+              {cloneScoped === "unsupported"
+                ? "This server is older than Honcho 3.3.0."
+                : "This server's Honcho version is unverified."}{" "}
+              Before 3.3.0, clone found its source by session name across all workspaces, so a
+              same-named session elsewhere could be copied instead. Upgrade first or check the copy.
+            </span>
+          )}
         </>
       ),
     });

@@ -5,7 +5,7 @@ import { toApiConclusion } from "../src/lib/honcho/adapters.ts";
 import { honcho } from "../src/lib/honcho/client.ts";
 import { HonchoApiError } from "../src/lib/honcho/types.ts";
 
-// Response contracts from plastic-labs/honcho v3.1.0 and v3.2.0–v3.2.2,
+// Response contracts from plastic-labs/honcho v3.1.0, v3.2.0–v3.2.2, and v3.3.0,
 // src/schemas/api.py (Conclusion) and the peer/workspace chat routes.
 const baseConclusion = {
   id: "conclusion-1",
@@ -22,15 +22,16 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
   headers: { "content-type": "application/json" },
 });
 
-for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2"]) {
+for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2", "3.3.0"]) {
   test(`dashboard SDK and raw client preserve Honcho ${version} contracts`, async (t) => {
     invalidateSdk();
     t.after(invalidateSdk);
-    const conclusion = version.startsWith("3.2.")
+    const attributed = !version.startsWith("3.0.") && !version.startsWith("3.1.");
+    const conclusion = attributed
       ? { ...baseConclusion, source_ids: ["source-1", "source-2"], times_derived: 4 }
       : baseConclusion;
     const explicit = { ...conclusion, id: "explicit-1", level: "explicit" };
-    if (version.startsWith("3.2.")) explicit.source_ids = version === "3.2.0" ? null : [];
+    if (attributed) explicit.source_ids = version === "3.2.0" ? null : [];
     const conclusions = [conclusion, explicit];
     const calls = [];
     t.mock.method(globalThis, "fetch", async (url, init = {}) => {
@@ -66,7 +67,7 @@ for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2"]) {
     assert.ok(calls.every(({ headers }) => headers.get("X-Honcho-Base-Url") === opts.baseUrl));
     const sdkCalls = calls.filter(({ path }) => !path.endsWith("/conclusions/list"));
     assert.ok(sdkCalls.every(({ headers }) => headers.get("authorization") === `Bearer ${opts.token}`));
-    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.5.1")));
+    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.6.0")));
     const query = calls.find(({ path }) => path.endsWith("/conclusions/query"));
     assert.deepEqual(query.body, {
       query: "meetings", top_k: 50,

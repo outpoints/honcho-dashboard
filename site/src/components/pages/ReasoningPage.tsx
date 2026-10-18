@@ -20,6 +20,7 @@ import { useOperatorQuery } from "@/lib/operator/client";
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
+import { INSTRUCTION_MODULES } from "@/lib/honcho/workspaceConfig";
 import { cn } from "@/lib/utils";
 
 type ChipTone = "blue" | "purple" | "yellow" | "orange" | "cyan" | "pink" | "muted";
@@ -434,6 +435,13 @@ export function ReasoningPage() {
                     <Row k="peer_card.use" v={<Bool v={nested(config, "peer_card", "use")} />} />
                     <Row k="peer_card.create" v={<Bool v={nested(config, "peer_card", "create")} />} />
                     <Row k="dream" v={<Bool v={nested(config, "dream", "enabled")} />} />
+                    {/* Honcho 3.3+ records where each agent's instructions came from. */}
+                    {INSTRUCTION_MODULES.map((agent) => {
+                      const source = nested(config, agent, "custom_instructions_source");
+                      return typeof source === "string" ? (
+                        <Row key={agent} k={`${agent}.instructions_from`} v={source} />
+                      ) : null;
+                    })}
                   </div>
                 ) : (
                   <div className="text-[11px] text-text-muted">No configuration captured on recent tasks.</div>

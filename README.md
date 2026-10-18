@@ -33,7 +33,8 @@ The Next.js app lives in [`site/`](./site).
 ![Context layers and preview using synthetic Honcho 3.2.1 data](docs/context.png)
 
 Chat evidence and provenance require Honcho 3.2+; evidence peer attribution requires
-3.2.1+. Backlog requires 3.1.2+.
+3.2.1+. Backlog requires 3.1.2+. Shared and per-agent custom instructions in
+workspace configuration require 3.3.0+.
 Call traces use an optional collector export configured on the dashboard host.
 
 ## Features
@@ -49,7 +50,7 @@ Organized into four sections that mirror the sidebar.
 
 **Explore**
 
-- **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API.
+- **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API. On Honcho 3.3.0+, the configuration form also edits shared custom instructions and per-agent overrides for the deriver, summaries, dreams, peer cards, and dialectic chat.
 - **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
 - **Sessions** — browse every paginated Honcho session, then search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
 - **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
@@ -83,7 +84,7 @@ Three layers, each with a single job:
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
    status, dream scheduling, scopes, scope-aware recall, workspace chat, and search use
-   the SDK directly. The dashboard currently targets SDK 2.5.1+ (locked to 2.5.1).
+   the SDK directly. The dashboard currently targets SDK 2.5.1+ (locked to 2.6.0).
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
@@ -283,7 +284,7 @@ Features introduced by Honcho 3.1 are capability-gated:
 - Network failures and other ambiguous responses fail conservatively: 3.1-only
   controls remain disabled without affecting older dashboard workflows.
 
-The dashboard uses `@honcho-ai/sdk` 2.5.1 for **Honcho 3.2.1/3.2.2** while
+The dashboard uses `@honcho-ai/sdk` 2.6.0 for **Honcho 3.2.1–3.3.0** while
 retaining the existing 3.0.x/3.1 workflows and 3.2.0 evidence/provenance. Conclusion responses retain optional
 `source_ids` (parent conclusion IDs) and `times_derived` attribution, including
 semantic-search results. On verified 3.2+ servers, **INCLUDE_EVIDENCE** collects
@@ -327,6 +328,17 @@ while it builds. Langfuse's new Agent Graph and richer traces are backend/export
 features, separate from the dashboard's metadata-only trace inspector.
 After upgrading your server, smoke-test Fleet, Conclusions/search, Chat,
 Scopes/context, and the operator DB panels against your migrated data and model.
+
+Honcho 3.3.0 support is covered by the
+[3.3.0 compatibility and upgrade guide](docs/HONCHO_3_3_0_VALIDATION.md). Saving a
+workspace configuration now keeps every key the form does not show, so 3.3
+per-agent instructions set by another client survive a save, and a field reset to
+its default is cleared on the server. The instruction fields appear only on
+verified 3.3.0+ servers. Session clone warns on older servers, where the clone
+source could come from a same-named session in another workspace. The 3.3.0
+migration builds a trigram index on `messages` about 1.5× the table's size, and a
+`SUMMARY_MODEL_CONFIG__MAX_OUTPUT_TOKENS` below the new 6000-token summary cap
+stops Honcho from starting. Check both before upgrading.
 
 For the **server upgrade**, apply Honcho's Alembic migrations using its deployment
 procedure before starting the upgraded services. The 3.2 tag adds the

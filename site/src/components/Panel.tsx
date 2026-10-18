@@ -53,7 +53,7 @@ export function Panel({
           {actions ? <div className="mr-2 flex items-center gap-1">{actions}</div> : null}
           <span className="text-text-muted text-xs select-none" aria-hidden>─</span>
           <span className="text-text-muted text-xs select-none" aria-hidden>□</span>
-          <span className="text-text-muted text-xs select-none cursor-pointer hover:text-accent transition-colors duration-150">
+          <span className="text-text-muted text-xs select-none" aria-hidden>
             ×
           </span>
         </div>

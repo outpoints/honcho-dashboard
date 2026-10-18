@@ -1,17 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Modal } from "@/components/Modal";
 import { Panel } from "@/components/Panel";
 import { Button, Checkbox, Chip, Field, PillTabs, TextInput } from "@/components/atoms";
+import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
 import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
+import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
-import type { ApiWorkspace } from "@/lib/honcho/types";
+import { HonchoApiError, type ApiWorkspace } from "@/lib/honcho/types";
+import {
+  buildWorkspaceConfiguration,
+  instructionFieldsInError,
+  instructionState,
+  seedWorkspaceConfigForm,
+  validateWorkspaceConfiguration,
+  withClearedKeys,
+  type InstructionKey,
+  type InstructionModule,
+  type InstructionState,
+  type Instructions,
+  type Tri,
+  type WorkspaceConfigForm,
+} from "@/lib/honcho/workspaceConfig";
+import { cn } from "@/lib/utils";
 
 /**
  * Global defaults Honcho falls back to when a workspace config field is unset.
@@ -29,34 +47,12 @@ const DEFAULTS = {
   dream: true,
 } as const;
 
-const KNOWN_KEYS = new Set(["reasoning", "peer_card", "summary", "dream"]);
+type Config = Record<string, unknown>;
 
-interface ReasoningCfg {
-  enabled?: boolean | null;
-  custom_instructions?: string | null;
-}
-interface PeerCardCfg {
-  use?: boolean | null;
-  create?: boolean | null;
-}
-interface SummaryCfg {
-  enabled?: boolean | null;
-  messages_per_short_summary?: number | null;
-  messages_per_long_summary?: number | null;
-}
-interface DreamCfg {
-  enabled?: boolean | null;
-}
-interface WorkspaceCfg {
-  reasoning?: ReasoningCfg | null;
-  peer_card?: PeerCardCfg | null;
-  summary?: SummaryCfg | null;
-  dream?: DreamCfg | null;
-  [k: string]: unknown;
-}
+const EASE = [0.25, 0.46, 0.45, 0.94] as const;
 
-/** `null` = inherit the global default (not explicitly stored). */
-type Tri = boolean | null;
+const TEXTAREA_CLASS =
+  "w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y";
 
 export function WorkspaceConfigModal({
   workspace,
@@ -71,115 +67,59 @@ export function WorkspaceConfigModal({
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
+  const { customInstructions: instructionsState } = useHonchoCapabilities();
+  const instructionsAvailable = instructionsState === "available";
 
   const [mode, setMode] = useState<"form" | "json">("form");
   const [saving, setSaving] = useState(false);
 
-  // Form state. `null` toggles inherit the default; empty strings inherit too.
-  const [reasoning, setReasoning] = useState<Tri>(null);
-  const [customInstructions, setCustomInstructions] = useState("");
-  const [pcUse, setPcUse] = useState<Tri>(null);
-  const [pcCreate, setPcCreate] = useState<Tri>(null);
-  const [summary, setSummary] = useState<Tri>(null);
-  const [shortInterval, setShortInterval] = useState("");
-  const [longInterval, setLongInterval] = useState("");
-  const [dream, setDream] = useState<Tri>(null);
+  // The form is overlaid onto `base` on save, so keys it does not show survive.
+  const [base, setBase] = useState<Config>({});
+  const [form, setForm] = useState<WorkspaceConfigForm>(() => seedWorkspaceConfigForm({}));
 
   const [jsonText, setJsonText] = useState("");
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneId, setCloneId] = useState("");
+  // Instruction fields start collapsed and show a one-line summary.
+  const [openFields, setOpenFields] = useState<Partial<Record<InstructionKey, boolean>>>({});
 
   // Seed every field from the workspace's stored configuration whenever it opens.
   useEffect(() => {
     if (!workspace) return;
-    const c = (workspace.configuration ?? {}) as WorkspaceCfg;
+    const stored = (workspace.configuration ?? {}) as Config;
     setMode("form");
-    setReasoning(c.reasoning?.enabled ?? null);
-    setCustomInstructions(c.reasoning?.custom_instructions ?? "");
-    setPcUse(c.peer_card?.use ?? null);
-    setPcCreate(c.peer_card?.create ?? null);
-    setSummary(c.summary?.enabled ?? null);
-    setShortInterval(
-      c.summary?.messages_per_short_summary != null
-        ? String(c.summary.messages_per_short_summary)
-        : "",
-    );
-    setLongInterval(
-      c.summary?.messages_per_long_summary != null
-        ? String(c.summary.messages_per_long_summary)
-        : "",
-    );
-    setDream(c.dream?.enabled ?? null);
+    setBase(stored);
+    setForm(seedWorkspaceConfigForm(stored));
     setCloneOpen(false);
     setCloneId("");
+    setOpenFields({});
   }, [workspace]);
 
-  /** Build the configuration dict, writing only explicitly-set fields and
-   *  preserving any unknown keys already on the workspace. */
-  const buildConfig = useMemo(
-    () =>
-      function build(): WorkspaceCfg {
-        const out: WorkspaceCfg = {};
+  const update = (patch: Partial<WorkspaceConfigForm>) => setForm((prev) => ({ ...prev, ...patch }));
+  const setInstruction = (agent: InstructionModule) => (value: Instructions) =>
+    setForm((prev) => ({ ...prev, instructions: { ...prev.instructions, [agent]: value } }));
+  const toggleField = (key: InstructionKey) => () =>
+    setOpenFields((prev) => ({ ...prev, [key]: !prev[key] }));
 
-        const reasoningCfg: ReasoningCfg = {};
-        if (reasoning !== null) reasoningCfg.enabled = reasoning;
-        if (customInstructions.trim()) reasoningCfg.custom_instructions = customInstructions.trim();
-        if (Object.keys(reasoningCfg).length) out.reasoning = reasoningCfg;
-
-        const peerCardCfg: PeerCardCfg = {};
-        if (pcUse !== null) peerCardCfg.use = pcUse;
-        if (pcCreate !== null) peerCardCfg.create = pcCreate;
-        if (Object.keys(peerCardCfg).length) out.peer_card = peerCardCfg;
-
-        const summaryCfg: SummaryCfg = {};
-        if (summary !== null) summaryCfg.enabled = summary;
-        if (shortInterval.trim()) summaryCfg.messages_per_short_summary = Number(shortInterval);
-        if (longInterval.trim()) summaryCfg.messages_per_long_summary = Number(longInterval);
-        if (Object.keys(summaryCfg).length) out.summary = summaryCfg;
-
-        const dreamCfg: DreamCfg = {};
-        if (dream !== null) dreamCfg.enabled = dream;
-        if (Object.keys(dreamCfg).length) out.dream = dreamCfg;
-
-        // Preserve unknown keys (server allows extra config fields).
-        const original = (workspace?.configuration ?? {}) as Record<string, unknown>;
-        for (const [k, v] of Object.entries(original)) {
-          if (!KNOWN_KEYS.has(k)) out[k] = v;
-        }
-        return out;
-      },
-    [
-      reasoning,
-      customInstructions,
-      pcUse,
-      pcCreate,
-      summary,
-      shortInterval,
-      longInterval,
-      dream,
-      workspace,
-    ],
-  );
-
-  /** Reject summary intervals that violate the server's constraints up front. */
-  function validateIntervals(cfg: WorkspaceCfg): string | null {
-    const s = cfg.summary?.messages_per_short_summary;
-    const l = cfg.summary?.messages_per_long_summary;
-    if (s != null && (!Number.isFinite(s) || s < 10)) return "Short summary interval must be ≥ 10";
-    if (l != null && (!Number.isFinite(l) || l < 20)) return "Long summary interval must be ≥ 20";
-    if (s != null && l != null && s >= l)
-      return "Short summary interval must be less than the long interval";
-    return null;
+  /** Open any instruction field the server rejected, so the error is not hidden. */
+  function revealRejectedFields(error: unknown) {
+    if (!(error instanceof HonchoApiError) || error.status !== 422) return;
+    const keys = instructionFieldsInError(error.body);
+    if (keys.length) setOpenFields((prev) => ({ ...prev, ...Object.fromEntries(keys.map((key) => [key, true])) }));
   }
 
-  function resolveConfig(): WorkspaceCfg | null {
+  function buildConfig(): Config {
+    return buildWorkspaceConfiguration(base, form, { customInstructions: instructionsAvailable });
+  }
+
+  function resolveConfig(): Config | null {
     if (mode === "json") {
       try {
         const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
           throw new Error("not an object");
         }
-        return parsed as WorkspaceCfg;
+        return parsed as Config;
       } catch {
         push({ type: "error", message: "Configuration must be a JSON object" });
         return null;
@@ -195,25 +135,14 @@ export function WorkspaceConfigModal({
       setMode("json");
       return;
     }
-    // json -> form: try to re-seed the form from the edited JSON.
+    // json -> form: re-seed the form and keep the edited JSON as the overlay base.
     try {
-      const parsed = jsonText.trim() ? (JSON.parse(jsonText) as WorkspaceCfg) : {};
-      setReasoning(parsed.reasoning?.enabled ?? null);
-      setCustomInstructions(parsed.reasoning?.custom_instructions ?? "");
-      setPcUse(parsed.peer_card?.use ?? null);
-      setPcCreate(parsed.peer_card?.create ?? null);
-      setSummary(parsed.summary?.enabled ?? null);
-      setShortInterval(
-        parsed.summary?.messages_per_short_summary != null
-          ? String(parsed.summary.messages_per_short_summary)
-          : "",
-      );
-      setLongInterval(
-        parsed.summary?.messages_per_long_summary != null
-          ? String(parsed.summary.messages_per_long_summary)
-          : "",
-      );
-      setDream(parsed.dream?.enabled ?? null);
+      const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new Error("not an object");
+      }
+      setBase(parsed as Config);
+      setForm(seedWorkspaceConfigForm(parsed));
       setMode("form");
     } catch {
       push({ type: "error", message: "Fix the JSON before switching to the form" });
@@ -222,13 +151,14 @@ export function WorkspaceConfigModal({
 
   async function save() {
     if (!apiOpts || !workspace) return;
-    const cfg = resolveConfig();
-    if (!cfg) return;
-    const err = validateIntervals(cfg);
+    const resolved = resolveConfig();
+    if (!resolved) return;
+    const err = validateWorkspaceConfiguration(resolved);
     if (err) {
       push({ type: "error", message: err });
       return;
     }
+    const cfg = withClearedKeys(workspace.configuration, resolved);
     const ok = await confirm({
       title: "SAVE_WORKSPACE_CONFIG",
       confirmLabel: "SAVE",
@@ -248,6 +178,7 @@ export function WorkspaceConfigModal({
       onSaved();
       onClose();
     } catch (e) {
+      revealRejectedFields(e);
       push({ type: "error", message: formatApiError(e) });
     } finally {
       setSaving(false);
@@ -263,7 +194,7 @@ export function WorkspaceConfigModal({
     }
     const cfg = resolveConfig();
     if (!cfg) return;
-    const err = validateIntervals(cfg);
+    const err = validateWorkspaceConfiguration(cfg);
     if (err) {
       push({ type: "error", message: err });
       return;
@@ -287,6 +218,7 @@ export function WorkspaceConfigModal({
       onSaved();
       onClose();
     } catch (e) {
+      revealRejectedFields(e);
       push({ type: "error", message: formatApiError(e) });
     } finally {
       setSaving(false);
@@ -331,64 +263,99 @@ export function WorkspaceConfigModal({
         {mode === "json" ? (
           <Field
             label="CONFIGURATION (JSON)"
-            hint="Full workspace configuration. Must be a JSON object."
+            hint="Full workspace configuration. Must be a JSON object. A removed section is saved as empty."
           >
             <textarea
               value={jsonText}
               onChange={(e) => setJsonText(e.target.value)}
               rows={16}
               spellCheck={false}
-              className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
+              className={TEXTAREA_CLASS}
             />
           </Field>
         ) : (
           <div className="space-y-3">
+            {instructionsAvailable ? (
+              <Panel title="SHARED_INSTRUCTIONS" status="idle">
+                <InstructionsField
+                  label="CUSTOM_INSTRUCTIONS"
+                  hint="Used by the deriver, summaries, dialectic chat, and dreams unless a section sets its own. Session settings override these."
+                  value={form.sharedInstructions}
+                  onChange={(value) => update({ sharedInstructions: value })}
+                  placeholder="(none)"
+                  rows={3}
+                  open={!!openFields.shared}
+                  onToggle={toggleField("shared")}
+                />
+              </Panel>
+            ) : (
+              <HonchoFeatureNotice
+                state={instructionsState}
+                minimum="3.3"
+                feature="Shared and per-agent instruction editing"
+              />
+            )}
+
             <Panel title="REASONING" status="idle">
               <ConfigToggle
                 label="Enabled"
-                value={reasoning}
+                value={form.reasoning}
                 fallback={DEFAULTS.reasoning}
-                onChange={setReasoning}
+                onChange={(value) => update({ reasoning: value })}
               />
-              <Field
+              <InstructionsField
                 label="CUSTOM_INSTRUCTIONS"
-                hint="Optional extra guidance for the reasoning system. Leave blank to inherit."
+                hint={
+                  instructionsAvailable
+                    ? "Deriver only. Overrides the shared instructions."
+                    : "Optional extra guidance for the reasoning system. Leave blank to inherit."
+                }
+                value={form.instructions.reasoning}
+                onChange={setInstruction("reasoning")}
+                inheritsShared={instructionsAvailable}
+                placeholder={instructionsAvailable ? "Inherits shared instructions" : "(none)"}
+                rows={3}
+                open={!!openFields.reasoning}
+                onToggle={toggleField("reasoning")}
                 className="mt-3"
-              >
-                <textarea
-                  value={customInstructions}
-                  onChange={(e) => setCustomInstructions(e.target.value)}
-                  rows={3}
-                  spellCheck={false}
-                  placeholder="(none)"
-                  className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
-                />
-              </Field>
+              />
             </Panel>
 
             <Panel title="PEER_CARD" status="idle">
               <div className="space-y-2.5">
                 <ConfigToggle
                   label="Use peer card during reasoning"
-                  value={pcUse}
+                  value={form.peerCardUse}
                   fallback={DEFAULTS.peerCardUse}
-                  onChange={setPcUse}
+                  onChange={(value) => update({ peerCardUse: value })}
                 />
                 <ConfigToggle
                   label="Generate peer card from content"
-                  value={pcCreate}
+                  value={form.peerCardCreate}
                   fallback={DEFAULTS.peerCardCreate}
-                  onChange={setPcCreate}
+                  onChange={(value) => update({ peerCardCreate: value })}
                 />
               </div>
+              {instructionsAvailable ? (
+                <InstructionsField
+                  label="CUSTOM_INSTRUCTIONS"
+                  hint="Added to the dream instructions when peer cards update. Does not use the shared instructions."
+                  value={form.instructions.peer_card}
+                  onChange={setInstruction("peer_card")}
+                  placeholder="(none)"
+                  open={!!openFields.peer_card}
+                  onToggle={toggleField("peer_card")}
+                  className="mt-3"
+                />
+              ) : null}
             </Panel>
 
             <Panel title="SUMMARY" status="idle">
               <ConfigToggle
                 label="Enabled"
-                value={summary}
+                value={form.summary}
                 fallback={DEFAULTS.summary}
-                onChange={setSummary}
+                onChange={(value) => update({ summary: value })}
               />
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <Field label="SHORT_SUMMARY_INTERVAL" hint="min 10 msgs">
@@ -396,9 +363,9 @@ export function WorkspaceConfigModal({
                     type="number"
                     min={10}
                     inputMode="numeric"
-                    value={shortInterval}
+                    value={form.shortInterval}
                     placeholder={`Default (${DEFAULTS.shortInterval})`}
-                    onChange={(e) => setShortInterval(e.target.value)}
+                    onChange={(e) => update({ shortInterval: e.target.value })}
                   />
                 </Field>
                 <Field label="LONG_SUMMARY_INTERVAL" hint="min 20 msgs">
@@ -406,22 +373,63 @@ export function WorkspaceConfigModal({
                     type="number"
                     min={20}
                     inputMode="numeric"
-                    value={longInterval}
+                    value={form.longInterval}
                     placeholder={`Default (${DEFAULTS.longInterval})`}
-                    onChange={(e) => setLongInterval(e.target.value)}
+                    onChange={(e) => update({ longInterval: e.target.value })}
                   />
                 </Field>
               </div>
+              {instructionsAvailable ? (
+                <InstructionsField
+                  label="CUSTOM_INSTRUCTIONS"
+                  hint="Overrides the shared instructions for session summaries."
+                  value={form.instructions.summary}
+                  onChange={setInstruction("summary")}
+                  inheritsShared
+                  placeholder="Inherits shared instructions"
+                  open={!!openFields.summary}
+                  onToggle={toggleField("summary")}
+                  className="mt-3"
+                />
+              ) : null}
             </Panel>
 
             <Panel title="DREAM" status="idle">
               <ConfigToggle
                 label="Enabled"
-                value={dream}
+                value={form.dream}
                 fallback={DEFAULTS.dream}
-                onChange={setDream}
+                onChange={(value) => update({ dream: value })}
               />
+              {instructionsAvailable ? (
+                <InstructionsField
+                  label="CUSTOM_INSTRUCTIONS"
+                  hint="Overrides the shared instructions for dreams."
+                  value={form.instructions.dream}
+                  onChange={setInstruction("dream")}
+                  inheritsShared
+                  placeholder="Inherits shared instructions"
+                  open={!!openFields.dream}
+                  onToggle={toggleField("dream")}
+                  className="mt-3"
+                />
+              ) : null}
             </Panel>
+
+            {instructionsAvailable ? (
+              <Panel title="DIALECTIC" status="idle">
+                <InstructionsField
+                  label="CUSTOM_INSTRUCTIONS"
+                  hint="Overrides the shared instructions for peer and workspace chat."
+                  value={form.instructions.dialectic}
+                  onChange={setInstruction("dialectic")}
+                  inheritsShared
+                  placeholder="Inherits shared instructions"
+                  open={!!openFields.dialectic}
+                  onToggle={toggleField("dialectic")}
+                />
+              </Panel>
+            ) : null}
 
             <div className="pt-1">
               {!canWrite ? null : cloneOpen ? (
@@ -494,6 +502,118 @@ function ConfigToggle({
           <Icon name="refresh" size={9} /> reset
         </button>
       )}
+    </div>
+  );
+}
+
+/** What a collapsed field says when it holds no text of its own. */
+const SUMMARY_TEXT: Record<Exclude<InstructionState, "custom">, string> = {
+  none: "no instructions",
+  inherits: "inherits shared",
+  unset: "not set",
+};
+
+/**
+ * A collapsible instruction field. Collapsed, it shows one line: the text itself,
+ * or whether it inherits, is unset, or is explicitly empty. `null` = unset
+ * (inherit), `""` = explicitly none, text = custom. `inheritsShared` marks
+ * sections that fall back to the shared text and offers the explicit-none state.
+ */
+function InstructionsField({
+  label,
+  hint,
+  value,
+  onChange,
+  inheritsShared = false,
+  placeholder,
+  rows = 2,
+  open,
+  onToggle,
+  className,
+}: {
+  label: string;
+  hint: string;
+  value: Instructions;
+  onChange: (next: Instructions) => void;
+  inheritsShared?: boolean;
+  placeholder: string;
+  rows?: number;
+  open: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  const id = useId();
+  const reducedMotion = useReducedMotion();
+  const none = inheritsShared && value === "";
+  const state = instructionState(value, inheritsShared);
+  const summary = state === "custom" ? (value ?? "").trim() : SUMMARY_TEXT[state];
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={open ? `${id}-body` : undefined}
+        className="group w-full flex items-center gap-2 py-0.5 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-2"
+      >
+        <Icon
+          name="chevron-right"
+          size={11}
+          className={cn("shrink-0 text-text-muted transition-transform duration-150", open && "rotate-90")}
+        />
+        <span
+          id={`${id}-label`}
+          className="shrink-0 text-[10px] text-text-muted uppercase tracking-wider group-hover:text-text-primary transition-colors duration-150"
+        >
+          {label}
+        </span>
+        {open ? null : (
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-[11px]",
+              state === "custom" ? "text-text-primary" : "text-text-muted",
+            )}
+          >
+            {summary}
+          </span>
+        )}
+      </button>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            key="body"
+            id={`${id}-body`}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: reducedMotion ? 0 : 0.2, ease: EASE }}
+            className="overflow-hidden"
+          >
+            <div className="pt-2 space-y-1.5">
+              <textarea
+                aria-labelledby={`${id}-label`}
+                value={value ?? ""}
+                onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+                disabled={none}
+                rows={rows}
+                spellCheck={false}
+                placeholder={none ? "No instructions" : placeholder}
+                className={`${TEXTAREA_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
+              />
+              <div className="text-[10px] text-text-muted">{hint}</div>
+              {inheritsShared ? (
+                <Checkbox
+                  className="pt-1"
+                  checked={none}
+                  onChange={(next) => onChange(next ? "" : null)}
+                  label="No instructions"
+                  hint="Don't use the shared instructions here."
+                />
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

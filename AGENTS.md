@@ -105,7 +105,7 @@ Use `@honcho-ai/sdk` 2.5.1+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the
 side-effect-free compatibility probe; do not reintroduce raw 3.1 feature paths.
 
-Maintain Honcho 3.1 compatibility alongside Honcho 3.2 support.
+Maintain Honcho 3.1 compatibility alongside Honcho 3.2 and 3.3 support.
 Conclusion attribution (`source_ids`, `times_derived`) is optional on the raw API;
 the SDK supplies null/1 defaults for older servers. Preserve it with
 `toApiConclusion` when mapping SDK search results. `includeEvidence` and single
@@ -122,6 +122,10 @@ the session and must not be used for this read-only lookup.
 Use `provenance.ts` for one-level, paginated parent/backlink reads; do not recursively
 fetch entire reasoning trees. New features fail closed on unknown server versions.
 `/deriver/metrics` requires 3.1.2+ and reports service-wide, not workspace metrics.
+Workspace `PUT` merges top-level configuration keys, replaces each section sent, and
+drops nulls. Build config bodies with `workspaceConfig.ts`: overlay form fields onto the
+stored section, keep keys the form does not show, and clear with `{}` or `""`. Shared and
+per-agent `custom_instructions` (3.3.0+) are gated by the `customInstructions` capability.
 Trace inspection reads the optional dashboard-host `HONCHO_TRACE_FILE` collector
 export, independent of the selected API instance; preserve its bounded metadata-only projection.
 

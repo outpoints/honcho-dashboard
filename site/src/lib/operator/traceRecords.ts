@@ -1,5 +1,6 @@
 /** Metadata-only projection of Honcho's CloudEvents trace stream.
  * Schema source: plastic-labs/honcho v3.2.0, src/telemetry/events/trace.py.
+ * v3.3.0 adds `custom_instructions_ref` (a content hash, not the instructions).
  * Never forward trace.content, tool inputs/outputs, or arbitrary event fields.
  */
 export interface TraceRecord {
@@ -25,7 +26,7 @@ const STRING_FIELDS = [
   "call_purpose", "parent_category", "session_id", "workspace_name", "observed",
   "peer_name", "agent_type", "track_name", "transport", "provider_label", "provider",
   "model", "system_prompt_ref", "output_content_ref", "output_thinking_ref",
-  "output_reasoning_ref", "raw_response_ref", "finish_reason", "error_class",
+  "output_reasoning_ref", "raw_response_ref", "custom_instructions_ref", "finish_reason", "error_class",
   "honcho_version",
 ] as const;
 const NUMBER_FIELDS = [

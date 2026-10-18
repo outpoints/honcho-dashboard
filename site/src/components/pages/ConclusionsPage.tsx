@@ -307,7 +307,7 @@ function ConclusionRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1.5 text-[10px]">
             <span className="text-accent font-mono">{c.observer_id}</span>
-            <Icon name="chevron-right" size={10} className="text-text-muted" />
+            <Icon name="arrow-right" size={10} className="text-text-muted" />
             <span className="text-purple-400 font-mono">{c.observed_id}</span>
             {c.session_id ? <Chip tone="cyan">{c.session_id}</Chip> : null}
           </div>
