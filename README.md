@@ -245,6 +245,8 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
 | `npm run typecheck` | TypeScript check (no emit) |
 | `npm run check`     | lint + typecheck + test + build |
 
+`npm run build` fails at `/_global-error` with `Cannot read properties of null (reading 'useContext')`? Your shell exports `NODE_ENV=development`. Unset it or run `NODE_ENV=production npm run build`.
+
 ## Stack
 
 - **Next.js 16** (App Router, React 19, TypeScript strict, standalone output)
