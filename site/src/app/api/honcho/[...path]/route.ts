@@ -1,23 +1,9 @@
 import { NextRequest } from "next/server";
 import { resolveHonchoTarget } from "@/lib/honcho/allowlist";
+import { HOP_BY_HOP, filterResponseHeaders } from "@/lib/honcho/proxy-headers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-  "content-length",
-  "cookie",
-  "set-cookie",
-]);
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
   const resolved = resolveHonchoTarget(req.headers);
@@ -71,13 +57,7 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] 
     return Response.json({ detail: `Upstream fetch failed: ${reason}` }, { status: 502 });
   }
 
-  const respHeaders = new Headers();
-  upstream.headers.forEach((value, key) => {
-    const k = key.toLowerCase();
-    if (HOP_BY_HOP.has(k)) return;
-    if (k.startsWith("access-control-")) return;
-    respHeaders.set(key, value);
-  });
+  const respHeaders = filterResponseHeaders(upstream.headers);
 
   return new Response(upstream.body, {
     status: upstream.status,
