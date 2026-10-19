@@ -8,16 +8,23 @@
 //
 // Grids are flat arrays indexed `col * rows + row`; 1 = alive, 0 = dead.
 
+// One deliberate deviation: the official keeps an ambient population alive and
+// lives with immortal blinkers/still-lifes; a dashboard background must go
+// quiet, so a small per-generation mortality makes every colony decay.
+
 /** Milliseconds between generations (90 frames @ 60fps in the original). */
-export const LIFE_STEP_MS = 1500;
+export const LIFE_STEP_MS = 1200;
 /** Alpha units per second while fading in (alive) or out (dead). */
-export const LIFE_FADE_PER_SEC = 2.4;
+export const LIFE_FADE_PER_SEC = 3.5;
+/** Chance a live cell dies at random each generation — guarantees colonies
+ * (blinkers, still-lifes, gliders, line interiors) dissipate within ~12s. */
+export const LIFE_MORTALITY_PROB = 0.1;
 /** Cursor still (but present) for this long counts as dwelling. */
 export const LIFE_DWELL_MS = 300;
 /** Chance a paint stamps a blinker instead of a single cell. */
-export const LIFE_PAINT_PATTERN_PROB = 0.05;
+export const LIFE_PAINT_PATTERN_PROB = 0.02;
 /** Same, while dwelling or pressing the mouse. */
-export const LIFE_PAINT_PATTERN_PROB_RICH = 0.15;
+export const LIFE_PAINT_PATTERN_PROB_RICH = 0.08;
 /** Alpha a freshly painted cell jumps to. */
 export const LIFE_PAINT_ALPHA = 0.15;
 /** Same, while dwelling or pressing the mouse. */
@@ -96,12 +103,15 @@ export function cullLife(life: LifeState, rand: () => number = Math.random): num
 }
 
 /**
- * Advance one generation under B3/S23 with toroidal wrap, in place.
- * (Live cells survive with 2–3 neighbors; dead cells are born on exactly 3.)
+ * Advance one generation under B3/S23 with toroidal wrap, in place, after the
+ * population cull and a per-cell mortality roll. `rand` is injectable for tests.
  */
-export function stepLife(life: LifeState): void {
+export function stepLife(life: LifeState, rand: () => number = Math.random): void {
   const { cols, rows, grid, next } = life;
-  cullLife(life);
+  cullLife(life, rand);
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === 1 && rand() < LIFE_MORTALITY_PROB) grid[i] = 0;
+  }
   for (let col = 0; col < cols; col++) {
     const colUp = (col - 1 + cols) % cols;
     const colDown = (col + 1) % cols;
