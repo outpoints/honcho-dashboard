@@ -2,18 +2,33 @@
 
 import { useEffect, useRef } from "react";
 import { useResolvedTheme } from "@/lib/theme";
+import {
+  LIFE_BUCKETS,
+  LIFE_DWELL_MS,
+  LIFE_FADE_PER_SEC,
+  LIFE_GLOW_BOOST,
+  LIFE_GLOW_RADIUS,
+  LIFE_INNER_ALPHA,
+  LIFE_INTENSITY_BOOST,
+  LIFE_INTENSITY_PER_SEC,
+  LIFE_OUTER_ALPHA,
+  LIFE_PAINT_ALPHA,
+  LIFE_PAINT_PATTERN_PROB,
+  LIFE_PAINT_PATTERN_PROB_RICH,
+  LIFE_PAINT_PATTERNS,
+  LIFE_SHIMMER_RATE,
+  LIFE_STEP_MS,
+  createLife,
+  stampLife,
+  stepLife as advanceLife,
+  type LifeState,
+} from "@/lib/gameOfLife";
 
 // Constants matched from the original site's compiled bundle.
 const CELL = 20;
 const DOT_SPACING = 80;
-const MAX_BURSTS = 8;
-const BURST_FADE_IN = 1500;
-const BURST_HOLD = 300;
-const BURST_FADE_OUT = 2000;
-const BURST_INTERVAL_MIN = 500;
-const BURST_INTERVAL_MAX = 1500;
-const BURST_NEIGHBOR_PROB = 0.4;
-const BURST_MAX_DEPTH = 3;
+// The mouse trail is a fading paint under prefers-reduced-motion; with motion
+// allowed it becomes the Game of Life trail instead (see lib/gameOfLife.ts).
 const TRAIL_LIFETIME = 1200;
 const TRAIL_FADE_IN = 150;
 const TRAIL_FADE_OUT_START = 300;
@@ -49,15 +64,6 @@ const CANVAS_THEME: Record<"light" | "dark", CanvasColors> = {
   },
 };
 
-interface Burst {
-  cells: { x: number; y: number }[];
-  phase: "in" | "hold" | "out";
-  opacity: number;
-  startTime: number;
-  fadeOutStart: number;
-  shade: 0 | 1;
-}
-
 interface TrailCell {
   x: number;
   y: number;
@@ -71,16 +77,26 @@ export function GridCanvas() {
   const refreshColorsRef = useRef<((theme: "light" | "dark") => void) | null>(
     null,
   );
-  const burstsRef = useRef<Burst[]>([]);
   const trailRef = useRef<TrailCell[]>([]);
   const occupiedRef = useRef<Set<string>>(new Set());
   const mouseRef = useRef({ x: -1000, y: -1000 });
   const lastMouseTickRef = useRef(0);
-  const lastBurstAtRef = useRef(0);
-  const burstIntervalRef = useRef(1000);
+  // Game of Life trail state (motion allowed only).
+  const lifeRef = useRef<LifeState | null>(null);
+  const lifeAliveRef = useRef(false);
+  const lifeBucketsRef = useRef<number[][]>(
+    Array.from({ length: LIFE_BUCKETS }, () => []),
+  );
+  const lastLifeStepRef = useRef(0);
+  const lastLifeAlphaRef = useRef(0);
+  const mouseActiveRef = useRef(false);
+  const mouseDownRef = useRef(false);
+  const dwellRef = useRef(false);
+  const intensityRef = useRef(0);
+  const lastMouseMoveAtRef = useRef(0);
+  const lastPaintCellRef = useRef({ col: -1, row: -1 });
   const rafRef = useRef(0);
   const resizeRafRef = useRef<number | null>(null);
-  const idleTimeoutRef = useRef<number | null>(null);
   const reducedMotionRef = useRef(false);
 
   useEffect(() => {
@@ -114,14 +130,8 @@ export function GridCanvas() {
       if (document.visibilityState === "visible") drawBackground();
     };
 
-    const clearIdle = () => {
-      if (idleTimeoutRef.current !== null) {
-        window.clearTimeout(idleTimeoutRef.current);
-        idleTimeoutRef.current = null;
-      }
-    };
-
-    const hasActivity = () => burstsRef.current.length > 0 || trailRef.current.length > 0;
+    const hasActivity = () =>
+      trailRef.current.length > 0 || lifeAliveRef.current;
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -140,33 +150,13 @@ export function GridCanvas() {
       offscreen.width = cw;
       offscreen.height = ch;
       offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // The life grid is dense over the viewport, so a resize restarts it
+      // rather than remapping cells (matches the official dashboard).
+      lifeRef.current = createLife(Math.ceil(w / CELL), Math.ceil(h / CELL));
+      lifeAliveRef.current = false;
+      lastLifeStepRef.current = performance.now();
+      lastLifeAlphaRef.current = performance.now();
       bgDirty = true;
-    };
-
-    const spawnBurst = (now: number): Burst => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const cols = Math.ceil(w / CELL);
-      const rows = Math.ceil(h / CELL);
-      const ox = Math.floor(Math.random() * cols);
-      const oy = Math.floor(Math.random() * rows);
-      const seen = new Set<string>();
-      const cells: { x: number; y: number }[] = [];
-      const dirs: [number, number][] = [
-        [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1],
-      ];
-      const recur = (cx: number, cy: number, depth: number) => {
-        const key = `${cx},${cy}`;
-        if (seen.has(key) || cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
-        seen.add(key);
-        cells.push({ x: cx * CELL, y: cy * CELL });
-        if (depth >= BURST_MAX_DEPTH) return;
-        for (const [dx, dy] of dirs) {
-          if (Math.random() < BURST_NEIGHBOR_PROB) recur(cx + dx, cy + dy, depth + 1);
-        }
-      };
-      recur(ox, oy, 0);
-      return { cells, phase: "in", opacity: 0, startTime: now, fadeOutStart: 0, shade: Math.random() < 0.6 ? 0 : 1 };
     };
 
     const trackMouse = (now: number) => {
@@ -195,6 +185,127 @@ export function GridCanvas() {
             break;
           }
         }
+      }
+    };
+
+    // Paints the cell under the cursor into the Game of Life grid. Called every
+    // frame like the official dashboard: movement stamps sparse cells, while
+    // dwelling (cursor still but present) or pressing the mouse stamps richer
+    // blinker seeds at a brighter alpha.
+    const paintLife = (now: number) => {
+      const life = lifeRef.current;
+      if (!life) return;
+      dwellRef.current =
+        mouseActiveRef.current && now - lastMouseMoveAtRef.current > LIFE_DWELL_MS;
+      if (!mouseActiveRef.current) return;
+      const { x, y } = mouseRef.current;
+      if (x < 0 || y < 0) return;
+      const col = Math.floor(x / CELL);
+      const row = Math.floor(y / CELL);
+      const last = lastPaintCellRef.current;
+      if (col === last.col && row === last.row) return;
+      lastPaintCellRef.current = { col, row };
+      const rich = dwellRef.current || mouseDownRef.current;
+      const pattern =
+        Math.random() < (rich ? LIFE_PAINT_PATTERN_PROB_RICH : LIFE_PAINT_PATTERN_PROB)
+          ? LIFE_PAINT_PATTERNS[Math.floor(Math.random() * LIFE_PAINT_PATTERNS.length)]
+          : LIFE_PAINT_PATTERNS[0];
+      stampLife(life, col, row, pattern, LIFE_PAINT_ALPHA);
+      lifeAliveRef.current = true;
+    };
+
+    const stepLifeTick = (now: number) => {
+      const life = lifeRef.current;
+      if (!life || now - lastLifeStepRef.current < LIFE_STEP_MS) return;
+      lastLifeStepRef.current = now;
+      advanceLife(life);
+    };
+
+    const clearLife = () => {
+      const life = lifeRef.current;
+      if (!life) return;
+      life.grid.fill(0);
+      life.alpha.fill(0);
+      lifeAliveRef.current = false;
+    };
+
+    // Advances per-cell render alpha (in while alive, out once dead), applies
+    // the shimmer wave plus the dwell/press cursor glow, and draws cells in
+    // alpha buckets so each bucket is two batched fills. Cell styling mirrors
+    // the fading trail so the dots keep the same visual weight as before.
+    const drawLife = (now: number) => {
+      const life = lifeRef.current;
+      if (!life) return;
+      const { cols, rows, grid, alpha } = life;
+      const dt = Math.min(0.1, Math.max(0, (now - lastLifeAlphaRef.current) / 1000));
+      lastLifeAlphaRef.current = now;
+      const delta = LIFE_FADE_PER_SEC * dt;
+
+      const rich = dwellRef.current || mouseDownRef.current;
+      intensityRef.current +=
+        ((rich ? 1 : 0) - intensityRef.current) *
+        (1 - Math.exp(-LIFE_INTENSITY_PER_SEC * dt));
+      const intensity = intensityRef.current;
+      const brightnessScale = 1 + LIFE_INTENSITY_BOOST * intensity;
+
+      const mouse = mouseRef.current;
+      const glow = mouseActiveRef.current && rich;
+      const mouseCol = Math.floor(mouse.x / CELL);
+      const mouseRow = Math.floor(mouse.y / CELL);
+
+      const buckets = lifeBucketsRef.current;
+      for (let b = 0; b < buckets.length; b++) buckets[b].length = 0;
+
+      const phase = LIFE_SHIMMER_RATE * now;
+      const radiusSq = LIFE_GLOW_RADIUS * LIFE_GLOW_RADIUS;
+      let anyVisible = false;
+      for (let col = 0; col < cols; col++) {
+        for (let row = 0; row < rows; row++) {
+          const idx = col * rows + row;
+          const current = alpha[idx];
+          const next =
+            grid[idx] === 1
+              ? Math.min(1, current + delta)
+              : Math.max(0, current - delta);
+          if (next <= 0) continue;
+          alpha[idx] = next;
+          anyVisible = true;
+          let n = (0.6 + 0.2 * Math.sin(phase + col + row)) * next;
+          if (glow) {
+            const dx = col - mouseCol;
+            const dy = row - mouseRow;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < radiusSq) {
+              n = Math.min(
+                1,
+                n + LIFE_GLOW_BOOST * (1 - Math.sqrt(distSq) / LIFE_GLOW_RADIUS) * intensity,
+              );
+            }
+          }
+          const bucket = Math.min(LIFE_BUCKETS - 1, Math.floor(n * LIFE_BUCKETS));
+          buckets[bucket].push(idx);
+        }
+      }
+      lifeAliveRef.current = anyVisible;
+      if (!anyVisible) return;
+
+      const colors = colorsRef.current;
+      for (let b = 0; b < buckets.length; b++) {
+        const list = buckets[b];
+        if (list.length === 0) continue;
+        const shade = ((b + 0.5) / LIFE_BUCKETS) * brightnessScale;
+        ctx.fillStyle = `rgba(${colors.accent}, ${(LIFE_OUTER_ALPHA * shade).toFixed(4)})`;
+        ctx.beginPath();
+        for (const idx of list) {
+          ctx.rect(Math.floor(idx / rows) * CELL, (idx % rows) * CELL, CELL, CELL);
+        }
+        ctx.fill();
+        ctx.fillStyle = `rgba(${colors.trail}, ${(LIFE_INNER_ALPHA * shade).toFixed(4)})`;
+        ctx.beginPath();
+        for (const idx of list) {
+          ctx.rect(Math.floor(idx / rows) * CELL + 2, (idx % rows) * CELL + 2, CELL - 4, CELL - 4);
+        }
+        ctx.fill();
       }
     };
 
@@ -232,34 +343,6 @@ export function GridCanvas() {
       ctx.drawImage(offscreen, 0, 0);
     };
 
-    const drawBursts = (now: number) => {
-      const bursts = burstsRef.current;
-      for (const b of bursts) {
-        const elapsed = now - b.startTime;
-        if (b.phase === "in") {
-          b.opacity = Math.min(1, elapsed / BURST_FADE_IN);
-          if (elapsed >= BURST_FADE_IN) {
-            b.phase = "hold";
-            b.opacity = 1;
-          }
-        } else if (b.phase === "hold") {
-          if (elapsed >= BURST_FADE_IN + BURST_HOLD) {
-            b.phase = "out";
-            b.fadeOutStart = now;
-          }
-        } else if (b.phase === "out") {
-          const ago = now - b.fadeOutStart;
-          b.opacity = Math.max(0, 1 - ago / BURST_FADE_OUT);
-        }
-        if (b.opacity > 0) {
-          const alphaBase = b.shade === 0 ? 0.08 : 0.15;
-          ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(alphaBase * b.opacity).toFixed(4)})`;
-          for (const c of b.cells) ctx.fillRect(c.x, c.y, CELL, CELL);
-        }
-      }
-      burstsRef.current = bursts.filter((b) => !(b.phase === "out" && b.opacity <= 0));
-    };
-
     const drawTrail = (now: number) => {
       const trail = trailRef.current;
       const occupied = occupiedRef.current;
@@ -277,6 +360,8 @@ export function GridCanvas() {
           : 1;
         const alpha = fadeIn * fadeOut;
         if (alpha > 0) {
+          // Original trail fill weights (pre-GoL); the GoL cell constants in
+          // lib/gameOfLife.ts are matched to the landing page instead.
           ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(0.18 * alpha).toFixed(4)})`;
           ctx.fillRect(c.x, c.y, CELL, CELL);
           ctx.fillStyle = `rgba(${colorsRef.current.trail}, ${(0.08 * alpha).toFixed(4)})`;
@@ -286,30 +371,9 @@ export function GridCanvas() {
       trailRef.current = keep;
     };
 
-    const maybeBurst = (now: number): boolean => {
-      if (reducedMotionRef.current) return false;
-      if (now - lastBurstAtRef.current < burstIntervalRef.current) return false;
-      if (burstsRef.current.length < MAX_BURSTS) burstsRef.current.push(spawnBurst(now));
-      lastBurstAtRef.current = now;
-      burstIntervalRef.current = BURST_INTERVAL_MIN + Math.random() * (BURST_INTERVAL_MAX - BURST_INTERVAL_MIN);
-      return true;
-    };
-
     const startActiveLoop = () => {
-      clearIdle();
       if (document.visibilityState !== "visible" || rafRef.current !== 0) return;
       rafRef.current = requestAnimationFrame(tick);
-    };
-
-    const startIdleTimer = () => {
-      clearIdle();
-      if (document.visibilityState !== "visible" || reducedMotionRef.current) return;
-      const elapsed = performance.now() - lastBurstAtRef.current;
-      const next = Math.max(0, burstIntervalRef.current - elapsed);
-      idleTimeoutRef.current = window.setTimeout(() => {
-        idleTimeoutRef.current = null;
-        startActiveLoop();
-      }, next);
     };
 
     const onResize = () => {
@@ -323,22 +387,35 @@ export function GridCanvas() {
           return;
         }
         drawBackground();
-        startIdleTimer();
       });
     };
 
     const onMouseMove = (e: MouseEvent) => {
       mouseRef.current = { x: e.clientX, y: e.clientY };
+      mouseActiveRef.current = true;
+      lastMouseMoveAtRef.current = performance.now();
+      dwellRef.current = false;
       startActiveLoop();
     };
 
     const onMouseLeave = () => {
       mouseRef.current = { x: -1000, y: -1000 };
+      mouseActiveRef.current = false;
+      dwellRef.current = false;
+      mouseDownRef.current = false;
+      lastPaintCellRef.current = { col: -1, row: -1 };
+    };
+
+    const onMouseDown = () => {
+      mouseDownRef.current = true;
+    };
+
+    const onMouseUp = () => {
+      mouseDownRef.current = false;
     };
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
-        clearIdle();
         if (rafRef.current !== 0) {
           cancelAnimationFrame(rafRef.current);
           rafRef.current = 0;
@@ -350,45 +427,55 @@ export function GridCanvas() {
         return;
       }
       drawBackground();
-      startIdleTimer();
     };
 
     const tick = (now: number) => {
       rafRef.current = 0;
-      const burst = maybeBurst(now);
-      trackMouse(now);
-      if (bgDirty || burst || hasActivity()) {
-        drawBackground();
-        drawBursts(now);
-        drawTrail(now);
+      if (reducedMotionRef.current) {
+        trackMouse(now);
+      } else {
+        paintLife(now);
+        stepLifeTick(now);
       }
-      if (document.visibilityState === "visible") {
-        if (hasActivity()) {
-          startActiveLoop();
-          return;
+      if (bgDirty || hasActivity()) {
+        drawBackground();
+        if (reducedMotionRef.current) {
+          drawTrail(now);
+          // The mode can flip mid-session; drop any frozen life cells so the
+          // loop can idle again (the background repaint erases them).
+          if (lifeAliveRef.current) clearLife();
+        } else {
+          drawLife(now);
+          if (trailRef.current.length > 0) {
+            trailRef.current = [];
+            occupiedRef.current.clear();
+          }
         }
-        startIdleTimer();
+      }
+      if (hasActivity() && document.visibilityState === "visible") {
+        startActiveLoop();
       }
     };
 
-    lastBurstAtRef.current = performance.now();
     resize();
     drawBackground();
-    startIdleTimer();
 
     window.addEventListener("resize", onResize);
     window.visualViewport?.addEventListener("resize", onResize);
     window.addEventListener("mousemove", onMouseMove, { passive: true });
+    window.addEventListener("mousedown", onMouseDown, { passive: true });
+    window.addEventListener("mouseup", onMouseUp, { passive: true });
     document.addEventListener("mouseleave", onMouseLeave);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current);
       if (resizeRafRef.current !== null) cancelAnimationFrame(resizeRafRef.current);
-      clearIdle();
       window.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("resize", onResize);
       window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("mouseleave", onMouseLeave);
       document.removeEventListener("visibilitychange", onVisibility);
       refreshColorsRef.current = null;
