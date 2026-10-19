@@ -1,35 +1,63 @@
 // Conway's Game of Life for the background canvas (GridCanvas.tsx).
 //
-// The behavior is matched from the official Honcho dashboard's compiled bundle
-// (app.honcho.dev, module 98143): mouse movement paints cells into a toroidal
-// B3/S23 grid, generations advance on a fixed cadence, and per-cell alpha fades
-// smoothly in while alive and out once dead. Their frame counters assume 60fps;
-// here everything is wall-clock so the cadence holds on any refresh rate.
+// Design target: match honcho.dev's landing-page `GoLBackground` as closely as
+// possible, with exactly two deviations — this dashboard never seeds ambient
+// life, and every colony must eventually die once the cursor stops (the
+// landing keeps an ambient population alive forever and reseeds soup
+// periodically, which is too much motion for an operator dashboard).
+//
+// How to re-check these constants against upstream (both bundles are minified
+// but readable; chunk hashes change per deploy, so locate by content, not
+// filename):
+//
+//   - honcho.dev (landing page): `GoLBackground` is webpack module 29861,
+//     loaded via next/dynamic, so its chunk is NOT among the scripts in the
+//     initial HTML. Load the page, run
+//     `performance.getEntriesByType("resource")` in the console (or diff
+//     document.scripts before/after hydration) to list the lazily fetched
+//     /_next/static/chunks/*.js, download them, and grep for `GoLBackground`
+//     or `w-screen h-screen` (chunk 861-*.js at the time of writing). It
+//     exposes interactionMode "full" (ambient seeding, toroidal wrap, 750ms
+//     generations, 5000-cell cap) and "mouseOnly" (no seeding, bounded edges,
+//     200ms generations, 1400-cell cap); we mirror full-mode painting and
+//     keep their shared rendering (25px cells there / our 20px grid here,
+//     ±0.08-frame alpha fades, full-alpha paint stamps, shimmer, dwell glow,
+//     bucketed fills).
+//
+//   - app.honcho.dev (dashboard login): module 98143, referenced statically —
+//     collect the chunk URLs from the page HTML and grep for `98143:`
+//     (chunk 3629-*.js at the time of writing). An older, simpler version of
+//     the same effect; the landing page supersedes it.
+//
+// Useful search anchors in either bundle: the neighbor step (births `3===`,
+// survival `<2||>3`), the bucketed fill loop (`Array.from({length:10},...)`),
+// and 60fps frame counters (converted to wall-clock here so the cadence holds
+// on any refresh rate).
 //
 // Grids are flat arrays indexed `col * rows + row`; 1 = alive, 0 = dead.
 
-// One deliberate deviation: the official keeps an ambient population alive and
-// lives with immortal blinkers/still-lifes; a dashboard background must go
-// quiet, so a small per-generation mortality makes every colony decay.
+// The deviation that makes this ours: a small per-generation mortality, so
+// colonies (blinkers, still-lifes, gliders, line interiors — all immortal under
+// pure B3/S23) decay to nothing shortly after the cursor moves on.
 
 /** Milliseconds between generations (90 frames @ 60fps in the original). */
-export const LIFE_STEP_MS = 900;
+export const LIFE_STEP_MS = 600;
 /** Alpha units per second while fading in (alive) or out (dead). */
-export const LIFE_FADE_PER_SEC = 5;
+export const LIFE_FADE_PER_SEC = 4.8;
 /** Chance a live cell dies at random each generation — guarantees colonies
  * (blinkers, still-lifes, gliders, line interiors) dissipate within a few
  * seconds of the cursor moving on. */
 export const LIFE_MORTALITY_PROB = 0.18;
 /** Cursor still (but present) for this long counts as dwelling. */
 export const LIFE_DWELL_MS = 300;
-/** Chance a paint stamps a blinker instead of a single cell. */
-export const LIFE_PAINT_PATTERN_PROB = 0.02;
-/** Same, while dwelling or pressing the mouse. */
-export const LIFE_PAINT_PATTERN_PROB_RICH = 0.08;
-/** Alpha a freshly painted cell jumps to. */
-export const LIFE_PAINT_ALPHA = 0.15;
-/** Same, while dwelling or pressing the mouse. */
-export const LIFE_PAINT_ALPHA_RICH = 0.4;
+/** Chance a paint stamps a blinker instead of a single cell (landing page:
+ * full mode 0.05, mouseOnly 0 — we keep full mode's). */
+export const LIFE_PAINT_PATTERN_PROB = 0.05;
+/** Same, while dwelling or pressing the mouse (landing page full mode). */
+export const LIFE_PAINT_PATTERN_PROB_RICH = 0.15;
+/** Alpha a freshly painted cell jumps to — full brightness, like the landing
+ * page's GoLBackground, so cursor feedback is instant. */
+export const LIFE_PAINT_ALPHA = 1;
 /** Cells within this radius of the cursor are brightened while dwelling. */
 export const LIFE_GLOW_RADIUS = 4;
 /** Maximum alpha added by the cursor glow, at the cursor itself. */
@@ -40,15 +68,18 @@ export const LIFE_INTENSITY_PER_SEC = 1.8;
 export const LIFE_INTENSITY_BOOST = 0.25;
 /** Shimmer wave phase advance, radians per millisecond. */
 export const LIFE_SHIMMER_RATE = 0.0006;
-/** Outer cell fill alpha at full brightness (matches the old trail fill). */
-export const LIFE_OUTER_ALPHA = 0.18;
-/** Inner cell fill alpha at full brightness. */
-export const LIFE_INNER_ALPHA = 0.08;
+/** Outer cell fill alpha at full brightness — the landing page's dim-square /
+ * bright-core split: outer 0.12, inner 0.25 (dark mode; light mode is
+ * 0.4 / 0.8 there). Colors stay our canvas tokens. */
+export const LIFE_OUTER_ALPHA = 0.12;
+/** Inner cell fill alpha at full brightness (the bright core). */
+export const LIFE_INNER_ALPHA = 0.25;
 /** Alpha quantization buckets for batched canvas fills. */
 export const LIFE_BUCKETS = 10;
-/** Live cells above this fraction of the grid triggers a cull. */
-export const LIFE_CULL_RATIO = 0.5;
-/** Fraction of live cells killed by a cull. */
+/** Population cap in live cells (landing page full mode; mouseOnly uses
+ * 1400). `max` is a cullLife parameter so tests can exercise it. */
+export const LIFE_CULL_MAX = 5000;
+/** Fraction of live cells killed when the cap is exceeded. */
 export const LIFE_CULL_KILL = 0.3;
 
 /** Paint shapes: a dot, a horizontal blinker, a vertical blinker. */
@@ -87,12 +118,12 @@ export function liveCount(life: LifeState): number {
 }
 
 /**
- * Population cap: when live cells exceed `LIFE_CULL_RATIO` of the grid,
- * randomly clear `LIFE_CULL_KILL` of them so colonies cannot choke the screen.
+ * Population cap: when live cells exceed `max`, randomly clear
+ * `LIFE_CULL_KILL` of them so colonies cannot choke the screen.
  */
-export function cullLife(life: LifeState, rand: () => number = Math.random): number {
+export function cullLife(life: LifeState, rand: () => number = Math.random, max: number = LIFE_CULL_MAX): number {
   const total = life.cols * life.rows;
-  if (liveCount(life) <= total * LIFE_CULL_RATIO) return 0;
+  if (liveCount(life) <= Math.min(max, total)) return 0;
   let killed = 0;
   for (let i = 0; i < life.grid.length; i++) {
     if (life.grid[i] === 1 && rand() < LIFE_CULL_KILL) {

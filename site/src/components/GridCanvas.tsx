@@ -13,7 +13,6 @@ import {
   LIFE_INTENSITY_PER_SEC,
   LIFE_OUTER_ALPHA,
   LIFE_PAINT_ALPHA,
-  LIFE_PAINT_ALPHA_RICH,
   LIFE_PAINT_PATTERN_PROB,
   LIFE_PAINT_PATTERN_PROB_RICH,
   LIFE_PAINT_PATTERNS,
@@ -211,7 +210,7 @@ export function GridCanvas() {
         Math.random() < (rich ? LIFE_PAINT_PATTERN_PROB_RICH : LIFE_PAINT_PATTERN_PROB)
           ? LIFE_PAINT_PATTERNS[Math.floor(Math.random() * LIFE_PAINT_PATTERNS.length)]
           : LIFE_PAINT_PATTERNS[0];
-      stampLife(life, col, row, pattern, rich ? LIFE_PAINT_ALPHA_RICH : LIFE_PAINT_ALPHA);
+      stampLife(life, col, row, pattern, LIFE_PAINT_ALPHA);
       lifeAliveRef.current = true;
     };
 
@@ -361,9 +360,11 @@ export function GridCanvas() {
           : 1;
         const alpha = fadeIn * fadeOut;
         if (alpha > 0) {
-          ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(LIFE_OUTER_ALPHA * alpha).toFixed(4)})`;
+          // Original trail fill weights (pre-GoL); the GoL cell constants in
+          // lib/gameOfLife.ts are matched to the landing page instead.
+          ctx.fillStyle = `rgba(${colorsRef.current.accent}, ${(0.18 * alpha).toFixed(4)})`;
           ctx.fillRect(c.x, c.y, CELL, CELL);
-          ctx.fillStyle = `rgba(${colorsRef.current.trail}, ${(LIFE_INNER_ALPHA * alpha).toFixed(4)})`;
+          ctx.fillStyle = `rgba(${colorsRef.current.trail}, ${(0.08 * alpha).toFixed(4)})`;
           ctx.fillRect(c.x + 2, c.y + 2, CELL - 4, CELL - 4);
         }
       }

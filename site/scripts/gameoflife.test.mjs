@@ -95,21 +95,21 @@ test("mortality rolls clear colonies that the rules alone would keep forever", (
   assert.equal(liveCount(life), 0);
 });
 
-test("cullLife only fires above the population ratio and kills the sampled share", () => {
-  const small = createLife(4, 4); // 16 cells, cull threshold 8
+test("cullLife only fires above the population cap and kills the sampled share", () => {
+  const small = createLife(4, 4); // 16 cells, cap 8
   small.grid[0] = 1;
   small.grid[5] = 1;
-  assert.equal(cullLife(small, () => 0), 0, "below the ratio nothing is culled");
+  assert.equal(cullLife(small, () => 0, 8), 0, "below the cap nothing is culled");
 
   const packed = createLife(4, 4);
-  packed.grid.fill(1); // 16 live cells > 16 * LIFE_CULL_RATIO
-  assert.equal(cullLife(packed, () => 0.9), 0, "rand above the kill threshold spares cells");
-  assert.equal(cullLife(packed, () => 0), 16, "rand below the threshold kills every live cell");
+  packed.grid.fill(1); // 16 live cells > cap 8
+  assert.equal(cullLife(packed, () => 0.9, 8), 0, "rand above the kill threshold spares cells");
+  assert.equal(cullLife(packed, () => 0, 8), 16, "rand below the threshold kills every live cell");
   assert.equal(liveCount(packed), 0);
 
   const packed2 = createLife(4, 4);
   packed2.grid.fill(1);
-  const killed = cullLife(packed2, () => LIFE_CULL_KILL - 0.01);
+  const killed = cullLife(packed2, () => LIFE_CULL_KILL - 0.01, 8);
   assert.ok(killed > 16 * LIFE_CULL_KILL - 1, "kills roughly the configured share");
 });
 
@@ -121,8 +121,10 @@ test("stampLife skips out-of-bounds cells and never dims on repaint", () => {
   assert.equal(life.grid[5 * 6 + 0], 0, "wrapped neighbor (-1,0) skipped: painting does not wrap");
 
   life.alpha[0] = 0.9;
-  stampLife(life, 0, 0, LIFE_PAINT_PATTERNS[0], LIFE_PAINT_ALPHA);
+  stampLife(life, 0, 0, LIFE_PAINT_PATTERNS[0], 0.4);
   assert.ok(Math.abs(life.alpha[0] - 0.9) < 1e-6, "repaint keeps the brighter alpha");
+  stampLife(life, 0, 0, LIFE_PAINT_PATTERNS[0], LIFE_PAINT_ALPHA);
+  assert.equal(life.alpha[0], 1, "a full-alpha paint stamps at full brightness");
   stampLife(life, 5, 5, LIFE_PAINT_PATTERNS[2], 0.4);
   assert.ok(Math.abs(life.alpha[5 * 6 + 5] - 0.4) < 1e-6);
 });
