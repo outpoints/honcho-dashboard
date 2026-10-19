@@ -13,12 +13,13 @@
 // quiet, so a small per-generation mortality makes every colony decay.
 
 /** Milliseconds between generations (90 frames @ 60fps in the original). */
-export const LIFE_STEP_MS = 1200;
+export const LIFE_STEP_MS = 900;
 /** Alpha units per second while fading in (alive) or out (dead). */
-export const LIFE_FADE_PER_SEC = 3.5;
+export const LIFE_FADE_PER_SEC = 5;
 /** Chance a live cell dies at random each generation — guarantees colonies
- * (blinkers, still-lifes, gliders, line interiors) dissipate within ~12s. */
-export const LIFE_MORTALITY_PROB = 0.1;
+ * (blinkers, still-lifes, gliders, line interiors) dissipate within a few
+ * seconds of the cursor moving on. */
+export const LIFE_MORTALITY_PROB = 0.18;
 /** Cursor still (but present) for this long counts as dwelling. */
 export const LIFE_DWELL_MS = 300;
 /** Chance a paint stamps a blinker instead of a single cell. */
