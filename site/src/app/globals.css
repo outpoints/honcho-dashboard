@@ -226,6 +226,134 @@
     image-rendering: pixelated;
     image-rendering: -moz-crisp-edges;
   }
+
+  /* Rendered markdown for stored Honcho text (components/Markdown.tsx). Every
+     size is relative, so each surface keeps its own type size and the caller's
+     leading-* utility still wins. Hierarchy comes from weight and space, not
+     from a second typeface. */
+  .md {
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  .md > * + *,
+  .md :where(li, blockquote) > * + * {
+    margin-top: 0.75em;
+  }
+  .md [data-md] {
+    font-weight: 600;
+    line-height: 1.4;
+    text-wrap: balance;
+  }
+  .md [data-md="h1"] {
+    font-size: 1.17em;
+  }
+  .md [data-md="h2"] {
+    font-size: 1.08em;
+  }
+  .md > [data-md]:not(:first-child) {
+    margin-top: 1.5em;
+  }
+  .md > [data-md] + * {
+    margin-top: 0.5em;
+  }
+  .md strong,
+  .md-inline strong {
+    font-weight: 600;
+  }
+  .md em,
+  .md-inline em {
+    font-style: italic;
+  }
+  .md del,
+  .md-inline del {
+    color: var(--color-text-muted);
+  }
+  .md a {
+    color: var(--color-accent);
+    text-decoration-line: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+    text-underline-offset: 0.2em;
+    transition: text-decoration-color 150ms;
+  }
+  .md a:hover {
+    text-decoration-color: currentColor;
+  }
+  .md a:focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .md :not(pre) > code,
+  .md-inline code {
+    background: var(--color-border);
+    padding: 0.1em 0.35em;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  .md pre {
+    background: var(--color-void);
+    border: 1px solid var(--color-border);
+    padding: 0.75em 1em;
+    overflow-x: auto;
+    overflow-wrap: normal;
+    line-height: 1.55;
+  }
+  .md :where(ul, ol) {
+    padding-left: 2ch;
+  }
+  .md ul {
+    list-style-type: "- ";
+  }
+  /* Outside markers hang in the padding; widen it as the numbers grow so
+     "10." is never clipped by a scrolling or clamped container. */
+  .md ol {
+    list-style-type: decimal;
+    padding-left: 3ch;
+  }
+  .md ol:has(> li:nth-child(10)) {
+    padding-left: 4ch;
+  }
+  .md ol:has(> li:nth-child(100)) {
+    padding-left: 5ch;
+  }
+  .md li::marker {
+    color: var(--color-text-muted);
+  }
+  .md li + li,
+  .md li > :where(ul, ol) {
+    margin-top: 0.35em;
+  }
+  .md li.task-list-item {
+    list-style: none;
+  }
+  .md .md-task {
+    color: var(--color-text-muted);
+  }
+  .md blockquote {
+    border-left: 1px solid var(--color-border-light);
+    padding-left: 1.5ch;
+    color: var(--color-text-muted);
+  }
+  .md hr {
+    border: 0;
+    border-top: 1px solid var(--color-border-light);
+  }
+  .md .md-table {
+    overflow-x: auto;
+  }
+  .md table {
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  .md :where(th, td) {
+    padding: 0.35em 2ch 0.35em 0;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .md th {
+    font-weight: 600;
+    border-bottom-color: var(--color-border-light);
+  }
 }
 
 @keyframes cursor-blink {

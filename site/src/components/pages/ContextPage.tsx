@@ -8,6 +8,7 @@ import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Field } from "@/components/atoms";
+import { Markdown } from "@/components/Markdown";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -58,7 +59,11 @@ interface Layer {
   items: number;
   enabled: boolean;
   estimated: boolean;
+  /** Markdown shown in CONTEXT_PREVIEW. */
   text: string;
+  /** The messages layer previews each message on its own, so one message's
+      markdown (an unclosed code fence, say) can never swallow the next. */
+  messages?: Pick<ApiMessage, "id" | "peer_id" | "content">[];
 }
 
 const estTokens = (s?: string | null) => (s ? Math.ceil(s.length / 4) : 0);
@@ -190,7 +195,7 @@ export function ContextPage() {
               items: peerCard.length,
               enabled: true,
               estimated: true,
-              text: peerCard.map((l) => `• ${l}`).join("\n"),
+              text: peerCard.map((l) => `- ${l}`).join("\n"),
             };
           case "conclusions":
             return {
@@ -219,6 +224,7 @@ export function ContextPage() {
               enabled: true,
               estimated: false,
               text: messagesText,
+              messages: messages.map(({ id, peer_id, content }) => ({ id, peer_id, content })),
             };
         }
       });
@@ -517,7 +523,7 @@ export function ContextPage() {
                 </p>
               </motion.div>
             ) : (
-              <div className="max-h-[420px] overflow-y-auto space-y-3">
+              <div data-testid="context-preview" className="max-h-[420px] overflow-y-auto space-y-3">
                 {previewLayers.map((l, i) => {
                   const [, text] = LAYER_TONE[l.id].split(" ");
                   return (
@@ -530,9 +536,18 @@ export function ContextPage() {
                       <div className={cn("text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1", text)}>
                         <Icon name={ICONS[l.id]} size={10} /> {l.label}
                       </div>
-                      <pre className="text-[11px] text-text-primary whitespace-pre-wrap break-words leading-relaxed">
-                        {l.text}
-                      </pre>
+                      {l.messages ? (
+                        <div className="divide-y divide-border">
+                          {l.messages.map((m) => (
+                            <div key={m.id} data-context-message className="py-2 first:pt-0 last:pb-0">
+                              <div className="text-[10px] text-text-muted mb-0.5">{m.peer_id}</div>
+                              <Markdown text={m.content} className="text-[11px] text-text-primary" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Markdown text={l.text} className="text-[11px] text-text-primary" />
+                      )}
                     </motion.div>
                   );
                 })}

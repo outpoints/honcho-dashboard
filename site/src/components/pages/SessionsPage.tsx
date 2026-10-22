@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
+import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Tabs, RefreshButton, TextInput } from "@/components/atoms";
@@ -759,7 +760,9 @@ function SessionRow({
                           <span className="text-text-muted">{new Date(m.created_at).toLocaleString()}</span>
                           <Chip tone="muted">{m.token_count} tok</Chip>
                         </div>
-                        <div className="text-xs text-text-primary line-clamp-3">{m.content}</div>
+                        <div className="text-xs text-text-primary line-clamp-3">
+                          <Markdown inline text={m.content} />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -770,7 +773,7 @@ function SessionRow({
                 <div>
                   <div className="text-[10px] text-purple-400 uppercase tracking-wider mb-1">SUMMARY</div>
                   <div className="text-xs text-text-primary bg-surface border border-border px-3 py-2 line-clamp-4">
-                    {detail.summary}
+                    <Markdown inline text={detail.summary} />
                   </div>
                 </div>
               ) : null}
@@ -926,9 +929,10 @@ function SummaryBlock({ label, summary }: { label: string; summary: SummaryView 
           {summary.tokenCount.toLocaleString()} tok · {new Date(summary.createdAt).toLocaleString()}
         </span>
       </div>
-      <div className="text-xs text-text-primary bg-void border border-border px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
-        {summary.content}
-      </div>
+      <Markdown
+        text={summary.content}
+        className="text-xs text-text-primary bg-void border border-border px-3 py-2 max-h-72 overflow-y-auto"
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import type { Scope } from "@honcho-ai/sdk";
 import { useEffect, useMemo, useState } from "react";
 import { Honcho31Notice } from "@/components/Honcho31Notice";
+import { Markdown } from "@/components/Markdown";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
@@ -404,9 +405,7 @@ export function SearchPage() {
                     VIEW_MESSAGES
                   </Button>
                 </div>
-                <div className="text-xs text-text-primary whitespace-pre-wrap break-words leading-relaxed">
-                  {message.content}
-                </div>
+                <Markdown text={message.content} className="text-xs text-text-primary max-w-[75ch]" />
               </article>
             ))}
           </div>

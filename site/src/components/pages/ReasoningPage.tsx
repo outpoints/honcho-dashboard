@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
+import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { DeriverBacklog } from "@/components/DeriverBacklog";
 import { useDeriverMetrics } from "@/lib/honcho/useDeriverMetrics";
@@ -751,9 +752,10 @@ function PayloadSummary({ payload }: { payload: Record<string, unknown> }) {
       {content ? (
         <div>
           <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">MESSAGE</div>
-          <div className="text-xs text-text-primary bg-void border border-border px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto">
-            {content}
-          </div>
+          <Markdown
+            text={content}
+            className="text-xs text-text-primary bg-void border border-border px-3 py-2 max-h-56 overflow-y-auto"
+          />
         </div>
       ) : null}
 

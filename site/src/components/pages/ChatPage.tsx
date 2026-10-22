@@ -9,6 +9,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Checkbox, Field, PillTabs, TextInput } from "@/components/atoms";
 import { ChatEvidence } from "@/components/ChatEvidence";
+import { Markdown } from "@/components/Markdown";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
 import { chatWithEvidence, type DashboardEvidence } from "@/lib/honcho/chat";
 import { Select } from "@/components/Select";
@@ -370,9 +371,13 @@ function Bubble({ turn }: { turn: Turn }) {
         <div className={cn("text-[9px] uppercase tracking-wider mb-1", isUser ? "text-accent" : "text-text-muted")}>
           {isUser ? "YOU" : turn.label ?? "PEER"}
         </div>
-        <p className="text-[12px] text-text-primary whitespace-pre-wrap break-words leading-relaxed">
-          {turn.content}
-        </p>
+        {isUser ? (
+          <p className="text-[13px] text-text-primary whitespace-pre-wrap break-words leading-[1.65]">
+            {turn.content}
+          </p>
+        ) : (
+          <Markdown text={turn.content} className="text-[13px] text-text-primary max-w-[75ch]" />
+        )}
         {!isUser && turn.evidence !== undefined ? <ChatEvidence evidence={turn.evidence} /> : null}
       </div>
     </motion.div>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { EvidenceMessageRef } from "@honcho-ai/sdk";
 import type { DashboardEvidence } from "@/lib/honcho/chat";
 import { Button, Chip } from "@/components/atoms";
+import { Markdown } from "@/components/Markdown";
 import { ConclusionInspector, ReadError } from "@/components/ConclusionInspector";
 import { useActiveWorkspace } from "@/lib/honcho/config";
 import { useHonchoQuery } from "@/lib/honcho/useQuery";
@@ -23,7 +24,7 @@ export function ChatEvidence({ evidence }: { evidence: DashboardEvidence | null 
         <section aria-label="Evidence conclusions" className="space-y-2">
           <h3 className="text-[10px] tracking-wider">CONCLUSIONS · {evidence.conclusions.length}</h3>
           {evidence.conclusions.length ? evidence.conclusions.map((item) => <div key={item.id} className="border border-border p-2 space-y-2">
-            <p className="whitespace-pre-wrap break-words leading-relaxed">{item.content}</p>
+            <Markdown text={item.content} />
             {item.observer_id || item.observed_id ? <dl className="space-y-1">
               <dt className="text-text-muted">OBSERVER → OBSERVED</dt>
               <dd className="break-all">{item.observer_id || "Unrecorded"} → {item.observed_id || "Unrecorded"}</dd>
@@ -65,6 +66,6 @@ function EvidenceMessage({ message }: { message: EvidenceMessageRef }) {
     </div>
     <p className="text-[10px] text-text-muted break-all">{message.id} · {new Date(message.created_at).toLocaleString()}</p>
     {open ? result.isLoading ? <p role="status">Loading message…</p> : result.error ? <ReadError resource="message" error={result.error} retry={result.refetch} />
-      : <p className="whitespace-pre-wrap break-words leading-relaxed">{result.data?.content || "This message has no text."}</p> : null}
+      : <Markdown text={result.data?.content || "This message has no text."} /> : null}
   </div>;
 }

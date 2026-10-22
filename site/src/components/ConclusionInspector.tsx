@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button, Chip } from "@/components/atoms";
+import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
 import { Panel } from "@/components/Panel";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
@@ -51,7 +52,7 @@ export function ConclusionInspector({ id, onClose }: { id: string; onClose: () =
                 <Chip tone="purple">{detail.data.level ?? "explicit"}</Chip>
                 <Chip tone="accent">{detail.data.times_derived ?? 1} derivations</Chip>
               </div>
-              <p className="text-xs text-text-primary whitespace-pre-wrap break-words leading-relaxed">{detail.data.content}</p>
+              <Markdown text={detail.data.content} className="text-xs text-text-primary" />
               <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-text-primary">
                 <div><dt className="text-text-muted">OBSERVER → OBSERVED</dt><dd className="break-all">{detail.data.observer_id} → {detail.data.observed_id}</dd></div>
                 <div><dt className="text-text-muted">CREATED</dt><dd>{new Date(detail.data.created_at).toLocaleString()}</dd></div>
@@ -83,7 +84,7 @@ export function ConclusionInspector({ id, onClose }: { id: string; onClose: () =
 
 function ConclusionLink({ conclusion, onOpen }: { conclusion: ApiConclusion; onOpen: (id: string) => void }) {
   return <div className="py-2 space-y-2">
-    <p className="text-xs text-text-primary break-words leading-relaxed">{conclusion.content}</p>
+    <p className="text-xs text-text-primary break-words leading-relaxed"><Markdown inline text={conclusion.content} /></p>
     <div className="flex flex-wrap items-center gap-2">
       <Chip tone="purple">{conclusion.level ?? "explicit"}</Chip>
       <Button size="sm" variant="ghost" onClick={() => onOpen(conclusion.id)} aria-label={`Inspect conclusion ${conclusion.id}`}>INSPECT</Button>

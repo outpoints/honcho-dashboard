@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
+import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Chip, Field, RefreshButton, TextInput } from "@/components/atoms";
@@ -311,7 +312,9 @@ function ConclusionRow({
             <span className="text-purple-400 font-mono">{c.observed_id}</span>
             {c.session_id ? <Chip tone="cyan">{c.session_id}</Chip> : null}
           </div>
-          <p className="text-[12px] text-text-primary leading-relaxed break-words">{c.content}</p>
+          <p className="text-[12px] text-text-primary leading-relaxed break-words">
+            <Markdown inline text={c.content} />
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-text-muted tabular-nums">
             <span>{new Date(c.created_at).toLocaleString()}</span>
             {onInspect ? <>

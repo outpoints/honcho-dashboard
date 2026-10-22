@@ -137,6 +137,12 @@ for cancel/low-emphasis), `outline`, `warning`/`danger` (yellow→red, destructi
 - **Loading / empty / error are not optional.** Every data-backed view renders all three: skeletons
   (`animate-pulse` bars) while loading, a `Panel` empty state with an icon + CTA when there's no data,
   and a red error line (with a pointer to `#/config`) on failure. Audit each new fetch path for these.
+- **Stored text renders through `Markdown`** (`components/Markdown.tsx`). Messages, chat answers,
+  conclusions, summaries, and representations are markdown: use `<Markdown text={…} />` for full
+  bodies and `<Markdown inline text={…} />` inside line-clamped previews. Never print the raw string
+  with `whitespace-pre-wrap`. The pipeline (`lib/markdown.ts`) keeps raw HTML visible as text, never
+  fetches images, and never formats underscores. Reading bodies cap at `max-w-[75ch]`; where an
+  operator may need the exact stored bytes, offer a `SHOW_RAW` toggle as the Messages stream does.
 
 ---
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
+import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
 import { Button, Checkbox, Chip, Field, TextInput, RefreshButton, ToggleButton } from "@/components/atoms";
@@ -780,7 +781,9 @@ function PeerSearchSection({
                 <span className="text-text-primary font-mono">{m.peer_id}</span>
                 <span>{new Date(m.created_at).toLocaleString()}</span>
               </div>
-              <div className="text-text-primary line-clamp-2">{m.content}</div>
+              <div className="text-text-primary line-clamp-2">
+                <Markdown inline text={m.content} />
+              </div>
             </div>
           ))}
         </div>
@@ -946,7 +949,9 @@ function ConclusionsSection({
                 transition={{ delay: Math.min(i * 0.03, 0.2), duration: 0.15 }}
                 className={cn("border-l-2 pl-3 py-0.5", border)}
               >
-                <div className="text-xs text-text-primary leading-snug">{c.content}</div>
+                <div className="text-xs text-text-primary leading-snug">
+                  <Markdown inline text={c.content} />
+                </div>
                 <div className="flex items-center gap-3 mt-1 text-[9px] text-text-muted tracking-wider">
                   {c.level ? <span className={cn("uppercase", text)}>{c.level}</span> : null}
                   <span>freq: {c.times_derived}</span>
