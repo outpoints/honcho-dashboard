@@ -47,6 +47,12 @@ services:
       # The single fallback above is implicitly added if not already present.
       HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
 
+      # Optional bearer token the proxy sends to the default upstream above when a
+      # request carries none. Applies only to that URL and never reaches the
+      # browser. Anyone who can reach the dashboard can use it through the proxy,
+      # so keep the dashboard behind its own auth or a private network.
+      HONCHO_PROXY_TOKEN: ${HONCHO_PROXY_TOKEN:-}
+
       # ---- Operator modules (server-side, runtime, all optional) ----
       # Read-only Postgres DSN — point at the SAME database Honcho uses.
       # Enables: throughput chart, 52-week heatmap, db size, pgvector status,

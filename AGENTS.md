@@ -100,6 +100,9 @@ image cannot get runtime config that way. The default target comes from
 `src/lib/honcho/defaultTarget.ts`: the server reads it at request time and `app/layout.tsx`
 passes it to the browser in a meta tag. Keep that module's compatibility rules: the implicit
 allowlist only grows, and only the untouched `default`/`local` seed is ever rewritten.
+`HONCHO_PROXY_TOKEN` is a server-only bearer token for that default target: the proxy adds it
+only when the request has no `X-Honcho-Token` and the origin is the default, and the layout
+advertises just a `default-token-managed` flag. Never render or return its value.
 
 Use `@honcho-ai/sdk` 2.5.1+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the

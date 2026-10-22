@@ -32,6 +32,9 @@
   <!-- 3. Honcho Proxy Allowed Origins (Optional) -->
   <Config Name="Proxy Allowed Bases" Target="HONCHO_PROXY_ALLOWED_BASES" Default="http://honcho:8000,http://honcho-aio:8000" Mode="" Description="(Optional) Comma-separated Honcho origins the server-side proxy may forward to, for other Honcho servers you add under CONFIG. The Honcho Proxy Base URL is always allowed." Type="Variable" Display="always" Required="false" Mask="false">http://honcho:8000,http://honcho-aio:8000</Config>
 
+  <!-- 3b. Honcho Proxy Token (Optional) -->
+  <Config Name="Proxy Token" Target="HONCHO_PROXY_TOKEN" Default="" Mode="" Description="(Optional) Bearer token the server-side proxy sends to the Honcho Proxy Base URL when a request carries none, so browsers need no token under CONFIG. Applies only to that URL and never reaches the browser. Anyone who can reach the dashboard can use it through the proxy, so keep the dashboard on a private network or behind your own auth." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
   <!-- 4. Operator Database Connection (Advanced) -->
   <Config Name="Operator Database URL" Target="HONCHO_DATABASE_URL" Default="" Mode="" Description="(Optional) Read-only Postgres DSN to the SAME database Honcho uses (e.g. postgresql+psycopg://postgres:secret@honcho-aio:5432/honcho). Enables throughput charts, 52-week heatmap, db size / vector-count / top-tables, and PostgreSQL diagnostics." Type="Variable" Display="always" Required="false" Mask="true"></Config>
 

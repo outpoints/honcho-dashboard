@@ -158,6 +158,12 @@ phones and other devices only need to reach the dashboard. Browsers still on the
 Instances you created or edited under **CONFIG** are never changed. To use other Honcho
 servers, add them under **CONFIG** and list them in `HONCHO_PROXY_ALLOWED_BASES`.
 
+`HONCHO_PROXY_TOKEN` (optional) is a server-side bearer token the proxy sends to Honcho when
+a request carries none, so browsers need no token under **CONFIG**. It applies only to the
+default base URL (never to other allowlisted servers), a token entered in **CONFIG** overrides
+it, and it never reaches the browser. Anyone who can reach the dashboard can use it through the
+proxy, so keep the dashboard behind its own auth or a private network, as with the proxy itself.
+
 A `docker-compose-example.yml` template is included at the repo root. Copy it to
 `docker-compose.yml` (which is gitignored, so your local edits stay local). To wire the
 operator modules, set these in the environment that runs Compose:
@@ -168,6 +174,7 @@ HONCHO_DATABASE_URL=postgresql://...            # read-only Postgres DSN (operat
 HONCHO_LOG_FILE=/var/log/honcho/honcho.log      # mounted in container (operator/logs)
 HONCHO_RUNTIME_START_TS=2026-05-22T00:00:00Z    # optional, lets us report Honcho uptime
 HONCHO_PROXY_ALLOWED_BASES=http://honcho:8000   # multi-instance allowlist
+HONCHO_PROXY_TOKEN=...                          # optional bearer token for the default base URL
 ```
 
 The dashboard container exposes port `3000`. If you co-locate it with Honcho on the same

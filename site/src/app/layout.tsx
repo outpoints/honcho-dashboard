@@ -3,8 +3,8 @@ import { JetBrains_Mono, VT323 } from "next/font/google";
 import { connection } from "next/server";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme";
-import { serverAdvertisedBaseUrl } from "@/lib/honcho/allowlist";
-import { DEFAULT_BASE_URL_META } from "@/lib/honcho/defaultTarget";
+import { serverAdvertisedBaseUrl, serverDefaultTokenManaged } from "@/lib/honcho/allowlist";
+import { DEFAULT_BASE_URL_META, DEFAULT_TOKEN_MANAGED_META } from "@/lib/honcho/defaultTarget";
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
@@ -34,6 +34,7 @@ export default async function RootLayout({
   // server's env, not the value frozen into the bundle by `next build`.
   await connection();
   const defaultBaseUrl = serverAdvertisedBaseUrl();
+  const tokenManaged = serverDefaultTokenManaged();
   return (
     <html
       lang="en"
@@ -43,6 +44,7 @@ export default async function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {defaultBaseUrl ? <meta name={DEFAULT_BASE_URL_META} content={defaultBaseUrl} /> : null}
+        {tokenManaged ? <meta name={DEFAULT_TOKEN_MANAGED_META} content="1" /> : null}
       </head>
       <body className="min-h-screen antialiased">
         <ThemeProvider>{children}</ThemeProvider>
