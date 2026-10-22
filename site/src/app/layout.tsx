@@ -24,7 +24,12 @@ export const metadata: Metadata = {
   // title here too would render a second, competing <title> that React re-asserts
   // on mount (overwriting the dynamic one on initial load).
   description: "honcho_dashboard",
-  icons: { icon: { url: "/seo/favicon.svg", type: "image/svg+xml", sizes: "any" } },
+  icons: {
+    icon: { url: "/seo/favicon.svg", type: "image/svg+xml", sizes: "any" },
+    // iOS "Add to Home Screen" ignores SVG favicons; without this it falls
+    // back to the favicon.ico monogram. Rasterized from the same logo SVG.
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+  },
 };
 
 export default async function RootLayout({
