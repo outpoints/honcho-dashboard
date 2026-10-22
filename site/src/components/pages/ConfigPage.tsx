@@ -14,6 +14,7 @@ import { TITLE_BASE, sectionTitle, useAppendSectionToTitle } from "@/lib/title";
 import { useNav } from "@/lib/nav";
 import { useWriteActions } from "@/lib/writeActions";
 import { useConfirm } from "@/components/confirm";
+import { useAuth } from "@/components/AuthGate";
 
 type TestState =
   | { kind: "idle" }
@@ -158,6 +159,8 @@ export function ConfigPage() {
             baseUrl={instances.find((i) => i.id === activeId)?.baseUrl ?? "the active instance"}
           />
 
+          <SessionPanel />
+
           <Panel title="NOTES">
             <div className="text-[11px] text-text-muted space-y-2 leading-relaxed">
               <p>
@@ -177,6 +180,36 @@ export function ConfigPage() {
 
       <StatusBar />
     </div>
+  );
+}
+
+function SessionPanel() {
+  const { enabled, logout } = useAuth();
+  const { push } = useToast();
+  const [busy, setBusy] = useState(false);
+  if (!enabled) return null;
+
+  const onLogout = async () => {
+    setBusy(true);
+    try {
+      await logout();
+    } catch (err) {
+      push({ type: "error", message: err instanceof Error ? err.message : "Logout failed" });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel title="SESSION">
+      <p className="text-[11px] text-text-muted leading-relaxed">
+        This dashboard is protected by a password. Logging out ends the session in this browser.
+      </p>
+      <div className="mt-3">
+        <Button variant="secondary" icon="power" onClick={onLogout} disabled={busy}>
+          LOGOUT
+        </Button>
+      </div>
+    </Panel>
   );
 }
 

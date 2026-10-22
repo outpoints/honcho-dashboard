@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireSession } from "@/lib/auth/server";
 import { resolveHonchoTarget } from "@/lib/honcho/allowlist";
 import { HOP_BY_HOP, filterResponseHeaders } from "@/lib/honcho/proxy-headers";
 
@@ -6,6 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
+  const denied = await requireSession(req);
+  if (denied) return denied;
   const resolved = resolveHonchoTarget(req.headers);
   if (!resolved.ok) {
     return Response.json({ detail: resolved.reason }, { status: resolved.status });

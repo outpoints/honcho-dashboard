@@ -46,4 +46,16 @@
 
   <!-- 8. Operator Config Keys (Advanced) -->
   <Config Name="Operator Config Keys" Target="HONCHO_OPERATOR_CONFIG_KEYS" Default="" Mode="" Description="(Optional) Comma-separated extra env keys to expose on /api/operator/config. Secrets matching token/secret/password/key are auto-redacted." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- 9. Dashboard Login Password (Optional) -->
+  <Config Name="Dashboard Password" Target="DASHBOARD_PASSWORD" Default="" Mode="" Description="(Optional) Require this shared password to use the dashboard. Leave empty for no login. When set, Dashboard Session Secret is required." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <!-- 10. Dashboard Session Secret (Required when a password is set) -->
+  <Config Name="Dashboard Session Secret" Target="DASHBOARD_SESSION_SECRET" Default="" Mode="" Description="Signs login cookies. Required, at least 32 characters, when Dashboard Password is set; there is no default. Generate with: openssl rand -base64 48" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <!-- 11. Dashboard Session Lifetime (Optional) -->
+  <Config Name="Dashboard Session Hours" Target="DASHBOARD_SESSION_TTL_HOURS" Default="" Mode="" Description="(Optional) Login session lifetime in hours. Defaults to 168 (7 days)." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- 12. Reverse Proxies In Front (Optional) -->
+  <Config Name="Dashboard Trusted Proxies" Target="DASHBOARD_TRUSTED_PROXIES" Default="" Mode="" Description="(Optional) Number of reverse proxies in front of the dashboard (default 1). Picks the client address for the login rate limiter from the right of X-Forwarded-For." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 </Container>

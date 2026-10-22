@@ -170,6 +170,16 @@ HONCHO_RUNTIME_START_TS=2026-05-22T00:00:00Z    # optional, lets us report Honch
 HONCHO_PROXY_ALLOWED_BASES=http://honcho:8000   # multi-instance allowlist
 ```
 
+To require a login (off by default), also set these; details in
+[Authentication (optional)](#authentication-optional):
+
+```bash
+DASHBOARD_PASSWORD=...                 # shared password; empty/unset = no login
+DASHBOARD_SESSION_SECRET=...           # REQUIRED with a password, >= 32 chars (openssl rand -base64 48)
+DASHBOARD_SESSION_TTL_HOURS=168        # optional session lifetime, default 7 days (minimum 1 minute)
+DASHBOARD_TRUSTED_PROXIES=1            # optional: reverse proxies in front, for the login rate limiter
+```
+
 The dashboard container exposes port `3000`. If you co-locate it with Honcho on the same
 Docker network, the proxy can talk to Honcho via the internal service name.
 
@@ -207,6 +217,82 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
   - Container Path: `/honcho.log` (Read-only)
   - `Honcho Log File Container Path`: `/honcho.log`
+
+## Authentication (optional)
+
+By default the dashboard has no login of its own: anyone who can reach its port can use the
+proxy and the operator routes (`/api/operator/*`, which can expose Postgres statistics, log
+tails and the redacted environment). Set a single shared password to protect all of it.
+
+| Variable | Meaning |
+| --- | --- |
+| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behaviour. |
+| `DASHBOARD_SESSION_SECRET` | **Required** when the password is set, at least 32 characters. Signs the session cookie. There is no default and it is never derived from the password. |
+| `DASHBOARD_SESSION_TTL_HOURS` | Optional session lifetime in hours. Default `168` (7 days); values below one minute are raised to one minute. |
+| `DASHBOARD_TRUSTED_PROXIES` | Optional number of reverse proxies in front of the dashboard (default `1`, max `10`). Only used to pick the client address for the login rate limiter; see below. |
+
+Generate a secret with:
+
+```bash
+openssl rand -base64 48
+```
+
+If `DASHBOARD_PASSWORD` is set but the secret is missing or shorter than 32 characters, the
+server logs the problem once and every protected request fails with HTTP `500`
+(`DASHBOARD_SESSION_SECRET must be set (>=32 chars) when DASHBOARD_PASSWORD is set`).
+
+**Why not reverse-proxy basic auth?** The dashboard's Honcho SDK client sends
+`Authorization: Bearer <token>` to the same origin, which collides with a basic-auth
+`Authorization` header. The guard is therefore cookie based: the login screen posts the
+password to `/api/auth/login`, which sets an `HttpOnly`, `SameSite=Lax` cookie
+(`honcho_dashboard_session`, `Secure` when the request arrives over HTTPS or with
+`X-Forwarded-Proto: https`). The cookie is never forwarded to Honcho.
+
+What is protected when a password is set:
+
+- `/api/*` (including the Honcho proxy and every operator route), `/v3/*`, `/health` and
+  `/openapi.json` answer `401 {"error":"authentication required"}` without a valid session.
+- The page itself (`/`) still loads so it can show the login screen; it contains no data.
+- Always reachable: `/api/auth/status`, `/api/auth/login`, `/api/auth/logout`,
+  `/api/healthz` (unauthenticated `{"ok":true}`, used by the container health check),
+  `/_next/*` and `/favicon.ico`.
+- **CONFIG** shows a **LOGOUT** button while authentication is enabled.
+
+Limits to know about:
+
+- **Rate limit.** Failed logins are limited to 10 per client address per 15 minutes (then
+  `429` with `Retry-After`). Attempts are counted as soon as they arrive, so concurrent
+  guesses cannot slip past the limit. The limiter is **in memory and per process**: it resets
+  on restart and is not shared between replicas.
+- **Which address is "the client".** The limiter keys on the **last** entry of
+  `X-Forwarded-For` (the address your reverse proxy appended), or the n-th from the right when
+  `DASHBOARD_TRUSTED_PROXIES=n` (use `2` for e.g. Cloudflare in front of Traefik). Everything
+  to the left of that entry is supplied by the client and ignored. Falls back to `X-Real-IP`,
+  then to a single shared `unknown` bucket. The limiter is only as good as the header your
+  proxy sets:
+  - Traefik and Caddy append to `X-Forwarded-For` by default. **nginx does not**: plain
+    `proxy_pass` sends no `X-Forwarded-For`, so every client reaches the dashboard from the
+    proxy's own address and shares one bucket, and a single attacker can lock everyone out for
+    15 minutes by guessing. Add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+    to the `location` block.
+  - With **no** reverse proxy, a client that sends no `X-Forwarded-For` is keyed on its real
+    connection address (Next.js fills the header from the socket), but a client can send its
+    own header and rotate the value to evade the limit. Put the dashboard behind a correctly
+    configured proxy, or rely on a strong password.
+- **Sessions are stateless.** Logging out only clears the cookie in that browser: a captured
+  cookie stays valid until it expires. Changing `DASHBOARD_PASSWORD` does **not** invalidate
+  existing sessions. To invalidate every session at once, rotate `DASHBOARD_SESSION_SECRET`
+  and restart.
+- **Expiry.** When a session expires while the app is open, the next request returns the
+  guard's `401` (marked with an `x-dashboard-auth: required` header) and the dashboard shows
+  the login screen again; a Honcho `401` (bad API key) is not affected.
+- **Cross-site writes.** While authentication is on, `POST`/`PUT`/`PATCH`/`DELETE` requests
+  that the browser marks cross-site (`Sec-Fetch-Site`, or an `Origin` that does not match
+  `Host` / `X-Forwarded-Host`) are rejected with `403`. Make sure your proxy forwards `Host`
+  or `X-Forwarded-Host` unchanged.
+- The unauthenticated page does not include the default Honcho URL; it appears after login.
+- This is one shared password, not user accounts, roles or SSO. Serve the dashboard over
+  HTTPS when it is reachable beyond a trusted network.
 
 ## Repo layout
 
