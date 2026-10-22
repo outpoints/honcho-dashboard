@@ -274,9 +274,11 @@ export function InstancePage() {
       <Panel title="OPERATOR_NOTE">
         <div className="text-[11px] text-text-muted leading-relaxed">
           Uptime, database size, and vector counts above come from the operator DB module —
-          a read-only Postgres connection from the dashboard to the same database Honcho uses.
-          Set <span className="text-accent">HONCHO_DATABASE_URL</span> on the dashboard to enable.
-          Honcho itself is not modified.
+          a Postgres connection from the dashboard to the same database Honcho uses, used
+          read-only except for the opt-in reasoning retry (
+          <span className="text-accent">HONCHO_OPERATOR_WRITES=true</span>), which updates
+          Honcho&apos;s queue table. Set <span className="text-accent">HONCHO_DATABASE_URL</span> on
+          the dashboard to enable; a read-only database role is recommended.
         </div>
       </Panel>
 

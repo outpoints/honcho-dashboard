@@ -48,10 +48,16 @@ services:
       HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
 
       # ---- Operator modules (server-side, runtime, all optional) ----
-      # Read-only Postgres DSN — point at the SAME database Honcho uses.
+      # Postgres DSN — point at the SAME database Honcho uses. Read-only unless
+      # HONCHO_OPERATOR_WRITES is enabled below; a read-only role is recommended.
       # Enables: throughput chart, 52-week heatmap, db size, pgvector status,
-      # top-tables table, PostgreSQL diagnostic probe. Honcho is never written to.
+      # top-tables table, PostgreSQL diagnostic probe.
       HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}
+
+      # Opt-in (1/true/yes): allow retrying failed reasoning tasks. The only
+      # direct database write: UPDATE on Honcho's `queue` table, so the
+      # role above needs UPDATE on `queue`. Unset = refused with HTTP 403.
+      HONCHO_OPERATOR_WRITES: ${HONCHO_OPERATOR_WRITES:-}
 
       # Path to a Honcho log file inside the container. Mount the real file
       # via the volumes block below. Enables: log tail panel on Diagnostics.

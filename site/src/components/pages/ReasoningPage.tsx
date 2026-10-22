@@ -18,6 +18,7 @@ import { useWriteActions } from "@/lib/writeActions";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
+import type { RuntimeInfo } from "@/lib/operator/runtime-types";
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
@@ -70,6 +71,18 @@ export function ReasoningPage() {
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
+  // The retry actions also need the server-side gate (HONCHO_OPERATOR_WRITES).
+  // Anything but a confirmed "on" (loading, probe failed, off) keeps them disabled
+  // so we never offer a write the server will refuse.
+  const runtime = useOperatorQuery<Pick<RuntimeInfo, "writes_enabled">>("/api/operator/runtime");
+  const serverWrites = runtime.data?.writes_enabled === true;
+  const serverWritesHint = serverWrites
+    ? undefined
+    : runtime.data
+      ? "server: HONCHO_OPERATOR_WRITES off"
+      : runtime.error
+        ? "server write gate unknown (runtime probe failed)"
+        : "checking server write gate…";
   const metrics = useDeriverMetrics();
 
   const [statusFilter, setStatusFilter] = useState("all");
@@ -258,6 +271,7 @@ export function ReasoningPage() {
                 queue.refetch();
                 conclusions.refetch();
                 metrics.refetch();
+                runtime.refetch();
               }}
             />
             {canWrite ? (
@@ -265,11 +279,20 @@ export function ReasoningPage() {
                 variant="warning"
                 icon="refresh"
                 onClick={doRetryAll}
-                disabled={!workspaceId || !counts?.failed || retryAllBusy}
-                title={counts?.failed ? `Retry all ${counts.failed} failed tasks` : "No failed tasks"}
+                disabled={!workspaceId || !counts?.failed || retryAllBusy || !serverWrites}
+                title={
+                  serverWritesHint
+                    ? serverWritesHint
+                    : counts?.failed
+                      ? `Retry all ${counts.failed} failed tasks`
+                      : "No failed tasks"
+                }
               >
                 RETRY_FAILED
               </Button>
+            ) : null}
+            {canWrite && serverWritesHint ? (
+              <span className="text-[10px] text-text-muted">{serverWritesHint}</span>
             ) : null}
             {canWrite ? (
               <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
@@ -382,6 +405,7 @@ export function ReasoningPage() {
                           t={t}
                           index={i}
                           canRetry={canWrite}
+                          retryDisabledHint={serverWritesHint}
                           onRetry={() => doRetry(t)}
                         />
                       ))}
@@ -560,11 +584,14 @@ function ReasoningTaskItem({
   t,
   index,
   canRetry,
+  retryDisabledHint,
   onRetry,
 }: {
   t: ReasoningTaskRow;
   index: number;
   canRetry: boolean;
+  /** When set, the retry button is disabled and this explains why. */
+  retryDisabledHint?: string;
   onRetry: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -685,11 +712,18 @@ function ReasoningTaskItem({
 
               {failed && canRetry ? (
                 <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Button variant="primary" size="sm" icon="refresh" onClick={onRetry}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon="refresh"
+                    onClick={onRetry}
+                    disabled={!!retryDisabledHint}
+                    title={retryDisabledHint}
+                  >
                     RETRY_TASK
                   </Button>
                   <span className="text-[10px] text-text-muted">
-                    clears the error and re-queues this task for the deriver
+                    {retryDisabledHint ?? "clears the error and re-queues this task for the deriver"}
                   </span>
                 </div>
               ) : null}

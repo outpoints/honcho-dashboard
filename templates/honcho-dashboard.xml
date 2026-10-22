@@ -33,7 +33,10 @@
   <Config Name="Proxy Allowed Bases" Target="HONCHO_PROXY_ALLOWED_BASES" Default="http://honcho:8000,http://honcho-aio:8000" Mode="" Description="(Optional) Comma-separated Honcho origins the server-side proxy may forward to, for other Honcho servers you add under CONFIG. The Honcho Proxy Base URL is always allowed." Type="Variable" Display="always" Required="false" Mask="false">http://honcho:8000,http://honcho-aio:8000</Config>
 
   <!-- 4. Operator Database Connection (Advanced) -->
-  <Config Name="Operator Database URL" Target="HONCHO_DATABASE_URL" Default="" Mode="" Description="(Optional) Read-only Postgres DSN to the SAME database Honcho uses (e.g. postgresql+psycopg://postgres:secret@honcho-aio:5432/honcho). Enables throughput charts, 52-week heatmap, db size / vector-count / top-tables, and PostgreSQL diagnostics." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Operator Database URL" Target="HONCHO_DATABASE_URL" Default="" Mode="" Description="(Optional) Postgres DSN to the SAME database Honcho uses; use a read-only role unless you enable Operator Writes (e.g. postgresql+psycopg://postgres:secret@honcho-aio:5432/honcho). Enables throughput charts, 52-week heatmap, db size / vector-count / top-tables, and PostgreSQL diagnostics." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <!-- 4b. Operator Writes (Advanced, opt-in) -->
+  <Config Name="Operator Writes" Target="HONCHO_OPERATOR_WRITES" Default="" Mode="" Description="(Optional) Set to true to let the dashboard retry failed reasoning tasks. This runs UPDATE on Honcho's queue table, so the database role needs UPDATE on queue. Leave empty to keep the operator DB connection read-only (writes are refused server-side)." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
   <!-- 5. Honcho Log File Host Mount (Advanced) -->
   <Config Name="Honcho Log File Mount" Target="/honcho.log" Default="" Mode="ro" Description="(Optional) Host path to Honcho's log file (e.g. /mnt/user/appdata/honcho-aio/logs/honcho.log). Mounts read-only into the container to enable the log tail panel on Diagnostics." Type="Path" Display="always" Required="false" Mask="false"></Config>
