@@ -30,7 +30,7 @@ The Next.js app lives in [`site/`](./site).
 
 **Context — scope-aware assembly with aligned controls**
 
-![Context layers and preview using synthetic Honcho 3.2.1 data](docs/context.png)
+![Context layers and preview using synthetic Honcho data](docs/context.png)
 
 Chat evidence and provenance require Honcho 3.2+; evidence peer attribution requires
 3.2.1+. Backlog requires 3.1.2+. Shared and per-agent custom instructions in
@@ -50,19 +50,19 @@ Organized into four sections that mirror the sidebar.
 
 **Explore**
 
-- **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API. On Honcho 3.3.0+, the configuration form also edits shared custom instructions and per-agent overrides for the deriver, summaries, dreams, peer cards, and dialectic chat.
-- **Peers** — filter by id, workspace, and type (user / agent); expand a peer for its session / message / conclusion counts, an editable peer card, its conclusions, and search-within-peer.
-- **Sessions** — browse every paginated Honcho session, then search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, recent messages, and summaries; clone a session, add / remove peers, or upload PDF / JSON / text documents as messages.
-- **Messages** — a read-only cross-session message stream with content search, session and peer filters, and user-vs-agent token stats.
-- **Scopes** — create named visibility boundaries, add or remove member sessions, and monitor asynchronous backfill/reconciliation state and copied-document counts. Requires Honcho 3.1.0+ and a workspace- or admin-level key.
+- **Workspaces** — browse workspaces as cards; create, edit configuration, and delete against the live API. On Honcho 3.3.0+, the configuration form also edits shared custom instructions and per-agent overrides for the deriver, summaries, dreams, peer cards, and dialectic chat. **EXPORT** saves a workspace (peers, sessions with per-peer settings and timestamped messages, conclusions, scopes) as one JSON file without writing to Honcho. **IMPORT** replays an export from this dashboard or from Hombre, or merges another workspace on the instance, after a preview: existing peers are reused unchanged, conflicting sessions are skipped or copied with an `-imported` suffix, and messages can be stored without queuing reasoning.
+- **Peers** — filter by id, workspace, and type (user / agent); rows show conclusion counts and last activity (with the operator DB) and open one at a time. An open peer shows its card the way Honcho structures it (identity, attributes, relationships, standing instructions; lines without Honcho's prefixes shown as written), editable with format warnings, then its conclusions by level and by whose view, with provenance (WHY), text filtering, and message search. `#/peers?peer=workspace/id` opens a peer directly. **COMPARE** puts two peers side by side: cards, representations, shared sessions, and what each knows about the other.
+- **Sessions** — browse every paginated Honcho session, then search and sort (most recent / oldest message, most / fewest messages, newest / oldest created) and filter by status (active / idle / archived); expand for peers, summaries, and the conversation itself (latest first, one line per message, a line opens in place, LOAD_MORE pages back); clone a session, add / remove peers, or upload PDF / JSON / text documents as messages. On Honcho 3.5+, each session shows the scopes it belongs to, and a scope filter narrows the list to one scope or to sessions in no scope.
+- **Messages** — read-only. Every message in a workspace, latest first, grouped by session: consecutive messages from one session form a group under a header with its time span, message and token counts, and peers. Select a header to collapse that session (every group of it closes; the choice lasts for the browser tab, and EXPAND_ALL reopens them). It follows new messages live, checking every 5 seconds while the tab is visible: at the top you see them arrive; scrolled down, you stay on the same line and a count shows how many arrived above. With the operator DB, text search runs on the server over the whole workspace. Session and peer filters stay in the link, and LOAD_MORE pages back 50 at a time. READ_SESSION or the session picker shows one session as a single list; without the operator DB, the page reads one session at a time through the Honcho API.
+- **Scopes** — create named visibility boundaries, add or remove member sessions, and monitor asynchronous backfill/reconciliation state and copied-document counts. On Honcho 3.5+, the registry shows each scope's session count, and several members can be removed at once (one request per 100 sessions; Honcho removes all of a request or none). Requires Honcho 3.1.0+ and a workspace- or admin-level key.
 - **Search** — Honcho-native hybrid keyword/vector search across a workspace, named scope, session, or peer, with Honcho relevance / newest / oldest ordering plus UTC date, metadata, and result-limit filters.
-- **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions. On Honcho 3.2+, inspect parent conclusions, derivation counts, and backlinks to other derived conclusions.
+- **Conclusions** — browse the workspace's derived facts (paginated), run semantic search scoped to an observer→observed pair, and create or delete conclusions. On Honcho 3.2+, inspect parent conclusions, derivation counts, and backlinks to other derived conclusions. On Honcho 3.5+, the inspector also shows the messages an explicit conclusion was derived from, and an opened message line (Messages, Sessions) lists the conclusions that cite it under **CITED_BY**. Deleted conclusions stay in a **TRASH** for the current browser tab, where RESTORE recreates one as a new explicit conclusion.
 
 **Memory**
 
 - **Reasoning** — the deriver queue that builds peer representations: queued / processing / completed / failed tiles, expandable tasks with parsed and raw payloads, a task-type breakdown, and a config readout; filter by status / type, retry failed tasks, or schedule a dream.
 - **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, a live preview, and optional scope-backed representation/card recall.
-- **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level. Opt into Honcho 3.2 evidence to inspect accessed conclusions, messages, tool calls, and the reasoning trace ID for each answer.
+- **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level. Answers stream, with a typing indicator until the first words arrive (from Honcho 3.5 the answer usually arrives in one piece once Honcho has gathered its context); requested evidence arrives when the answer finishes. Opt into Honcho 3.2 evidence to inspect accessed conclusions, messages, tool calls, and the reasoning trace ID for each answer.
 
 **Setup**
 
@@ -75,7 +75,7 @@ Organized into four sections that mirror the sidebar.
 - **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth.
 - **Safe by default** — a master **write-actions** toggle (off by default) hides the create / update / delete controls on the workspace, peer, session, conclusion, reasoning, and webhook screens; each confirms before writing to the live instance. Reads never confirm.
 - **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook queue activity, log tail) come from an optional operator database connection, and degrade gracefully to the Honcho API when it isn't configured. Reads work with read-only credentials; retrying reasoning tasks requires queue update permission.
-- **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme.
+- **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme. The sidebar and status bar show instance health and the workspace's queue progress with when it last refreshed (icons and words, not color alone), plus a SCHEDULE_DREAM shortcut when writes are enabled. With the operator DB, they also show how many queue items failed, linking to Reasoning filtered to the failed tasks; Honcho's API does not report failures, so without the DB nothing is shown.
 
 ## Architecture
 
@@ -84,7 +84,7 @@ Three layers, each with a single job:
 1. **`@honcho-ai/sdk` — native data flows.**
    Workspaces, peers, sessions, messages, conclusions queries, contexts, chat, queue
    status, dream scheduling, scopes, scope-aware recall, workspace chat, and search use
-   the SDK directly. The dashboard currently targets SDK 2.5.1+ (locked to 2.6.0).
+   the SDK directly. The dashboard currently targets SDK 2.5.1+ (locked to 2.8.0).
    See `site/src/lib/honcho/sdk.ts` for the per-(instance, workspace) client cache.
 
 2. **A thin raw client — only for verified SDK gaps.**
@@ -102,6 +102,11 @@ Three layers, each with a single job:
    - One read-only scope-list compatibility probe — deliberately bypasses the
      SDK's workspace get-or-create behavior when version metadata is unavailable
    - Webhook `list / create / delete / test` — no SDK methods
+   - Named-scope key minting (`POST /v3/keys`) — no SDK method
+   - Workspace export / import — non-creating session, message, and peer reads,
+     and create bodies that keep stored config keys and message `created_at`
+     exactly; the SDK's typed configs and `session(id)` get-or-create don't
+   - Peer representation for COMPARE — the SDK's `peer(id)` get-or-creates first
 
 3. **Operator modules — for self-hosted runtime, db, config, logs, diagnostics.**
    `site/src/lib/operator/*` + `site/src/app/api/operator/*` route handlers.
@@ -284,7 +289,7 @@ Features introduced by Honcho 3.1 are capability-gated:
 - Network failures and other ambiguous responses fail conservatively: 3.1-only
   controls remain disabled without affecting older dashboard workflows.
 
-The dashboard uses `@honcho-ai/sdk` 2.6.0 for **Honcho 3.2.1–3.3.0** while
+The dashboard uses `@honcho-ai/sdk` 2.8.0 for **Honcho 3.2.1–3.5.0** while
 retaining the existing 3.0.x/3.1 workflows and 3.2.0 evidence/provenance. Conclusion responses retain optional
 `source_ids` (parent conclusion IDs) and `times_derived` attribution, including
 semantic-search results. On verified 3.2+ servers, **INCLUDE_EVIDENCE** collects
@@ -339,6 +344,32 @@ source could come from a same-named session in another workspace. The 3.3.0
 migration builds a trigram index on `messages` about 1.5× the table's size, and a
 `SUMMARY_MODEL_CONFIG__MAX_OUTPUT_TOKENS` below the new 6000-token summary cap
 stops Honcho from starting. Check both before upgrading.
+
+Honcho 3.4.0 support is covered by the
+[3.4.0 compatibility and upgrade guide](docs/HONCHO_3_4_0_VALIDATION.md). The
+dashboard moves to `@honcho-ai/sdk` 2.7.0. Workspaces, peers, and sessions show the
+server-assigned **UID** when the server returns one, and pasting a UID into peer or
+session search finds it. On verified 3.4.0+ servers with authentication enabled, the
+Scopes page mints **named-scope keys** for the selected scope; the key is shown once
+and never stored. Diagnostics compares the database's Alembic revision with the
+server version and flags INVALID indexes left by a timed-out concurrent build,
+including the five 3.4 queue indexes and the `btree_gin` dependency. The trace
+inspector reads dream and dialectic agent runs, including 3.4's iteration-limit,
+write-window, and working-notes counters. The 3.4 migration builds its queue indexes
+concurrently with a 60-minute limit; images from 3.2.2 onward still run against the
+new schema.
+
+Honcho 3.5.0 support is covered by the
+[3.5.0 compatibility and upgrade guide](docs/HONCHO_3_5_0_VALIDATION.md). The
+dashboard moves to `@honcho-ai/sdk` 2.8.0. Each 3.5 feature is detected from the
+server's `/openapi.json` schema first and the version second, so a server built
+from Honcho's main branch (which reports the last release's version) gets exactly
+the features it has. Saving a workspace configuration sends the whole configuration
+on every server; on 3.5, where Honcho stores exactly what is sent, cleared settings
+are left out instead of being sent as empty values. Sessions show their scopes and
+filter by scope, the Scopes registry counts sessions and removes members in bulk,
+and conclusions link to the messages they cite in both directions. Diagnostics knows
+the 3.5.0 schema head. Both 3.5.0 migrations only add a table and nullable columns.
 
 For the **server upgrade**, apply Honcho's Alembic migrations using its deployment
 procedure before starting the upgraded services. The 3.2 tag adds the

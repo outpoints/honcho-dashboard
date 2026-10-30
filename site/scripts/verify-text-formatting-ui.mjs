@@ -143,11 +143,30 @@ async function contextFor(viewport, touch) {
     }
     if (path.endsWith('/scopes/list')) return reply(pageOf([]));
     if (path.endsWith('/queue/status')) return reply({ total_work_units: 0, completed_work_units: 0, in_progress_work_units: 0, pending_work_units: 0 });
-    if (path.endsWith('/chat')) return reply({ content: CHAT_ANSWER });
+    if (path.endsWith('/chat')) {
+      // Chat streams by default; answer the way Honcho does.
+      if (body?.stream) {
+        return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({ done: false, delta: { content: CHAT_ANSWER } })}\n\ndata: ${JSON.stringify({ done: true, delta: {} })}\n\n` });
+      }
+      return reply({ content: CHAT_ANSWER });
+    }
     if (path === '/deriver/metrics') return reply({ detail: 'No measurement' }, 404);
     if (path === '/api/operator/db' && url.searchParams.get('view') === 'messages') {
       const sid = url.searchParams.get('session_id');
-      return reply({ available: true, messages: messages.filter((m) => !sid || m.session_id === sid).sort(byNewest) });
+      const pid = url.searchParams.get('peer_id');
+      const q = url.searchParams.get('q')?.toLowerCase();
+      const afterAt = url.searchParams.get('after_at');
+      const afterId = url.searchParams.get('after_id') ?? '';
+      if (q) streamSearches.push(q);
+      if (afterAt) liveChecks.push(afterAt);
+      const newer = (m) => !afterAt || Date.parse(m.created_at) > Date.parse(afterAt) || (m.created_at === afterAt && m.id > afterId);
+      return reply({
+        available: true,
+        hasMore: false,
+        messages: [...messages, ...arrivals]
+          .filter((m) => (!sid || m.session_id === sid) && (!pid || m.peer_id === pid) && (!q || m.content.toLowerCase().includes(q)) && newer(m))
+          .sort(byNewest),
+      });
     }
     if (path === '/api/operator/db') return reply({ available: false, reason: 'Synthetic test has no operator DB' });
     if (path.startsWith('/api/operator/')) return reply({ available: false, entries: [], probes: [] });
@@ -181,26 +200,128 @@ async function shot(page, name) {
 
 const stream = (page) => page.locator('[data-testid="message-stream"]');
 const messageRow = (page, id) => page.locator(`[data-message-id="${id}"]`);
+const lineIds = (page) => page.locator('[data-message-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-message-id')));
+// Lines start closed; opening one shows the whole message and its actions.
+const openLine = async (page, id) => {
+  const toggle = messageRow(page, id).locator('button[aria-expanded]').first();
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await messageRow(page, id).getByRole('button', { name: /^(COPY|COPIED)$/ }).waitFor();
+};
+const streamSearches = [];
+const liveChecks = [];
+// Messages that "arrive" while a test watches the stream; cleared after each check.
+const arrivals = [];
+const arrive = (id, session_id, peer_id, content, created_at) =>
+  arrivals.push({ id, session_id, peer_id, content, created_at, workspace_id: ws.id, metadata: {}, token_count: Math.ceil(content.length / 4) });
+const groups = (page) => page.locator('[data-session-group]').evaluateAll((els) => els.map((el) => el.getAttribute('data-session-group')));
+// A session's first group header (every header of the session toggles it).
+const groupHeader = (page, sid) => page.locator(`[data-session-group="${sid}"] [data-session-toggle]`).first();
+// Height of each group's line list for a session: 0 once it is collapsed.
+const groupHeights = (page, sid) => page.locator(`[data-session-group="${sid}"] ol`).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
+const inStreamView = (page, id) =>
+  page.getByTestId('message-stream').evaluate((box, mid) => {
+    const line = box.querySelector(`[data-message-id="${mid}"]`);
+    if (!line) return false;
+    const l = line.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    return l.top >= b.top - 1 && l.top < b.bottom;
+  }, id);
+const lineTop = (page, id) => page.locator(`[data-message-id="${id}"]`).evaluate((el) => el.getBoundingClientRect().top);
 
 try {
   for (const [label, viewport, touch] of [['desktop', { width: 1440, height: 1000 }, false], ['mobile', { width: 390, height: 844 }, true]]) {
     const { context, page } = await contextFor(viewport, touch);
 
-    // Cross-session feed, newest first.
+    // Across sessions: every message, latest first, in groups of consecutive
+    // messages from one session (newest first inside each group too).
     await page.goto(`${base}/#/messages`);
     await page.getByText('Release checklist draft:', { exact: false }).first().waitFor();
     await shot(page, `${label}-messages-feed`);
+    if (asserting) {
+      assert.deepEqual(await lineIds(page), ['m-06', 'm-05', 'm-04', 'm-03', 'm-02', 'm-01'], 'the latest first, inside groups too');
+      assert.deepEqual(await groups(page), ['release-review', 'planning-notes'], 'consecutive messages from a session form a group');
+      assert.match(await page.locator('[data-session-group="planning-notes"]').innerText(), /4 messages/, 'a group header counts its messages');
+      assert.ok(await inStreamView(page, 'm-06'), 'the stream opens at the latest message');
+      assert.equal(await messageRow(page, 'm-06').getByRole('button', { name: 'COPY' }).count(), 0, 'closed lines show no actions');
 
-    // One session reads as a transcript, oldest first.
+      // Live follow: a new message appears at the top and is in view.
+      arrive('m-07', 'planning-notes', 'assistant', 'Follow-up: the retry queue survives a restart.', '2026-10-14T17:05:00Z');
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 7, null, { timeout: 12000 });
+      assert.deepEqual((await lineIds(page)).slice(0, 2), ['m-07', 'm-06']);
+      assert.deepEqual(await groups(page), ['planning-notes', 'release-review', 'planning-notes'], 'a session that resumes starts a new group');
+      assert.ok(await inStreamView(page, 'm-07'), 'the reader at the top sees new messages');
+      assert.ok(liveChecks.length > 0, 'live follow asks only for newer messages');
+
+      // Scrolled down, new messages arrive above without moving the reader.
+      await page.setViewportSize({ width: viewport.width, height: 420 });
+      await page.getByTestId('message-stream').evaluate((box) => { box.scrollTop = box.scrollHeight; });
+      await page.waitForTimeout(200);
+      const readTop = await lineTop(page, 'm-01');
+      arrive('m-08', 'release-review', 'alice', 'Changelog updated.', '2026-10-14T17:06:00Z');
+      await page.getByRole('button', { name: '1 NEW' }).waitFor({ timeout: 12000 });
+      assert.ok(Math.abs((await lineTop(page, 'm-01')) - readTop) < 2, 'a reader scrolled down stays on the same line');
+      assert.equal(await inStreamView(page, 'm-08'), false);
+      await page.getByRole('button', { name: '1 NEW' }).click();
+      await page.waitForFunction(() => document.querySelector('[data-testid="message-stream"]')?.scrollTop === 0);
+      await page.getByRole('button', { name: '1 NEW' }).waitFor({ state: 'detached' });
+      await page.setViewportSize(viewport);
+      arrivals.length = 0;
+      await page.reload();
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 6);
+
+      // An opened line in a group names its tokens (groups have no tokens column).
+      await openLine(page, 'm-06');
+      assert.match(await messageRow(page, 'm-06').innerText(), /\d+ tokens/);
+
+      // Selecting a session's header collapses it; READ_SESSION stays reachable.
+      await groupHeader(page, 'planning-notes').click();
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-session-group="planning-notes"] ol')].every((el) => el.getBoundingClientRect().height < 1));
+      assert.equal(await groupHeader(page, 'planning-notes').getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('[data-session-group="planning-notes"] [inert]').count(), 1, 'hidden lines are out of the tab order');
+      assert.ok((await groupHeights(page, 'release-review')).every((h) => h > 0), 'other sessions stay open');
+      assert.equal(await page.locator('[data-session-group="planning-notes"]').getByRole('button', { name: /READ_SESSION/ }).isVisible(), true);
+      // The choice lasts for the tab, and EXPAND_ALL undoes it.
+      await page.reload();
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 6);
+      assert.equal(await groupHeader(page, 'planning-notes').getAttribute('aria-expanded'), 'false', 'collapsed sessions survive a reload');
+      await page.getByRole('button', { name: /EXPAND_ALL \(1 collapsed\)/ }).click();
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-session-group] ol')].every((el) => el.getBoundingClientRect().height > 0));
+      assert.equal(await page.getByRole('button', { name: /EXPAND_ALL/ }).count(), 0);
+
+      // Text search runs on the server and survives in the link.
+      await page.locator('#messages-search').fill('RunBook');
+      await page.locator('#messages-search').press('Enter');
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 1);
+      assert.deepEqual(await lineIds(page), ['m-04']);
+      assert.ok(streamSearches.includes('runbook'), 'the search was sent to the server');
+      assert.match(page.url(), /q=RunBook/);
+      await page.getByRole('button', { name: 'CLEAR_FILTERS' }).first().click();
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 6);
+
+      // A peer filter from a link narrows the stream.
+      await page.goto(`${base}/#/messages?peer=alice`);
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 3);
+      assert.deepEqual(await lineIds(page), ['m-05', 'm-03', 'm-01']);
+
+      // READ_SESSION on a group opens that session on its own.
+      await page.goto(`${base}/#/messages`);
+      await page.locator('[data-session-group="planning-notes"]').first().getByRole('button', { name: /READ_SESSION/ }).click();
+      await page.waitForFunction(() => location.hash.includes('session=planning-notes'));
+      await page.waitForFunction(() => document.querySelectorAll('[data-message-id]').length === 4);
+    }
+
+    // One session, latest first like the workspace stream.
     await page.goto(`${base}/#/messages?session=planning-notes`);
     await page.getByText('Two follow-ups', { exact: false }).first().waitFor();
     await page.waitForTimeout(300);
     await shot(page, `${label}-messages-transcript`);
 
     if (asserting) {
-      const order = await page.locator('[data-message-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-message-id')));
-      assert.deepEqual(order, ['m-01', 'm-02', 'm-03', 'm-04'], 'a selected session reads oldest first');
+      assert.deepEqual(await lineIds(page), ['m-04', 'm-03', 'm-02', 'm-01'], 'a selected session shows the latest first');
+      assert.equal(await page.locator('[data-session-group]').count(), 0, 'one session is one list, not groups');
       assert.equal(await stream(page).getByText('**v2 importer**').count(), 0, 'markdown markers are not shown');
+      await openLine(page, 'm-01');
+      await openLine(page, 'm-02');
       assert.equal(await messageRow(page, 'm-01').locator('strong', { hasText: 'v2 importer' }).count(), 1);
       assert.equal(await messageRow(page, 'm-02').getByRole('heading', { name: 'What changed' }).count(), 1);
       assert.equal(await messageRow(page, 'm-02').locator('table').count(), 1);
@@ -211,7 +332,9 @@ try {
       assert.match(await link.getAttribute('rel'), /noopener/);
 
       // The long runbook collapses; SHOW_MORE reveals the rest.
+      await openLine(page, 'm-04');
       const runbook = messageRow(page, 'm-04');
+      await runbook.scrollIntoViewIfNeeded();
       const collapsed = (await runbook.boundingBox()).height;
       await runbook.getByRole('button', { name: 'SHOW_MORE' }).click();
       await runbook.getByRole('button', { name: 'SHOW_LESS' }).waitFor();
@@ -219,34 +342,19 @@ try {
       await runbook.getByRole('button', { name: 'SHOW_LESS' }).click();
       assert.equal(await messageRow(page, 'm-01').getByRole('button', { name: 'SHOW_MORE' }).count(), 0, 'short messages do not collapse');
 
-      // Row actions wait for hover or focus where hover exists, and always show on touch.
-      const first = messageRow(page, 'm-01');
-      const actionsOpacity = () => first.getByRole('button', { name: 'COPY' }).evaluate((el) => getComputedStyle(el.parentElement).opacity);
-      if (touch) {
-        assert.equal(await actionsOpacity(), '1', 'touch screens always show row actions');
-      } else {
-        await page.mouse.move(0, 0);
-        await page.waitForTimeout(250);
-        assert.equal(await actionsOpacity(), '0', 'row actions stay quiet until hover');
-        await first.hover();
-        await page.waitForTimeout(250);
-        assert.equal(await actionsOpacity(), '1', 'hover reveals row actions');
-      }
-
       // RAW shows the stored text exactly; COPY copies it.
-      await first.hover();
+      const first = messageRow(page, 'm-01');
+      await first.scrollIntoViewIfNeeded();
       await first.getByRole('button', { name: 'SHOW_RAW' }).click();
       await first.locator('pre', { hasText: '**v2 importer**' }).waitFor();
       await first.getByRole('button', { name: 'SHOW_FORMATTED' }).click();
       await first.locator('strong', { hasText: 'v2 importer' }).waitFor();
-      await first.hover();
       await first.getByRole('button', { name: 'COPY' }).click();
       await first.getByRole('button', { name: 'COPIED' }).waitFor();
       assert.equal(await page.evaluate(() => navigator.clipboard.readText()), messages[0].content);
 
       const answer = messageRow(page, 'm-02');
       await answer.scrollIntoViewIfNeeded();
-      await answer.hover();
       await answer.getByRole('button', { name: 'SHOW_RAW' }).click();
       await answer.locator('pre', { hasText: '## What changed' }).scrollIntoViewIfNeeded();
       await shot(page, `${label}-messages-raw`);
@@ -257,8 +365,10 @@ try {
     await page.goto(`${base}/#/messages?session=release-review`);
     await page.getByText('Release checklist draft:', { exact: false }).first().waitFor();
     if (asserting) {
+      await openLine(page, 'm-05');
+      await openLine(page, 'm-06');
       const html = messageRow(page, 'm-06');
-      await html.getByText('<kbd>Ctrl</kbd>', { exact: false }).waitFor();
+      await html.getByText('<kbd>Ctrl</kbd>', { exact: false }).first().waitFor();
       assert.equal(await html.locator('kbd').count(), 0);
       assert.equal(await html.locator('img').count(), 0);
       assert.equal(await html.getByRole('link', { name: '[image: release chart]' }).count(), 1);
@@ -266,13 +376,18 @@ try {
       assert.equal(await messageRow(page, 'm-05').getByText('[x]').count(), 1);
     }
 
-    // Session previews flatten markdown into a clamped line of text.
+    // Session previews flatten markdown into a clamped line of text, latest first.
     await page.goto(`${base}/#/sessions`);
     await page.getByRole('button', { name: /planning-notes/ }).first().click();
-    await page.getByText('RECENT_MESSAGES', { exact: false }).waitFor();
+    await page.getByText('CONVERSATION', { exact: false }).waitFor();
     await page.locator('.md-inline strong', { hasText: 'v2 importer' }).first().waitFor();
     await shot(page, `${label}-sessions`);
     if (asserting) {
+      const transcript = page.getByTestId('session-transcript');
+      const shownIds = await transcript.locator('[data-message-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-message-id')));
+      const expected = messages.filter((m) => m.session_id === 'planning-notes').sort(byNewest).map((m) => m.id);
+      assert.deepEqual(shownIds, expected, 'the session conversation shows the latest first');
+      assert.equal(await transcript.evaluate((el) => el.scrollTop), 0, 'the conversation opens at the top, on the latest message');
       assert.equal(await page.getByText('**v2 importer**', { exact: false }).count(), 0);
       assert.equal(await page.locator('.md-inline :is(h1, h2, h4, h5, h6, ul, ol, li, table, a, img)').count(), 0);
     }

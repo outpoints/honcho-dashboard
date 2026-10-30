@@ -70,6 +70,11 @@ async function fixture(viewport) {
       if (suffix === "/peers") return reply(peerFor(ws));
       if (suffix === "/peers/notes/card") return reply({ peer_card: [`Card from ${ws}`] });
       if (suffix === "/peers/notes/search") return reply([]);
+      if (suffix === "/conclusions/list") {
+        const filters = request.postDataJSON()?.filters ?? {};
+        const matches = (!filters.level || filters.level === "explicit") && !filters.NOT && !filters.created_at;
+        return reply(pageOf(matches ? [{ id: `conclusion-${ws}`, content: `Conclusion from ${ws}`, observer_id: "notes", observed_id: "notes", level: "explicit", created_at: date }] : []));
+      }
       if (suffix === "/sessions/list") return reply(pageOf([{ id: `session-${ws}`, workspace_id: ws, metadata: {}, configuration: {}, is_active: true, created_at: date }]));
       if (["/peers/notes/sessions", "/scopes/list"].includes(suffix)) return reply(pageOf([]));
     }
@@ -86,6 +91,9 @@ async function assertWorkspace(page, ws) {
   await page.locator("main").getByText(`@${ws}`, { exact: true }).waitFor().catch(async (error) => {
     throw new Error(`${error.message}\nRendered: ${await page.locator("main").innerText()}\nUnexpected: ${JSON.stringify(unexpected)}\nErrors: ${JSON.stringify(errors)}`);
   });
+  // Rows start closed; open this workspace's row to read its details.
+  const row = page.locator("main button[aria-controls]", { hasText: `@${ws}` });
+  if (await row.getAttribute("aria-expanded") !== "true") await row.click();
   await page.locator("main").getByText(`Conclusion from ${ws}`, { exact: true }).waitFor();
   // Wait for Framer Motion's departing row to finish its exit animation.
   await page.waitForFunction(() => [...document.querySelectorAll("main span")].filter((el) => /^@/.test(el.textContent)).length === 1);
@@ -105,9 +113,12 @@ try {
     assert.equal(await page.evaluate(() => localStorage.getItem("honcho-dashboard:activeWorkspaceId")), "ws-b");
     passed++;
 
-    await page.getByPlaceholder("search this peer's messages…").fill("notes");
-    await page.locator("main").getByRole("button", { name: "SEARCH", exact: true }).click();
-    await page.getByText("No matching messages for that query.", { exact: true }).waitFor();
+    // The peer's message search runs from the conclusions filter box.
+    await page.getByPlaceholder("filter conclusions by text…").fill("notes");
+    await page.locator("main").getByRole("button", { name: "SEARCH_MESSAGES", exact: true }).click();
+    await page.getByText("No messages from notes match “notes”.", { exact: true }).waitFor();
+    await page.locator("main").getByRole("button", { name: "BACK_TO_CONCLUSIONS", exact: true }).click();
+    await page.locator("main").getByText("Conclusion from ws-a", { exact: true }).waitFor();
     assert.deepEqual(mutations, [], "Peer search must remain non-creating");
     passed++;
 
@@ -176,12 +187,12 @@ try {
     // A valid linked workspace need not be present on the first workspace page.
     state.omitWorkspace = true;
     // Peer-row navigation carries the clicked row's workspace and peer filter.
-    for (const [button, route] of [["VIEW_MESSAGES", "messages"], ["VIEW_SESSIONS", "sessions"], ["VIEW_CONTEXT", "context"]]) {
+    for (const [button, route] of [[/^MESSAGES \d/, "messages"], [/^SESSIONS \d/, "sessions"], ["CONTEXT", "context"]]) {
       await other.evaluate(() => localStorage.setItem("honcho-dashboard:activeWorkspaceId", "ws-b"));
       await page.evaluate(() => { window.location.hash = "#/peers?ws=ws-a"; });
       await page.reload();
       await assertWorkspace(page, "ws-a");
-      await page.getByRole("button", { name: button, exact: true }).click();
+      await page.locator("main").getByRole("button", { name: button, exact: typeof button === "string" }).click();
       await page.waitForURL(`**/#/${route}?peer=notes`);
       await page.locator("header").getByRole("button", { name: "ws-a", exact: true }).waitFor();
       assert.equal(await page.evaluate(() => localStorage.getItem("honcho-dashboard:activeWorkspaceId")), "ws-a");

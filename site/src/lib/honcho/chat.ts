@@ -60,3 +60,33 @@ export async function chatWithEvidence(sdk: Honcho, query: string, options: Dash
   validateResponse({ content, evidence: null });
   return { content, evidence: null, evidenceRequested: false };
 }
+
+/**
+ * Streamed variant: `onText` receives the answer so far after each chunk.
+ * Evidence arrives only on the terminal SSE event, so it is read after the
+ * stream is consumed. Same validation as the buffered path.
+ */
+export async function streamChatWithEvidence(
+  sdk: Honcho,
+  query: string,
+  options: DashboardChatOptions,
+  onText: (text: string) => void,
+): Promise<DashboardChatResponse & { evidenceRequested: boolean }> {
+  const { peerId, includeEvidence, evidenceCapability, ...recall } = options;
+  if (includeEvidence && evidenceCapability !== "available") {
+    throw new Error("Chat evidence requires a verified Honcho 3.2+ server");
+  }
+  const peer = peerId ? await sdk.peer(peerId) : null;
+  // Leave the flag out entirely unless requested, like the buffered path.
+  const params = includeEvidence ? { ...recall, includeEvidence: true } : recall;
+  const stream = peer ? await peer.chatStream(query, params) : await sdk.chatStream(query, params);
+  let content = "";
+  for await (const chunk of stream) {
+    if (typeof chunk !== "string" || !chunk) continue;
+    content += chunk;
+    onText(content);
+  }
+  const evidence = includeEvidence ? stream.evidence : null;
+  validateResponse({ content, evidence });
+  return { content, evidence: evidence as DashboardEvidence | null, evidenceRequested: includeEvidence };
+}

@@ -66,3 +66,51 @@ export function capabilityFromProbe(input: {
   if (input.errorStatus === 401 || input.errorStatus === 403) return "restricted";
   return "unknown";
 }
+
+/**
+ * Honcho 3.5.0 features, each with the OpenAPI evidence that proves a server
+ * has it. A server built from Honcho's main branch reports the last tag in
+ * `info.version` while already carrying some of these, so the schema decides
+ * first and the version is the fallback. Absent evidence on an older or
+ * unknown version fails closed.
+ */
+export const HONCHO_35_FEATURES = {
+  /** `source_message_ids` on conclusions and its `contains` filter (#935). */
+  messageCitations: { model: "Conclusion", property: "source_message_ids" },
+  /** Session list `include_scopes`, `scope` and `in_no_scope` (#1477). */
+  sessionScopes: { model: "WorkspaceSessionGet" },
+  /** Scope list `include_session_count` and name filters (#1478). */
+  scopeSessionCounts: { model: "Scope", property: "session_count" },
+  /** `POST /scopes/{id}/sessions/remove`, up to 100 sessions at once (#1480). */
+  scopeBulkRemove: { model: "ScopeSessionsRemove" },
+  /** Workspace `PUT` replaces the stored configuration instead of merging (#1458). */
+  workspaceConfigReplace: { model: "WorkspaceUpdate", property: "configuration", description: /replaces the entire workspace configuration/i },
+} as const;
+
+export type Honcho35Feature = keyof typeof HONCHO_35_FEATURES;
+
+interface SchemaEvidence {
+  model: string;
+  property?: string;
+  description?: RegExp;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/** True when `/openapi.json` declares the model (and property, and description). */
+export function schemaHas(openapi: unknown, evidence: SchemaEvidence): boolean {
+  const model = record(record(record(record(openapi)?.components)?.schemas)?.[evidence.model]);
+  if (!model) return false;
+  if (!evidence.property) return true;
+  const property = record(record(model.properties)?.[evidence.property]);
+  if (!property) return false;
+  if (!evidence.description) return true;
+  return typeof property.description === "string" && evidence.description.test(property.description);
+}
+
+export function honcho35Capability(openapi: unknown, rawVersion: string | undefined, feature: Honcho35Feature): HonchoCapabilityState {
+  if (schemaHas(openapi, HONCHO_35_FEATURES[feature])) return "available";
+  return capabilityAtVersion(rawVersion, [3, 5, 0]);
+}

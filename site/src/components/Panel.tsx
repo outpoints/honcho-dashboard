@@ -39,7 +39,10 @@ export function Panel({
       transition={{ duration: 0.25, delay, ease: EASE }}
       className={cn("bg-surface border border-border", className)}
     >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+      {/* The status dot and [ TITLE ] carry the terminal identity; the right
+          side holds only real controls. No decorative ─ □ × glyphs: they read
+          as close/maximize buttons that do nothing (issue #24). */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border">
         <div className="flex items-center gap-2">
           <motion.span
             className={cn("w-2 h-2", STATUS_DOT[status])}
@@ -49,14 +52,7 @@ export function Panel({
           />
           <span className="text-text-muted text-xs">[ {title} ]</span>
         </div>
-        <div className="flex items-center gap-1">
-          {actions ? <div className="mr-2 flex items-center gap-1">{actions}</div> : null}
-          <span className="text-text-muted text-xs select-none" aria-hidden>─</span>
-          <span className="text-text-muted text-xs select-none" aria-hidden>□</span>
-          <span className="text-text-muted text-xs select-none" aria-hidden>
-            ×
-          </span>
-        </div>
+        {actions ? <div className="flex items-center gap-1">{actions}</div> : null}
       </div>
       <div className={cn("p-3", bodyClassName)}>{children}</div>
     </motion.div>

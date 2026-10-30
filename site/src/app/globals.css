@@ -196,6 +196,11 @@
   button {
     font-family: inherit;
   }
+  /* Search-term matches painted by the CSS Custom Highlight API (lib/textHighlight.ts). */
+  ::highlight(search-match) {
+    background-color: color-mix(in oklab, var(--color-yellow-400) 32%, transparent);
+    color: var(--color-text-primary);
+  }
 
   /* Scoped crossfade applied only during a theme switch (the provider toggles
      `.theme-transition` for 250ms), so normal hover/active stays instant. */
@@ -225,6 +230,25 @@
   .pixelated {
     image-rendering: pixelated;
     image-rendering: -moz-crisp-edges;
+  }
+
+  /* Streaming chat answers: a block caret at the end of the last line of text. */
+  .md-streaming > :last-child:not(ul, ol, pre, table, blockquote)::after,
+  .md-streaming > :is(ul, ol):last-child > li:last-child::after {
+    content: "";
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: var(--color-accent);
+    animation: cursor-blink 1s steps(1) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .md-streaming > :last-child::after,
+    .md-streaming > :is(ul, ol):last-child > li:last-child::after {
+      animation: none;
+    }
   }
 
   /* Rendered markdown for stored Honcho text (components/Markdown.tsx). Every

@@ -2,7 +2,7 @@
 
 import type { Scope } from "@honcho-ai/sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Panel } from "@/components/Panel";
@@ -11,7 +11,7 @@ import { Button, Checkbox, Field, PillTabs, TextInput } from "@/components/atoms
 import { ChatEvidence } from "@/components/ChatEvidence";
 import { Markdown } from "@/components/Markdown";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
-import { chatWithEvidence, type DashboardEvidence } from "@/lib/honcho/chat";
+import { streamChatWithEvidence, type DashboardEvidence } from "@/lib/honcho/chat";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -40,6 +40,8 @@ interface Turn {
   content: string;
   label?: string;
   evidence?: DashboardEvidence | null;
+  /** True while chunks are still arriving. */
+  streaming?: boolean;
 }
 
 function recallBoundary(value: string): { sessionId?: string; scopeId?: string } {
@@ -79,9 +81,13 @@ function ChatSession() {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
-  const [includeEvidence, setIncludeEvidence] = useState(false);
+  // On by default: Honcho collects evidence from reads it already makes, so it adds no model work.
+  const [includeEvidence, setIncludeEvidence] = useState(true);
   const evidenceAvailable = capabilities.evidence === "available";
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const streamingTurn = turns.find((turn) => turn.streaming);
+  // The typing indicator covers the wait before the first streamed chunk.
+  const waiting = busy && !streamingTurn?.content;
 
   useEffect(() => {
     const p = readHashParam("peer");
@@ -92,7 +98,9 @@ function ChatSession() {
 
   // Auto-scroll the transcript to the latest turn.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    // Smooth scrolling on every streamed chunk lags behind the text; jump instead.
+    const behavior = turns.some((turn) => turn.streaming) ? "auto" : "smooth";
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior });
   }, [turns, busy]);
 
   const peers = useHonchoQuery<{ items: ApiPeer[] }>(
@@ -161,39 +169,48 @@ function ChatSession() {
     }
     if (!query || busy) return;
 
-    const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", content: query };
-    setTurns((cur) => [...cur, userTurn]);
+    const stamp = Date.now();
+    const userTurn: Turn = { id: `u-${stamp}`, role: "user", content: query };
+    const answerId = `a-${stamp}`;
+    const label = mode === "workspace" ? "WORKSPACE" : effectivePeerId;
+    const patchAnswer = (patch: Partial<Turn>) =>
+      setTurns((cur) => cur.map((turn) => (turn.id === answerId ? { ...turn, ...patch } : turn)));
+    setTurns((cur) => [
+      ...cur,
+      userTurn,
+      { id: answerId, role: "assistant", content: "", label, streaming: true },
+    ]);
     setInput("");
     setBusy(true);
+    let streamed = "";
     try {
       const recall = recallBoundary(effectiveBoundary);
       const options = {
         ...(recall.sessionId ? { session: recall.sessionId } : {}),
         ...(recall.scopeId ? { scope: recall.scopeId } : {}),
         reasoningLevel: level,
-      };
-      const sdk = getSdk(apiOpts, workspaceId);
-      const reply = await chatWithEvidence(sdk, query, {
-        ...options,
         peerId: mode === "peer" ? effectivePeerId : undefined,
         includeEvidence: includeEvidence && evidenceAvailable,
         evidenceCapability: capabilities.evidence,
+      };
+      const sdk = getSdk(apiOpts, workspaceId);
+      const reply = await streamChatWithEvidence(sdk, query, options, (text) => {
+        streamed = text;
+        patchAnswer({ content: text });
       });
-      setTurns((cur) => [
-        ...cur,
-        {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          content: reply.content?.trim() ? reply.content : "(no answer returned)",
-          label: mode === "workspace" ? "WORKSPACE" : effectivePeerId,
-          ...(reply.evidenceRequested ? { evidence: reply.evidence } : {}),
-        },
-      ]);
+      patchAnswer({
+        content: reply.content?.trim() ? reply.content : "(no answer returned)",
+        streaming: false,
+        ...(reply.evidenceRequested ? { evidence: reply.evidence } : {}),
+      });
     } catch (err) {
-      setTurns((cur) => [
-        ...cur,
-        { id: `e-${Date.now()}`, role: "assistant", content: `⚠ ${formatApiError(err)}` },
-      ]);
+      const message = `⚠ ${formatApiError(err)}`;
+      // Keep any partial answer above the error.
+      patchAnswer({
+        content: streamed ? `${streamed}\n\n${message}` : message,
+        streaming: false,
+        ...(streamed ? {} : { label: undefined }),
+      });
     } finally {
       setBusy(false);
     }
@@ -304,7 +321,7 @@ function ChatSession() {
 
       <Panel title="TRANSCRIPT" status={busy ? "processing" : "active"}>
         <div ref={scrollRef} className="max-h-[460px] min-h-[200px] overflow-y-auto space-y-3 pr-1">
-          {turns.length === 0 && !busy ? (
+          {turns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-14 gap-2">
               <Icon name="bot" className="text-text-muted" size={28} />
               <p className="text-sm text-text-muted">No messages yet</p>
@@ -315,19 +332,10 @@ function ChatSession() {
               </p>
             </div>
           ) : (
-            turns.map((t) => <Bubble key={t.id} turn={t} />)
+            // An empty streaming turn is represented by the typing indicator below.
+            turns.filter((t) => !(t.streaming && !t.content)).map((t) => <Bubble key={t.id} turn={t} />)
           )}
-          {busy ? (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: EASE }}
-              className="flex items-center gap-2 text-[11px] text-text-muted"
-            >
-              <Icon name="loader" size={12} className="animate-spin" />
-              <span className="cursor-blink">THINKING</span>
-            </motion.div>
-          ) : null}
+          {waiting ? <TypingIndicator label={streamingTurn?.label ?? (mode === "workspace" ? "WORKSPACE" : effectivePeerId)} /> : null}
         </div>
 
         <div className="mt-3 pt-3 border-t border-border flex items-center gap-2">
@@ -376,9 +384,40 @@ function Bubble({ turn }: { turn: Turn }) {
             {turn.content}
           </p>
         ) : (
-          <Markdown text={turn.content} className="text-[13px] text-text-primary max-w-[75ch]" />
+          <div aria-busy={turn.streaming || undefined}>
+            <Markdown text={turn.content} className={cn("text-[13px] text-text-primary max-w-[75ch]", turn.streaming && "md-streaming")} />
+          </div>
         )}
         {!isUser && turn.evidence !== undefined ? <ChatEvidence evidence={turn.evidence} /> : null}
+      </div>
+    </motion.div>
+  );
+}
+
+/** Before the first chunk arrives: who is answering, with three pulsing cells. */
+function TypingIndicator({ label }: { label: string }) {
+  const reducedMotion = useReducedMotion();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: EASE }}
+      className="flex justify-start"
+      role="status"
+      aria-label={`${label || "Honcho"} is thinking`}
+    >
+      <div className="border border-border bg-void/40 px-2.5 py-2">
+        <div className="text-[9px] uppercase tracking-wider mb-1.5 text-text-muted">{label || "PEER"}</div>
+        <div className="flex items-center gap-1" aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <motion.span
+              key={i}
+              className="w-1.5 h-1.5 bg-accent"
+              animate={reducedMotion ? { opacity: 0.7 } : { opacity: [0.25, 1, 0.25] }}
+              transition={reducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+            />
+          ))}
+        </div>
       </div>
     </motion.div>
   );

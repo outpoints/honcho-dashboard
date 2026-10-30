@@ -4,6 +4,8 @@ import { honcho } from "./client";
 import {
   capabilityFromProbe,
   capabilityAtVersion,
+  honcho35Capability,
+  type Honcho35Feature,
   honcho31FromVersion,
   normalizeHonchoVersion,
   shouldProbeHoncho31,
@@ -48,6 +50,14 @@ export interface HonchoCapabilities {
   customInstructions: HonchoCapabilityState;
   /** Session clone resolves its source inside the workspace (fixed in 3.3.0). */
   scopedSessionClone: HonchoCapabilityState;
+  /** `POST /v3/keys?scope_id=` mints named-scope keys (3.4.0+). */
+  scopeKeys: HonchoCapabilityState;
+  /** 3.5.0 features, each detected from `/openapi.json` first (see HONCHO_35_FEATURES). */
+  messageCitations: HonchoCapabilityState;
+  sessionScopes: HonchoCapabilityState;
+  scopeSessionCounts: HonchoCapabilityState;
+  scopeBulkRemove: HonchoCapabilityState;
+  workspaceConfigReplace: HonchoCapabilityState;
 }
 
 export function useHonchoCapabilities(): HonchoCapabilities {
@@ -90,5 +100,15 @@ export function useHonchoCapabilities(): HonchoCapabilities {
     deriverMetrics: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 1, 2]),
     customInstructions: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 3, 0]),
     scopedSessionClone: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 3, 0]),
+    scopeKeys: version.isLoading ? "checking" : capabilityAtVersion(version.rawVersion, [3, 4, 0]),
+    messageCitations: at35("messageCitations"),
+    sessionScopes: at35("sessionScopes"),
+    scopeSessionCounts: at35("scopeSessionCounts"),
+    scopeBulkRemove: at35("scopeBulkRemove"),
+    workspaceConfigReplace: at35("workspaceConfigReplace"),
   };
+
+  function at35(feature: Honcho35Feature): HonchoCapabilityState {
+    return version.isLoading ? "checking" : honcho35Capability(version.data, version.rawVersion, feature);
+  }
 }

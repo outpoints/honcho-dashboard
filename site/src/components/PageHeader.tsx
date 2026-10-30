@@ -48,7 +48,8 @@ export function PageHeader({ title, subtitle, actions, className, showClock = tr
             <span className="text-[9px] text-accent uppercase tracking-wider">SELF-HOSTED</span>
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        {/* Wraps so a long action row pushes the clock down instead of clipping it on phones. */}
+        <div className="flex flex-wrap items-center gap-3">
           {actions}
           {showClock ? (
             <span className="font-pixel text-xl text-text-muted tracking-wider tabular-nums">

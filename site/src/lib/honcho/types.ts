@@ -6,14 +6,20 @@ export interface Page<T> {
   pages: number;
 }
 
-export interface ApiWorkspace {
+/**
+ * Honcho 3.4+: the immutable identifier the server assigns. `id` stays the
+ * client-chosen name. Absent on older servers, so render it only when present.
+ */
+type ServerUid = { uid?: string };
+
+export interface ApiWorkspace extends ServerUid {
   id: string;
   metadata: Record<string, unknown>;
   configuration: Record<string, unknown>;
   created_at: string;
 }
 
-export interface ApiPeer {
+export interface ApiPeer extends ServerUid {
   id: string;
   workspace_id: string;
   metadata?: Record<string, unknown>;
@@ -21,19 +27,23 @@ export interface ApiPeer {
   created_at: string;
 }
 
-export interface ApiSession {
+export interface ApiSession extends ServerUid {
   id: string;
   workspace_id: string;
   metadata?: Record<string, unknown>;
   configuration?: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
+  /** Honcho 3.5+: active scope names, only when listed with `include_scopes`. */
+  scopes?: string[];
 }
 
 export interface ApiScope {
   id: string;
   metadata?: Record<string, unknown>;
   created_at: string;
+  /** Honcho 3.5+: active member sessions, only when listed with `include_session_count`. */
+  session_count?: number;
 }
 
 export interface ApiMessage {
@@ -60,6 +70,12 @@ export interface ApiConclusion {
   source_ids?: string[] | null;
   /** Honcho 3.2+: number of independent derivations. Absent on 3.1. */
   times_derived?: number;
+  /**
+   * Honcho 3.5+: messages the deriver cited for an explicit conclusion, in
+   * citation order. Null for derived levels and for conclusions written before
+   * citations existed; absent on older servers.
+   */
+  source_message_ids?: string[] | null;
   created_at: string;
 }
 

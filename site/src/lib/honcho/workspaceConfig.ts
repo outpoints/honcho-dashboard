@@ -1,13 +1,19 @@
 /**
  * Workspace configuration form <-> Honcho request body.
  *
- * `PUT /v3/workspaces/{id}` merges top-level keys into the stored configuration
- * and drops `null` values. A section the request sends replaces the stored
- * section, and a section it omits is kept. So the form must:
- *   - overlay its fields onto the stored section instead of rebuilding it, or
- *     keys the form does not show are erased (for example Honcho 3.3's
- *     `summary.custom_instructions` when the server version is unknown);
- *   - clear a section by sending `{}`, and a top-level string by sending `""`.
+ * Every save sends the whole configuration: the stored one with the form's
+ * fields laid over it. Keys the form does not show (for example Honcho 3.3's
+ * `summary.custom_instructions` on a server of unknown version) ride along
+ * untouched. What differs by server is how a cleared key must be sent:
+ *
+ *   - Honcho 3.5+ replaces the stored configuration with the one sent
+ *     (`model_dump(exclude_none=True)`), so a cleared key is simply left out.
+ *   - Before 3.5, `PUT /v3/workspaces/{id}` merges top-level keys, replaces each
+ *     section sent, keeps sections omitted and drops `null`. A cleared section
+ *     must be sent as `{}` and a cleared top-level string as `""`.
+ *
+ * The merge-style body is also correct on 3.5 (it only leaves those empty
+ * values stored), so an unknown server gets it.
  */
 
 export type Tri = boolean | null;
@@ -71,6 +77,8 @@ export interface WorkspaceConfigForm {
 export interface WorkspaceConfigOptions {
   /** Manage 3.3 shared and per-agent instructions. When false they are preserved untouched. */
   customInstructions: boolean;
+  /** The server replaces the stored configuration on save (Honcho 3.5+). Default: merges. */
+  replaces?: boolean;
 }
 
 type Config = Record<string, unknown>;
@@ -126,7 +134,7 @@ function intervalValue(raw: string): number | null {
 export function buildWorkspaceConfiguration(
   base: unknown,
   form: WorkspaceConfigForm,
-  { customInstructions }: WorkspaceConfigOptions,
+  { customInstructions, replaces = false }: WorkspaceConfigOptions,
 ): Config {
   const stored = plainObject(base) ?? {};
   const out: Config = { ...stored };
@@ -139,7 +147,7 @@ export function buildWorkspaceConfiguration(
       else next[field] = value;
     }
     if (Object.keys(next).length) out[key] = next;
-    else if (previous && Object.keys(previous).length) out[key] = {};
+    else if (!replaces && previous && Object.keys(previous).length) out[key] = {};
     else delete out[key];
   };
   const instructions = (agent: InstructionModule) =>
@@ -164,16 +172,17 @@ export function buildWorkspaceConfiguration(
     const shared = normalizeInstructions(form.sharedInstructions);
     if (shared !== null) out.custom_instructions = shared;
     // At the workspace level "" and unset both mean no shared instructions.
-    else if (typeof stored.custom_instructions === "string" && stored.custom_instructions) out.custom_instructions = "";
+    else if (!replaces && typeof stored.custom_instructions === "string" && stored.custom_instructions) out.custom_instructions = "";
     else delete out.custom_instructions;
   }
   return out;
 }
 
 /**
- * Make a saved configuration replace the stored one. The server keeps keys the
- * request omits, so removed objects are sent as `{}` and removed strings as `""`.
- * Other value types cannot be cleared through the API and are left alone.
+ * Make a saved configuration replace the stored one on a merging (pre-3.5)
+ * server. It keeps keys the request omits, so removed objects are sent as `{}`
+ * and removed strings as `""`. Other value types cannot be cleared through the
+ * API and are left alone.
  */
 export function withClearedKeys(stored: unknown, next: Config): Config {
   const out: Config = { ...next };
@@ -184,6 +193,14 @@ export function withClearedKeys(stored: unknown, next: Config): Config {
     else if (typeof value === "string" && value) out[key] = "";
   }
   return out;
+}
+
+/**
+ * The body for `PUT /v3/workspaces/{id}`: exactly the configuration on a
+ * replacing (3.5+) server, with cleared keys spelled out on a merging one.
+ */
+export function workspaceConfigBody(stored: unknown, next: Config, { replaces }: { replaces: boolean }): Config {
+  return replaces ? { ...next } : withClearedKeys(stored, next);
 }
 
 /** Reject summary intervals that violate the server's constraints up front. */

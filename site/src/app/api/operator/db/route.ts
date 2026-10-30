@@ -11,6 +11,8 @@ import {
   dbRetryAllFailedReasoningTasks,
   dbWebhookStats,
   dbPeerDetail,
+  dbPeerSummaries,
+  dbQueueFailures,
 } from "@/lib/operator/db";
 
 export const runtime = "nodejs";
@@ -36,10 +38,18 @@ export async function GET(req: NextRequest) {
   if (view === "messages") {
     const ws = req.nextUrl.searchParams.get("workspace_id");
     if (!ws) return Response.json({ available: false, reason: "workspace_id required" });
-    const sessionId = req.nextUrl.searchParams.get("session_id") ?? undefined;
-    const q = req.nextUrl.searchParams.get("q") ?? undefined;
-    const limit = Number(req.nextUrl.searchParams.get("limit") ?? 100);
-    return Response.json(await dbRecentMessages(ws, { sessionId, q, limit }));
+    const sp = req.nextUrl.searchParams;
+    const sessionId = sp.get("session_id") ?? undefined;
+    const peerId = sp.get("peer_id") ?? undefined;
+    const q = sp.get("q") ?? undefined;
+    const limit = Number(sp.get("limit") ?? 100);
+    const beforeAt = sp.get("before_at");
+    const beforeId = sp.get("before_id");
+    const before = beforeAt && beforeId && !Number.isNaN(Date.parse(beforeAt)) ? { at: beforeAt, id: beforeId } : undefined;
+    const afterAt = sp.get("after_at");
+    const afterId = sp.get("after_id");
+    const after = afterAt && afterId && !Number.isNaN(Date.parse(afterAt)) ? { at: afterAt, id: afterId } : undefined;
+    return Response.json(await dbRecentMessages(ws, { sessionId, peerId, q, limit, before, after }));
   }
   if (view === "reasoning") {
     const ws = req.nextUrl.searchParams.get("workspace_id");
@@ -48,6 +58,11 @@ export async function GET(req: NextRequest) {
     const taskType = req.nextUrl.searchParams.get("task_type") ?? undefined;
     const limit = Number(req.nextUrl.searchParams.get("limit") ?? 150);
     return Response.json(await dbReasoningTasks(ws, { status, taskType, limit }));
+  }
+  if (view === "queue_failures") {
+    const ws = req.nextUrl.searchParams.get("workspace_id");
+    if (!ws) return Response.json({ available: false, reason: "workspace_id required" });
+    return Response.json(await dbQueueFailures(ws));
   }
   if (view === "webhooks") {
     const ws = req.nextUrl.searchParams.get("workspace_id");
@@ -60,6 +75,11 @@ export async function GET(req: NextRequest) {
     if (!ws || !peer) return Response.json({ available: false, reason: "workspace_id and peer_id required" });
     const limit = Number(req.nextUrl.searchParams.get("limit") ?? 12);
     return Response.json(await dbPeerDetail(ws, peer, limit));
+  }
+  if (view === "peer_summaries") {
+    // Repeated `workspace_id` params scope the read; none means every workspace.
+    const ids = req.nextUrl.searchParams.getAll("workspace_id").filter(Boolean).slice(0, 200);
+    return Response.json(await dbPeerSummaries(ids.length ? ids : null));
   }
   return Response.json(await dbStats());
 }

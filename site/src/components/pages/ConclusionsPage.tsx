@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { Scope } from "@honcho-ai/sdk";
 import { motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Field, RefreshButton, TextInput } from "@/components/atoms";
+import { Button, Chip, Field, PillTabs, RefreshButton, TextInput } from "@/components/atoms";
 import { Modal } from "@/components/Modal";
 import { ConclusionInspector } from "@/components/ConclusionInspector";
+import { ConclusionTrashPanel } from "@/components/ConclusionTrashPanel";
+import { trashScope, useConclusionTrash } from "@/lib/conclusionTrash";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import { Select } from "@/components/Select";
@@ -22,6 +25,9 @@ import { honcho } from "@/lib/honcho/client";
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiConclusion, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiConclusion, ApiPeer, Page } from "@/lib/honcho/types";
+import { listAllScopes } from "@/lib/honcho/scopeListing";
+import { conclusionSourceFilter, scopeOfObserver, type ConclusionSource } from "@/lib/honcho/scopeCopies";
+import { useTextHighlight } from "@/lib/textHighlight";
 
 const EASE = [0.25, 0.46, 0.45, 0.94] as const;
 const PAGE_SIZE = 25;
@@ -46,7 +52,17 @@ function ConclusionsSession() {
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [inspected, setInspected] = useState<string | null>(null);
-  const { provenance } = useHonchoCapabilities();
+  const [source, setSource] = useState<ConclusionSource>("all");
+  const { provenance, scopes: scopesCapability } = useHonchoCapabilities();
+  const trash = useConclusionTrash(apiOpts && workspaceId ? trashScope(apiOpts.baseUrl, workspaceId) : null);
+
+  // Scope copies only exist on 3.1+ servers with scopes; the list key matches ScopesPage's.
+  const scopes = useHonchoQuery<Scope[]>(
+    workspaceId && scopesCapability === "available" ? `workspaces/${workspaceId}/scopes/list` : null,
+    (o) => listAllScopes(getSdk(o, workspaceId!)),
+  );
+  const scopeIds = useMemo(() => (scopes.data ?? []).map((scope) => scope.id), [scopes.data]);
+  const sourceFilter = conclusionSourceFilter(source, scopeIds);
 
   // Honcho's conclusion semantic search is scoped to an (observer, observed)
   // pair — `/conclusions/query` 422s without it. So a query needs an observer.
@@ -55,7 +71,9 @@ function ConclusionsSession() {
   const resultsKey = workspaceId
     ? searching
       ? `conclusions/query/${workspaceId}/${observer}/${observed || observer}/${query}`
-      : `conclusions/list/${workspaceId}/p${page}`
+      : sourceFilter === null
+        ? null
+        : `conclusions/list/${workspaceId}/p${page}/${source}/${source === "all" ? "" : scopeIds.join(",")}`
     : null;
 
   const results = useHonchoQuery<Page<ApiConclusion>>(resultsKey, async (o) => {
@@ -68,7 +86,7 @@ function ConclusionsSession() {
       const mapped = found.map(toApiConclusion);
       return { items: mapped, total: mapped.length, page: 1, size: mapped.length, pages: 1 };
     }
-    return honcho.conclusions.list(o, workspaceId!, { page, size: PAGE_SIZE });
+    return honcho.conclusions.list(o, workspaceId!, { page, size: PAGE_SIZE, ...(sourceFilter ? { filters: sourceFilter } : {}) });
   });
 
   const peers = useHonchoQuery<{ items: ApiPeer[] }>(
@@ -79,6 +97,9 @@ function ConclusionsSession() {
   const items = results.data?.items ?? [];
   const pages = results.data?.pages ?? 1;
   const peerOptions = (peers.data?.items ?? []).map((p) => ({ value: p.id, label: p.id }));
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Semantic matches often share no words with the query; highlight the ones that do.
+  useTextHighlight(listRef, searching ? query : "", results.data);
 
   const runSearch = () => {
     if (!observer) {
@@ -103,19 +124,23 @@ function ConclusionsSession() {
       confirmLabel: "DELETE",
       body: (
         <>
-          Permanently delete this conclusion about{" "}
-          <span className="text-accent font-mono">{c.observed_id}</span> on the live instance? This
-          cannot be undone.
+          Delete this conclusion about{" "}
+          <span className="text-accent font-mono">{c.observed_id}</span> on the live instance? Honcho
+          deletes it permanently. A copy stays in this tab&apos;s TRASH so you can recreate it as a new
+          explicit conclusion.
         </>
       ),
     });
     if (!ok) return;
     try {
       await honcho.conclusions.delete(apiOpts, workspaceId, c.id);
+      const kept = trash.add(c);
       invalidate("conclusions/");
       invalidate(`provenance/${workspaceId}/`);
       results.refetch();
-      push({ type: "success", message: "Conclusion deleted" });
+      push(kept
+        ? { type: "success", message: "Conclusion deleted · copy kept in TRASH" }
+        : { type: "info", message: "Conclusion deleted. This browser blocked the trash copy." });
     } catch (err) {
       push({ type: "error", message: formatApiError(err) });
     }
@@ -215,8 +240,27 @@ function ConclusionsSession() {
           ) : undefined
         }
       >
+        {!searching && scopeIds.length > 0 ? (
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <PillTabs<ConclusionSource>
+              items={[
+                { key: "all", label: "ALL" },
+                { key: "peers", label: "PEER_MEMORY" },
+                { key: "scopes", label: "SCOPE_COPIES", icon: "focus" },
+              ]}
+              current={source}
+              onChange={(next) => { setSource(next); setPage(1); }}
+              layoutId="conclusion-source"
+            />
+            <span className="text-[10px] text-text-muted max-w-[70ch]">
+              Adding a session to a scope copies its conclusions into that scope so scoped recall has evidence. Copies are labeled SCOPE.
+            </span>
+          </div>
+        ) : null}
         {!workspaceId ? (
           <div className="text-xs text-text-muted py-4">Select a workspace in the header to browse conclusions.</div>
+        ) : sourceFilter === null ? (
+          <div className="text-xs text-text-muted py-6 text-center">This workspace has no scopes, so there are no scope copies.</div>
         ) : results.isLoading && items.length === 0 ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -227,10 +271,10 @@ function ConclusionsSession() {
           <div className="text-xs text-red-400">{formatApiError(results.error)}</div>
         ) : items.length === 0 ? (
           <div className="text-xs text-text-muted py-6 text-center">
-            {searching ? "No conclusions match that search." : "No conclusions in this workspace yet."}
+            {searching ? "No conclusions match that search." : source === "scopes" ? "No scope copies yet. They appear after a scope member session is reasoned over." : "No conclusions in this workspace yet."}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div ref={listRef} className="space-y-2">
             {items.map((c, i) => (
               <ConclusionRow key={c.id} c={c} index={i} canWrite={canWrite} onDelete={() => onDelete(c)}
                 onInspect={provenance === "available" ? () => setInspected(c.id) : undefined} />
@@ -265,6 +309,22 @@ function ConclusionsSession() {
         ) : null}
       </Panel>
 
+      {workspaceId ? (
+        <ConclusionTrashPanel
+          items={trash.items}
+          apiOpts={apiOpts}
+          workspaceId={workspaceId}
+          canWrite={canWrite}
+          onRemove={trash.remove}
+          onClear={trash.clear}
+          onRestored={() => {
+            invalidate("conclusions/");
+            invalidate(`provenance/${workspaceId}/`);
+            results.refetch();
+          }}
+        />
+      ) : null}
+
       {canWrite ? (
         <CreateConclusionModal
           open={createOpen}
@@ -297,6 +357,7 @@ function ConclusionRow({
   onDelete: () => void;
   onInspect?: () => void;
 }) {
+  const scopeName = scopeOfObserver(c.observer_id);
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -306,8 +367,14 @@ function ConclusionRow({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1.5 text-[10px]">
-            <span className="text-accent font-mono">{c.observer_id}</span>
+          <div className="flex flex-wrap items-center gap-2 mb-1.5 text-[10px]">
+            {scopeName ? (
+              <span title={`Copy Honcho keeps for recall inside scope ${scopeName}. Observer ${c.observer_id}.`}>
+                <Chip tone="muted" icon="focus">SCOPE · {scopeName}</Chip>
+              </span>
+            ) : (
+              <span className="text-accent font-mono">{c.observer_id}</span>
+            )}
             <Icon name="arrow-right" size={10} className="text-text-muted" />
             <span className="text-purple-400 font-mono">{c.observed_id}</span>
             {c.session_id ? <Chip tone="cyan">{c.session_id}</Chip> : null}
@@ -319,7 +386,11 @@ function ConclusionRow({
             <span>{new Date(c.created_at).toLocaleString()}</span>
             {onInspect ? <>
               <Chip tone="purple">{c.level ?? "explicit"}</Chip>
-              <span>{c.times_derived ?? 1} derivations · {c.source_ids?.length ?? 0} parents</span>
+              <span>
+                {c.times_derived ?? 1} derivations · {c.source_ids?.length ?? 0} parents
+                {/* Honcho 3.5+ sends citations (null when none were recorded). */}
+                {Array.isArray(c.source_message_ids) ? ` · ${c.source_message_ids.length} cited ${c.source_message_ids.length === 1 ? "message" : "messages"}` : null}
+              </span>
               <Button size="sm" variant="ghost" onClick={onInspect}>PROVENANCE</Button>
             </> : null}
           </div>

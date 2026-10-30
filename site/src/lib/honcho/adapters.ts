@@ -30,28 +30,38 @@ export function toApiConclusion(c: Conclusion): ApiConclusion {
     source_ids: c.sourceIds,
     times_derived: c.timesDerived,
     created_at: c.createdAt,
+    // SDK 2.8 reports null both when an older server omits the field and when
+    // nothing was cited, so only a real list is passed on.
+    ...(Array.isArray(c.sourceMessageIds) ? { source_message_ids: c.sourceMessageIds } : {}),
   };
 }
 
+/** SDK 2.7 exposes `uid` only when the server returned one (Honcho 3.4+). */
+function withUid<T extends object>(value: T, uid: string | undefined): T & { uid?: string } {
+  return typeof uid === "string" && uid ? { ...value, uid } : value;
+}
+
 export function toApiPeer(p: Peer): ApiPeer {
-  return {
+  return withUid({
     id: p.id,
     workspace_id: p.workspaceId,
     metadata: p.metadata ?? {},
     configuration: (p.configuration as Record<string, unknown> | undefined) ?? {},
     created_at: p.createdAt ?? "",
-  };
+  }, p.uid);
 }
 
 export function toApiSession(s: Session): ApiSession {
-  return {
+  return withUid({
     id: s.id,
     workspace_id: s.workspaceId,
     metadata: s.metadata ?? {},
     configuration: (s.configuration as Record<string, unknown> | undefined) ?? {},
     is_active: s.isActive ?? true,
     created_at: s.createdAt ?? "",
-  };
+    // SDK 2.8 sets `scopes` only on sessions listed with `includeScopes`.
+    ...(Array.isArray(s.scopes) ? { scopes: s.scopes } : {}),
+  }, s.uid);
 }
 
 export function toApiMessage(m: Message): ApiMessage {

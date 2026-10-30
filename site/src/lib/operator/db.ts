@@ -1,6 +1,7 @@
 import "server-only";
 import { Pool } from "pg";
 import { webhookQueueStatus, type WebhookQueueStatus } from "./webhookStatus";
+import { QUEUE_PENDING_INDEXES, type SchemaFacts } from "./schemaHealth";
 
 let pool: Pool | null = null;
 let lastUrl: string | null = null;
@@ -161,6 +162,59 @@ export async function dbStats(): Promise<DbStats> {
   }
 }
 
+/**
+ * Catalog facts for the migration probes (`schemaHealth.ts`). Read-only: the
+ * alembic revision, indexes Postgres marks INVALID, the 3.4.0 partial queue
+ * indexes, and whether `btree_gin` is installed.
+ */
+export async function dbSchemaFacts(): Promise<
+  ({ available: true } & SchemaFacts) | { available: false; reason: string }
+> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    const versionTable = await p.query<{ schema: string }>(
+      `SELECT table_schema AS schema FROM information_schema.tables
+        WHERE table_name = 'alembic_version'
+        ORDER BY (table_schema = current_schema()) DESC, table_schema
+        LIMIT 1`,
+    );
+    const schema = versionTable.rows[0]?.schema;
+    const [revision, invalid, queueIndexes, btreeGin] = await Promise.all([
+      schema
+        ? p.query<{ version_num: string }>(
+            `SELECT version_num FROM "${schema.replaceAll('"', '""')}".alembic_version LIMIT 1`,
+          )
+        : Promise.resolve({ rows: [] as { version_num: string }[] }),
+      p.query<{ name: string }>(
+        `SELECT c.relname AS name
+           FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indexrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE NOT i.indisvalid
+            AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          ORDER BY c.relname`,
+      ),
+      p.query<{ name: string }>(
+        `SELECT c.relname AS name
+           FROM pg_class c
+          WHERE c.relkind = 'i' AND c.relname = ANY($1::text[])`,
+        [[...QUEUE_PENDING_INDEXES]],
+      ),
+      p.query(`SELECT 1 FROM pg_extension WHERE extname = 'btree_gin'`),
+    ]);
+    return {
+      available: true,
+      revision: revision.rows[0]?.version_num ?? null,
+      invalidIndexes: invalid.rows.map((row) => row.name),
+      presentQueueIndexes: queueIndexes.rows.map((row) => row.name),
+      btreeGin: (btreeGin.rowCount ?? 0) > 0,
+    };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface ThroughputBucket {
   ts: string;
   reads: number;
@@ -188,10 +242,12 @@ export async function dbThroughput(timeframe: "1H" | "6H" | "24H" | "7D"): Promi
     // Honcho's REST `conclusions` resource is stored as documents in the DB.
     // We pick whichever activity source exists for the "reads" series.
     const readsTable = await firstExistingTable(p, ["documents", "conclusions"]);
+    const liveMessages = await liveRows(p, "messages");
+    const liveReads = readsTable ? await liveRows(p, readsTable) : "TRUE";
     const writesQ = p.query<{ bucket: string; n: string }>(
       `SELECT date_trunc($2, created_at) AS bucket, count(*)::bigint AS n
          FROM messages
-        WHERE created_at > now() - $1::interval
+        WHERE created_at > now() - $1::interval AND ${liveMessages}
         GROUP BY 1 ORDER BY 1`,
       [r.interval, r.bucket.split(" ")[1]],
     );
@@ -199,7 +255,7 @@ export async function dbThroughput(timeframe: "1H" | "6H" | "24H" | "7D"): Promi
       ? p.query<{ bucket: string; n: string }>(
           `SELECT date_trunc($2, created_at) AS bucket, count(*)::bigint AS n
              FROM ${readsTable}
-            WHERE created_at > now() - $1::interval
+            WHERE created_at > now() - $1::interval AND ${liveReads}
             GROUP BY 1 ORDER BY 1`,
           [r.interval, r.bucket.split(" ")[1]],
         )
@@ -239,10 +295,12 @@ export async function dbHeatmap(): Promise<{
     if (!source) {
       return { available: false, reason: "no activity table found in this Honcho schema" };
     }
+    const live = await liveRows(p, source);
     const r = await p.query<{ day: string; n: string }>(
       `SELECT (created_at AT TIME ZONE 'UTC')::date::text AS day, count(*)::bigint AS n
          FROM ${source}
-        WHERE created_at >=
+        WHERE ${live}
+          AND created_at >=
               (date_trunc('day', now() AT TIME ZONE 'UTC') - interval '363 days') AT TIME ZONE 'UTC'
           AND created_at <
               (date_trunc('day', now() AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
@@ -278,8 +336,10 @@ export async function dbConclusionStats(workspaceId?: string): Promise<{
     const hasObserver = await columnExists(p, source, "observer_id");
     const hasWorkspace = await columnExists(p, source, "workspace_id");
 
-    const filter = workspaceId && hasWorkspace ? "WHERE workspace_id = $1" : "";
-    const params: string[] = workspaceId && hasWorkspace ? [workspaceId] : [];
+    const scoped = workspaceId && hasWorkspace;
+    // Deleted conclusions keep their row (deleted_at); count only live ones.
+    const filter = `WHERE ${await liveRows(p, source)}${scoped ? " AND workspace_id = $1" : ""}`;
+    const params: string[] = scoped ? [workspaceId] : [];
 
     const tot = await p.query<{ n: string }>(
       `SELECT count(*)::bigint AS n FROM ${source} ${filter}`,
@@ -345,7 +405,7 @@ export async function dbSessionStats(workspaceId?: string): Promise<{
     }
     const hasToken = await columnExists(p, "messages", "token_count");
 
-    const where = workspaceId ? `WHERE ${msgWs} = $1` : "";
+    const where = `WHERE ${await liveRows(p, "messages")}${workspaceId ? ` AND ${msgWs} = $1` : ""}`;
     const params = workspaceId ? [workspaceId] : [];
     const agg = await p.query<{
       session_id: string;
@@ -427,9 +487,11 @@ export async function dbSessionStats(workspaceId?: string): Promise<{
 }
 
 /**
- * Recent messages across a workspace (optionally narrowed to one session or a
- * content search). Mirrors main's cross-session MESSAGE_STREAM — the SDK only
- * lists messages per-session, so the workspace-wide view comes from here.
+ * Recent messages across a workspace, newest first, optionally narrowed to one
+ * session, one peer, or a content search. The SDK only lists messages per
+ * session, so the workspace-wide view comes from here. Pages with a
+ * (created_at, id) cursor; `hasMore` says whether an older page exists.
+ * Honcho's trigram index on `content` keeps the ILIKE search fast.
  */
 export interface RecentMessageRow {
   id: string;
@@ -442,8 +504,17 @@ export interface RecentMessageRow {
 
 export async function dbRecentMessages(
   workspaceId: string,
-  opts: { sessionId?: string; q?: string; limit?: number } = {},
-): Promise<{ available: boolean; reason?: string; messages?: RecentMessageRow[] }> {
+  opts: {
+    sessionId?: string;
+    peerId?: string;
+    q?: string;
+    limit?: number;
+    /** Older than this message (LOAD_MORE). */
+    before?: { at: string; id: string };
+    /** Newer than this message (live follow); wins over `before`. */
+    after?: { at: string; id: string };
+  } = {},
+): Promise<{ available: boolean; reason?: string; messages?: RecentMessageRow[]; hasMore?: boolean }> {
   const p = getPool();
   if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
   try {
@@ -458,18 +529,36 @@ export async function dbRecentMessages(
       return { available: false, reason: "messages table missing expected columns" };
     }
     const hasToken = await columnExists(p, "messages", "token_count");
+    // Honcho main adds tombstones; deleted messages are hidden from the API, so hide them here too.
+    const hasDeletedAt = await columnExists(p, "messages", "deleted_at");
 
     const where = [`${msgWs} = $1`];
     const params: string[] = [workspaceId];
+    if (hasDeletedAt) where.push("deleted_at IS NULL");
     if (opts.sessionId) {
       params.push(opts.sessionId);
       where.push(`${msgSession} = $${params.length}`);
     }
+    if (opts.peerId) {
+      params.push(opts.peerId);
+      where.push(`${msgPeer} = $${params.length}`);
+    }
     if (opts.q && opts.q.trim()) {
-      params.push(`%${opts.q.trim()}%`);
+      // Match the text literally: escape LIKE wildcards in what the operator typed.
+      params.push(`%${opts.q.trim().replace(/[\\%_]/g, "\\$&")}%`);
       where.push(`content ILIKE $${params.length}`);
     }
-    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
+    if (opts.after) {
+      params.push(opts.after.at, opts.after.id);
+      where.push(`(created_at, ${msgId}::text) > ($${params.length - 1}::timestamptz, $${params.length})`);
+    } else if (opts.before) {
+      params.push(opts.before.at, opts.before.id);
+      where.push(`(created_at, ${msgId}::text) < ($${params.length - 1}::timestamptz, $${params.length})`);
+    }
+    // Newer pages take the oldest messages past the cursor, so a page never
+    // skips any; every page is returned newest first.
+    const direction = opts.after ? "ASC" : "DESC";
+    const limit = Math.min(Math.max(Number.isFinite(opts.limit) ? Number(opts.limit) : 100, 1), 200);
 
     const r = await p.query<{
       id: string;
@@ -487,13 +576,16 @@ export async function dbRecentMessages(
               created_at::text AS created_at
          FROM messages
         WHERE ${where.join(" AND ")}
-        ORDER BY created_at DESC
-        LIMIT ${limit}`,
+        ORDER BY created_at ${direction}, ${msgId}::text ${direction}
+        LIMIT ${limit + 1}`,
       params,
     );
+    const page = r.rows.slice(0, limit);
+    if (opts.after) page.reverse();
     return {
       available: true,
-      messages: r.rows.map((row) => ({
+      hasMore: r.rows.length > limit,
+      messages: page.map((row) => ({
         id: row.id,
         peer_id: row.peer_id,
         session_id: row.session_id,
@@ -682,6 +774,40 @@ export async function dbReasoningTasks(
  * This re-runs identical work: a deterministic failure (e.g. a model
  * ValidationException) will just fail again until its root cause is fixed.
  */
+export type QueueFailuresResult =
+  | { available: true; workspace_id: string; failed: number; latest_failed_at: string | null }
+  | { available: false; reason: string };
+
+/**
+ * Failed deriver queue items for one workspace: rows with an `error`. Honcho's
+ * REST API never reports these (its queue status counts only pending, running
+ * and completed work), and they stay failed until someone retries them. One
+ * count on the workspace index, cheap enough for the sidebar to poll.
+ */
+export async function dbQueueFailures(workspaceId: string): Promise<QueueFailuresResult> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    if (!(await tableExists(p, "queue"))) return { available: false, reason: "queue table not found in this Honcho schema" };
+    const qWs = await pickColumn(p, "queue", ["workspace_name", "workspace_id"]);
+    if (!qWs) return { available: false, reason: "queue table missing workspace column" };
+    if (!(await columnExists(p, "queue", "error"))) return { available: false, reason: "queue table has no error column" };
+    const r = await p.query<{ failed: string; latest: string | null }>(
+      `SELECT count(*)::bigint AS failed, max(created_at)::text AS latest
+         FROM queue WHERE ${qWs} = $1 AND error IS NOT NULL`,
+      [workspaceId],
+    );
+    return {
+      available: true,
+      workspace_id: workspaceId,
+      failed: Number(r.rows[0]?.failed ?? 0),
+      latest_failed_at: r.rows[0]?.latest ?? null,
+    };
+  } catch (err) {
+    return { available: false, reason: (err as Error).message };
+  }
+}
+
 export async function dbRetryReasoningTask(
   workspaceId: string,
   id: string,
@@ -891,7 +1017,7 @@ export async function dbPeerDetail(
       const mPeer = await pickColumn(p, "messages", ["peer_name", "peer_id"]);
       if (mWs && mPeer) {
         const r = await p.query<{ n: string }>(
-          `SELECT count(*)::bigint AS n FROM messages WHERE ${mWs} = $1 AND ${mPeer} = $2`,
+          `SELECT count(*)::bigint AS n FROM messages WHERE ${mWs} = $1 AND ${mPeer} = $2 AND ${await liveRows(p, "messages")}`,
           [workspaceId, peerId],
         );
         messages = Number(r.rows[0]?.n ?? 0);
@@ -951,6 +1077,71 @@ export async function dbPeerDetail(
   }
 }
 
+export interface PeerSummary {
+  workspace_id: string;
+  peer_id: string;
+  conclusions: number;
+  last_message_at: string | null;
+}
+
+/**
+ * One row per peer for the peer list: conclusions about the peer and when it
+ * last sent a message. Two grouped reads, not one query per peer. Rows deleted
+ * through Honcho's `deleted_at` tombstones are excluded where the column exists.
+ */
+export async function dbPeerSummaries(
+  workspaceIds: string[] | null,
+): Promise<{ available: boolean; reason?: string; peers?: PeerSummary[] }> {
+  const p = getPool();
+  if (!p) return { available: false, reason: "HONCHO_DATABASE_URL not set" };
+  try {
+    const byKey = new Map<string, PeerSummary>();
+    const row = (ws: string, peer: string) => {
+      const key = `${ws}\u0000${peer}`;
+      let found = byKey.get(key);
+      if (!found) {
+        found = { workspace_id: ws, peer_id: peer, conclusions: 0, last_message_at: null };
+        byKey.set(key, found);
+      }
+      return found;
+    };
+    const scoped = (column: string) => (workspaceIds ? `AND ${column} = ANY($1)` : "");
+    const args = workspaceIds ? [workspaceIds] : [];
+
+    const docTable = await firstExistingTable(p, ["documents", "conclusions"]);
+    if (docTable) {
+      const dWs = await pickColumn(p, docTable, ["workspace_name", "workspace_id"]);
+      const dObserved = await pickColumn(p, docTable, ["observed", "observed_id"]);
+      if (dWs && dObserved) {
+        const live = (await columnExists(p, docTable, "deleted_at")) ? "deleted_at IS NULL" : "TRUE";
+        const r = await p.query<{ ws: string; peer: string; n: string }>(
+          `SELECT ${dWs} AS ws, ${dObserved} AS peer, count(*)::bigint AS n
+             FROM ${docTable} WHERE ${live} ${scoped(dWs)} GROUP BY 1, 2`,
+          args,
+        );
+        for (const x of r.rows) row(x.ws, x.peer).conclusions = Number(x.n);
+      }
+    }
+
+    if (await tableExists(p, "messages")) {
+      const mWs = await pickColumn(p, "messages", ["workspace_name", "workspace_id"]);
+      const mPeer = await pickColumn(p, "messages", ["peer_name", "peer_id"]);
+      if (mWs && mPeer) {
+        const live = (await columnExists(p, "messages", "deleted_at")) ? "deleted_at IS NULL" : "TRUE";
+        const r = await p.query<{ ws: string; peer: string; last: string | null }>(
+          `SELECT ${mWs} AS ws, ${mPeer} AS peer, max(created_at)::text AS last
+             FROM messages WHERE ${live} ${scoped(mWs)} GROUP BY 1, 2`,
+          args,
+        );
+        for (const x of r.rows) row(x.ws, x.peer).last_message_at = x.last;
+      }
+    }
+    return { available: true, peers: [...byKey.values()] };
+  } catch (err) {
+    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */
@@ -959,6 +1150,17 @@ async function pickColumn(p: Pool, table: string, candidates: string[]): Promise
     if (await columnExists(p, table, c)) return c;
   }
   return null;
+}
+
+/**
+ * `deleted_at IS NULL` where the table has Honcho's tombstone column, else
+ * `TRUE`. Conclusions (documents) have had it for a while; 3.5.0 adds it to
+ * workspaces, peers, sessions and messages, though nothing sets it yet. This
+ * checks the row's own tombstone only. Honcho's reads also hide a message
+ * whose session, peer or workspace is tombstoned; revisit when deletion ships.
+ */
+async function liveRows(p: Pool, table: string): Promise<string> {
+  return (await columnExists(p, table, "deleted_at")) ? "deleted_at IS NULL" : "TRUE";
 }
 
 async function columnExists(p: Pool, table: string, column: string): Promise<boolean> {

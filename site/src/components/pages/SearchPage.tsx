@@ -1,7 +1,7 @@
 "use client";
 
 import type { Scope } from "@honcho-ai/sdk";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Markdown } from "@/components/Markdown";
 import { PageHeader } from "@/components/PageHeader";
@@ -23,6 +23,7 @@ import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { buildSearchFilters } from "@/lib/honcho/searchFilters";
 import { orderSearchResults, type SearchOrder } from "@/lib/honcho/searchOrdering";
 import type { ApiMessage, ApiPeer, ApiSession } from "@/lib/honcho/types";
+import { useTextHighlight } from "@/lib/textHighlight";
 
 type SearchScope = "workspace" | "scope" | "session" | "peer";
 
@@ -106,6 +107,9 @@ export function SearchPage() {
     () => orderSearchResults(currentRun?.items ?? [], order),
     [currentRun?.items, order],
   );
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  // Hybrid search can match on meaning alone; mark the words that do appear.
+  useTextHighlight(resultsRef, currentRun?.query ?? "", orderedItems);
   const hasFilters = !!(fromDate || toDate || metadataJson.trim());
 
   const changeScope = (next: SearchScope) => {
@@ -382,7 +386,7 @@ export function SearchPage() {
             {" · "}order: <span className="text-text-primary">{order}</span>
             {" · "}query: <span className="text-text-primary">“{currentRun.query}”</span>
           </div>
-          <div className="space-y-2">
+          <div ref={resultsRef} className="space-y-2">
             {orderedItems.map((message, index) => (
               <article key={message.id} className="border border-border bg-void/30 p-3">
                 <div className="flex flex-wrap items-center gap-2 text-[10px] mb-2">

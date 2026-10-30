@@ -11,11 +11,20 @@ import { useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { getSdk } from "@/lib/honcho/sdk";
 import { getConclusion, getDerived, getPremises } from "@/lib/honcho/provenance";
+import { citedMessageIds, noCitationReason } from "@/lib/honcho/citations";
+import { honcho } from "@/lib/honcho/client";
 import type { ApiConclusion } from "@/lib/honcho/types";
+import { MessageBody } from "@/components/MessageLine";
 
-export function ConclusionInspector({ id, onClose }: { id: string; onClose: () => void }) {
-  const { workspaceId } = useActiveWorkspace();
-  const { provenance } = useHonchoCapabilities();
+export function ConclusionInspector({ id, onClose, workspaceId: workspaceOverride }: {
+  id: string;
+  onClose: () => void;
+  /** The conclusion's workspace when it differs from the active one (Peers across workspaces). */
+  workspaceId?: string;
+}) {
+  const active = useActiveWorkspace();
+  const workspaceId = workspaceOverride ?? active.workspaceId;
+  const { provenance, messageCitations } = useHonchoCapabilities();
   const [history, setHistory] = useState([id]);
   const [sourcePage, setSourcePage] = useState(1);
   const [derivedPage, setDerivedPage] = useState(1);
@@ -58,6 +67,11 @@ export function ConclusionInspector({ id, onClose }: { id: string; onClose: () =
                 <div><dt className="text-text-muted">CREATED</dt><dd>{new Date(detail.data.created_at).toLocaleString()}</dd></div>
               </dl>
             </Panel>
+            {messageCitations === "available" && workspaceId ? (
+              <Panel title="CITED_MESSAGES">
+                <CitedMessages conclusion={detail.data} workspaceId={workspaceId} />
+              </Panel>
+            ) : null}
             <Panel title="PARENT_CONCLUSIONS">
               <p className="text-[11px] text-text-primary mb-3">Premises recorded for this conclusion. These IDs refer to conclusions, not source messages.</p>
               {sources.isLoading ? <p className="text-xs text-text-primary">Loading premises…</p>
@@ -65,7 +79,7 @@ export function ConclusionInspector({ id, onClose }: { id: string; onClose: () =
                 : sources.data?.items.length ? <div className="divide-y divide-border">{sources.data.items.map(({ id: sourceId, conclusion }) =>
                   conclusion ? <ConclusionLink key={sourceId} conclusion={conclusion} onOpen={open} />
                     : <p key={sourceId} className="py-2 text-[11px] text-text-primary break-all">{sourceId} · unavailable or deleted</p>)}</div>
-                : <p className="text-xs text-text-primary">No parent conclusions recorded{detail.data.level === "explicit" ? " — explicit facts are extracted directly from messages" : ""}.</p>}
+                : <p className="text-xs text-text-primary">No parent conclusions recorded{detail.data.level === "explicit" ? ` — explicit facts are extracted directly from messages${messageCitations === "available" ? ", listed above" : ""}` : ""}.</p>}
               <Pagination page={sourcePage} pages={sources.data?.pages ?? 1} onChange={setSourcePage} />
             </Panel>
             <Panel title="DERIVED_CONCLUSIONS">
@@ -80,6 +94,48 @@ export function ConclusionInspector({ id, onClose }: { id: string; onClose: () =
       </div>
     </Modal>
   );
+}
+
+/** The messages a conclusion cites, read without creating anything. */
+function CitedMessages({ conclusion, workspaceId }: { conclusion: ApiConclusion; workspaceId: string }) {
+  const ids = citedMessageIds(conclusion);
+  if (!ids.length) return <p className="text-xs text-text-primary">{noCitationReason(conclusion)}</p>;
+  if (!conclusion.session_id) {
+    return <div className="space-y-1 text-[11px] text-text-primary">
+      <p>This conclusion has no session recorded, so its cited messages can&apos;t be read.</p>
+      {ids.map((id) => <p key={id} className="text-text-muted break-all">#{id}</p>)}
+    </div>;
+  }
+  return <>
+    <p className="text-[11px] text-text-primary mb-3">Messages the deriver cited when it wrote this conclusion, in citation order.</p>
+    <ol className="space-y-2">
+      {ids.map((id, index) => <CitedMessage key={id} index={index + 1} workspaceId={workspaceId} sessionId={conclusion.session_id!} messageId={id} />)}
+    </ol>
+  </>;
+}
+
+/** Long messages clamp behind SHOW_MORE, as on message lines, so the modal never nests a scroll box. */
+function CitedMessage({ index, workspaceId, sessionId, messageId }: {
+  index: number;
+  workspaceId: string;
+  sessionId: string;
+  messageId: string;
+}) {
+  const result = useHonchoQuery(`citation/message/${workspaceId}/${sessionId}/${messageId}`,
+    (o) => honcho.messages.get(o, workspaceId, sessionId, messageId));
+  const message = result.data;
+  return <li className="border border-border p-2 space-y-1.5">
+    <div className="flex flex-wrap items-center gap-2 text-[10px] text-text-muted">
+      <span className="tabular-nums">{index}.</span>
+      {/* No kind icon: this panel does not know whether the peer is a user or an agent. */}
+      {message ? <Chip tone="cyan">{message.peer_id}</Chip> : null}
+      {message ? <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time> : null}
+      <span className="break-all">{sessionId} · #{messageId}</span>
+    </div>
+    {result.isLoading ? <p className="text-xs text-text-primary" role="status">Loading message…</p>
+      : result.error ? <ReadError resource="message" error={result.error} retry={result.refetch} />
+      : message ? <MessageBody content={message.content || "This message has no text."} raw={false} /> : null}
+  </li>;
 }
 
 function ConclusionLink({ conclusion, onOpen }: { conclusion: ApiConclusion; onOpen: (id: string) => void }) {

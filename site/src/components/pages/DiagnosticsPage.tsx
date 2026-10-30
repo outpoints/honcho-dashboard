@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Panel } from "@/components/Panel";
@@ -9,6 +10,7 @@ import { Icon } from "@/components/icons";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
 import { useOperatorQuery } from "@/lib/operator/client";
 import { TraceInspector } from "@/components/TraceInspector";
+import { LogTail } from "@/components/LogTail";
 import type { TraceResult } from "@/lib/operator/traceRecords";
 
 interface Probe {
@@ -27,13 +29,6 @@ interface DiagnosticsResp {
   probes: Probe[];
 }
 
-interface LogsResp {
-  available: boolean;
-  reason?: string;
-  source?: string;
-  entries?: { id: string; timestamp?: string; level: string; source?: string; message: string }[];
-}
-
 interface ConfigResp {
   available: boolean;
   entries: { key: string; value: string; redacted: boolean; set: boolean }[];
@@ -41,16 +36,14 @@ interface ConfigResp {
 
 export function DiagnosticsPage() {
   const apiOpts = useActiveHonchoOptions();
+  const [logRuns, setLogRuns] = useState(0);
   const diag = useOperatorQuery<DiagnosticsResp>(
     "/api/operator/diagnostics",
     { withHonchoHeaders: true },
   );
-  const logs = useOperatorQuery<LogsResp>("/api/operator/logs?limit=80", {
-    refreshInterval: 15000,
-  });
   const config = useOperatorQuery<ConfigResp>("/api/operator/config");
   const traces = useOperatorQuery<TraceResult>("/api/operator/traces");
-  const refreshing = diag.isLoading || logs.isLoading || config.isLoading || traces.isLoading;
+  const refreshing = diag.isLoading || config.isLoading || traces.isLoading;
 
   const probes = diag.data?.probes ?? [];
   const byCategory = (cat: Probe["category"]) => probes.filter((p) => p.category === cat);
@@ -70,7 +63,7 @@ export function DiagnosticsPage() {
         title="DIAGNOSTICS"
         subtitle="composite probes from operator + honcho"
         actions={
-          <Button onClick={() => { diag.refetch(); logs.refetch(); config.refetch(); traces.refetch(); }} disabled={!apiOpts || refreshing}>
+          <Button onClick={() => { diag.refetch(); config.refetch(); traces.refetch(); setLogRuns((n) => n + 1); }} disabled={!apiOpts || refreshing}>
             {refreshing ? "RUNNING…" : "RE_RUN"}
           </Button>
         }
@@ -132,31 +125,7 @@ export function DiagnosticsPage() {
 
       <TraceInspector traces={traces} />
 
-      <Panel title="LOGS">
-        {!logs.data ? (
-          <div className="text-xs text-text-muted py-4">Loading…</div>
-        ) : !logs.data.available ? (
-          <div className="text-xs text-text-muted py-4">
-            {logs.data.reason ?? "Set HONCHO_LOG_FILE on the dashboard to enable tail."}
-          </div>
-        ) : (logs.data.entries ?? []).length === 0 ? (
-          <div className="text-xs text-text-muted py-4">No log entries.</div>
-        ) : (
-          <div className="space-y-0.5 max-h-[280px] overflow-y-auto">
-            {(logs.data.entries ?? []).slice(-80).map((e) => (
-              <div key={e.id} className="text-[10px] font-mono flex gap-2 px-2 py-1 bg-void/30 border border-border/50">
-                {e.timestamp ? <span className="text-text-muted shrink-0">{e.timestamp}</span> : null}
-                <span className={"shrink-0 uppercase " + levelClass(e.level)}>{e.level}</span>
-                {e.source ? <span className="text-text-muted shrink-0">[{e.source}]</span> : null}
-                <span className="text-text-primary truncate">{e.message}</span>
-              </div>
-            ))}
-            <div className="text-[10px] text-text-muted pt-1">
-              source: <span className="font-mono">{logs.data.source}</span>
-            </div>
-          </div>
-        )}
-      </Panel>
+      <LogTail refreshKey={logRuns} />
 
       <Panel title="API_NOTE">
         <div className="text-[11px] text-text-muted leading-relaxed">
@@ -253,8 +222,11 @@ function ProbeList({ probes, loading }: { probes: Probe[]; loading?: boolean }) 
               <div className="text-xs text-text-primary font-mono truncate">{p.label}</div>
               {p.message ? (
                 <div
+                  title={p.message}
                   className={
-                    "text-[10px] mt-0.5 truncate " +
+                    // Warnings carry the recovery step, so let them wrap.
+                    "text-[10px] mt-0.5 " +
+                    (p.status === "warn" ? "break-words " : "truncate ") +
                     (p.status === "err" ? "text-red-400" : "text-text-muted")
                   }
                 >
@@ -272,15 +244,6 @@ function ProbeList({ probes, loading }: { probes: Probe[]; loading?: boolean }) 
       </AnimatePresence>
     </div>
   );
-}
-
-function levelClass(level: string): string {
-  const l = level.toLowerCase();
-  if (l === "error" || l === "fatal" || l === "exception") return "text-red-400";
-  if (l === "warn" || l === "warning") return "text-yellow-400";
-  if (l === "debug" || l === "trace") return "text-text-muted";
-  if (l === "info" || l === "notice") return "text-accent";
-  return "text-text-muted";
 }
 
 function Card({

@@ -1,15 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
-import { Markdown } from "@/components/Markdown";
 import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Checkbox, Chip, Field, TextInput, RefreshButton, ToggleButton } from "@/components/atoms";
+import { Button, Chip, Field, TextInput, RefreshButton, ToggleButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
+import { PeerCompare } from "@/components/PeerCompare";
+import {
+  PeerAvatar,
+  PeerRowBody,
+  PeerTypeChip,
+  classifyPeer,
+  type DecoratedPeer,
+  type PeerSummary,
+  type PeerType,
+} from "@/components/PeerDetail";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
@@ -17,59 +26,17 @@ import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { getSdk } from "@/lib/honcho/sdk";
-import type { ApiPeer, ApiMessage } from "@/lib/honcho/types";
 import { cn } from "@/lib/utils";
+import { useNow } from "@/lib/useNow";
 import { useHash } from "@/lib/nav";
 import { peersHash, readPeerWorkspaceFilter } from "@/lib/peerWorkspaceFilter";
+import { readSelectedPeer, shortAge } from "@/lib/peerMemory";
 
-type TypeFilter = "all" | "user" | "agent";
+const peerKey = (p: { workspace_id: string; id: string }) => `${p.workspace_id}/${p.id}`;
 
-interface DecoratedPeer extends ApiPeer {
-  derivedType: TypeFilter; // "user" | "agent" | "unknown" mapped to all
-}
-
-function classifyPeer(p: ApiPeer): TypeFilter {
-  const cfg = p.configuration ?? {};
-  const observeMe =
-    (cfg as { observe_me?: boolean }).observe_me ??
-    (cfg as { observeMe?: boolean }).observeMe;
-  if (observeMe === true) return "user";
-  if (observeMe === false) return "agent";
-  return "all"; // unknown → bucket-all
-}
-
-interface PeerConclusion {
-  id: string;
-  content: string;
-  level: string;
-  times_derived: number;
-  created_at: string;
-}
-
-interface PeerDetailResp {
-  available: boolean;
-  reason?: string;
-  messages?: number;
-  conclusions?: number;
-  conclusionsList?: PeerConclusion[];
-}
-
-/** Border + text color for a conclusion `level` (deductive/explicit/...). */
-function levelColors(level: string): { border: string; text: string } {
-  switch (level.toLowerCase()) {
-    case "deductive":
-      return { border: "border-l-blue-400", text: "text-blue-400" };
-    case "inductive":
-      return { border: "border-l-pink-400", text: "text-pink-400" };
-    case "abductive":
-      return { border: "border-l-orange-400", text: "text-orange-400" };
-    case "summary":
-      return { border: "border-l-cyan-400", text: "text-cyan-400" };
-    case "explicit":
-      return { border: "border-l-accent", text: "text-accent" };
-    default:
-      return { border: "border-l-purple-400", text: "text-purple-400" };
-  }
+/** Hash navigation lives outside components so render stays pure. */
+function setHash(next: string) {
+  window.location.hash = next;
 }
 
 export function PeersPage() {
@@ -80,16 +47,19 @@ export function PeersPage() {
   const { enabled: canWrite } = useWriteActions();
   // A pinned URL wins over the shared active workspace, including storage events
   // from other tabs. Derive on every hash change so Back/Forward works too.
-  const workspaceFilter = readPeerWorkspaceFilter(useHash());
+  const hash = useHash();
+  const workspaceFilter = readPeerWorkspaceFilter(hash);
+  const selected = readSelectedPeer(hash);
   const workspaceId = workspaceFilter === undefined ? activeWorkspaceId : workspaceFilter;
   const createWorkspaceId = workspaceId ?? activeWorkspaceId;
 
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<PeerType>("all");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [observeMe, setObserveMe] = useState<boolean>(true);
   const [busy, setBusy] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   // Workspaces list for the per-page dropdown ("all" / each workspace).
   const wsList = useHonchoQuery("workspaces/list?size=100", (o) =>
@@ -119,7 +89,7 @@ export function PeersPage() {
       const items: DecoratedPeer[] = [];
       for (const arr of pages) {
         for (const p of arr) {
-          const key = `${p.workspace_id}::${p.id}`;
+          const key = peerKey(p);
           if (seen.has(key)) continue;
           seen.add(key);
           items.push({ ...p, derivedType: classifyPeer(p) });
@@ -129,7 +99,28 @@ export function PeersPage() {
     },
   );
 
-  const all = data?.items ?? [];
+  // Conclusion counts and last message per peer, one operator-database read for the whole list.
+  const summaries = useHonchoQuery(
+    targetWorkspaces.length ? `operator/peer_summaries/${targetWorkspaces.join(",")}` : null,
+    async () => {
+      const qs = targetWorkspaces.map((w) => `workspace_id=${encodeURIComponent(w)}`).join("&");
+      const body = (await fetch(`/api/operator/db?view=peer_summaries&${qs}`, { cache: "no-store" }).then((r) => r.json())) as {
+        available?: boolean;
+        peers?: PeerSummary[];
+      };
+      if (!body.available) return null;
+      return new Map((body.peers ?? []).map((s) => [`${s.workspace_id}/${s.peer_id}`, s]));
+    },
+  );
+  // Rows sort by activity once these arrive; wait for them (or their failure) so rows
+  // never reorder under the pointer after the first paint.
+  const summariesSettled = !targetWorkspaces.length || summaries.data !== undefined || summaries.error !== undefined;
+  const summaryOf = (p: DecoratedPeer): PeerSummary | undefined =>
+    summaries.data
+      ? summaries.data.get(peerKey(p)) ?? { workspace_id: p.workspace_id, peer_id: p.id, conclusions: 0, last_message_at: null }
+      : undefined;
+
+  const all = useMemo(() => data?.items ?? [], [data]);
   const counts = useMemo(
     () => ({
       all: all.length,
@@ -141,12 +132,21 @@ export function PeersPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return all.filter((p) => {
-      if (q && !p.id.toLowerCase().includes(q)) return false;
+    const list = all.filter((p) => {
+      // Honcho 3.4+ also returns an immutable uid; an exact paste finds the peer.
+      if (q && !p.id.toLowerCase().includes(q) && p.uid?.toLowerCase() !== q) return false;
       if (typeFilter !== "all" && p.derivedType !== typeFilter) return false;
       return true;
     });
-  }, [all, search, typeFilter]);
+    const sums = summaries.data;
+    if (!sums) return list;
+    // Most recently active first; peers that never sent a message keep API order at the end.
+    return [...list].sort((a, b) => {
+      const la = sums.get(peerKey(a))?.last_message_at ?? "";
+      const lb = sums.get(peerKey(b))?.last_message_at ?? "";
+      return la === lb ? 0 : la > lb ? -1 : 1;
+    });
+  }, [all, search, typeFilter, summaries.data]);
 
   const create = async () => {
     if (!apiOpts) return;
@@ -204,14 +204,25 @@ export function PeersPage() {
   const effectiveWorkspaceValue =
     workspaceFilter === null ? "all" : workspaceId ? `ws:${workspaceId}` : "";
 
+
   return (
     <div className="space-y-3">
       <PageHeader
         title="PEERS"
         subtitle="users and agents that interact within sessions"
         actions={
-          <div className="flex items-center gap-2">
-            <RefreshButton label="REFRESH" onClick={() => refetch()} />
+          <div className="flex flex-wrap items-center gap-2">
+            <RefreshButton label="REFRESH" onClick={() => { refetch(); summaries.refetch(); }} />
+            <Button
+              variant="outline"
+              icon="users"
+              onClick={() => setCompareOpen((v) => !v)}
+              disabled={all.length < 2}
+              aria-expanded={compareOpen}
+              title={all.length < 2 ? "Needs at least two peers" : undefined}
+            >
+              COMPARE
+            </Button>
             {canWrite ? (
               <Button icon="plus" onClick={() => setOpen(true)} disabled={!createWorkspaceId}>
                 NEW_PEER
@@ -235,7 +246,8 @@ export function PeersPage() {
             />
             <TextInput
               className="pl-7"
-              placeholder="search peers by name or id…"
+              placeholder="search peers by id, or paste a uid…"
+              aria-label="Search peers by id or uid"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -247,7 +259,7 @@ export function PeersPage() {
             <Select
               className="min-w-[180px]"
               value={effectiveWorkspaceValue}
-              onChange={(v) => { window.location.hash = peersHash(v === "all" ? null : v.slice(3)); }}
+              onChange={(v) => setHash(peersHash(v === "all" ? null : v.slice(3)))}
               options={workspaceOptions}
               triggerClassName="py-1.5"
             />
@@ -272,16 +284,20 @@ export function PeersPage() {
             ? "loading…"
             : `${filtered.length} of ${all.length} peers${
                 workspaceFilter === null ? " across all workspaces" : ""
-              }`}
+              }${summaries.data ? " · most recently active first" : ""}`}
         </div>
       </Panel>
+
+      {compareOpen && all.length >= 2 ? (
+        <PeerCompare key={peersKey ?? "none"} peers={all} onClose={() => setCompareOpen(false)} />
+      ) : null}
 
       {error ? (
         <Panel title="ERROR" status="processing">
           <div className="text-xs text-red-400">{formatApiError(error)}</div>
         </Panel>
-      ) : isLoading ? (
-        <div className="space-y-2">
+      ) : isLoading || (data && !summariesSettled) ? (
+        <div className="space-y-2" aria-label="Loading peers">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-surface border border-border p-4 space-y-2">
               <div className="h-4 bg-border/60 animate-pulse w-1/4" />
@@ -300,20 +316,15 @@ export function PeersPage() {
         </Panel>
       ) : (
         <div className="space-y-2">
-          <AnimatePresence initial={false}>
-            {filtered.map((p, i) => (
-              <motion.div
-                key={`${p.workspace_id}::${p.id}`}
-                layout
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97 }}
-                transition={{ delay: Math.min(i * 0.02, 0.2), duration: 0.2 }}
-              >
-                <PeerRow peer={p} onAction={() => refetch()} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
+          {filtered.map((p) => (
+            <PeerRow
+              key={peerKey(p)}
+              peer={p}
+              summary={summaryOf(p)}
+              linked={!!selected && selected.workspaceId === p.workspace_id && selected.peerId === p.id}
+              onChanged={() => refetch()}
+            />
+          ))}
         </div>
       )}
 
@@ -359,630 +370,71 @@ export function PeersPage() {
   );
 }
 
+/** Expanding rows, closed until opened. Details load only for an open row. */
 function PeerRow({
   peer,
-  onAction,
+  summary,
+  linked,
+  onChanged,
 }: {
   peer: DecoratedPeer;
-  onAction: () => void;
+  summary?: PeerSummary;
+  /** Named by `#/peers?peer=workspace/id`: opens and scrolls into view. */
+  linked: boolean;
+  onChanged: () => void;
 }) {
-  const apiOpts = useActiveHonchoOptions();
-  const { setWorkspaceId } = useActiveWorkspace();
-  const { push } = useToast();
-  const confirm = useConfirm();
-  const { enabled: canWrite } = useWriteActions();
-  const [expanded, setExpanded] = useState(true);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editObserveMe, setEditObserveMe] = useState(true);
-  const [editMetadata, setEditMetadata] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<ApiMessage[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [details, setDetails] = useState<{
-    loading: boolean;
-    sessions: number | null;
-    messages: number | null;
-    conclusions: number | null;
-    conclusionsList: PeerConclusion[] | null;
-    peerCard: string[] | null;
-    error?: string;
-  }>({
-    loading: false,
-    sessions: null,
-    messages: null,
-    conclusions: null,
-    conclusionsList: null,
-    peerCard: null,
-  });
-
-  // Dedupe by peer key and depend ONLY on stable primitives. `useActiveHonchoOptions`
-  // returns a fresh object every render, so depending on apiOpts (directly or via a
-  // callback) re-runs this effect each render, whose cleanup flips `cancelled` before
-  // card()/sessions() resolve — leaving the card stuck on skeletons. Read it from a ref.
-  const fetchedRef = useRef<string | null>(null);
-  const apiOptsRef = useRef(apiOpts);
-  apiOptsRef.current = apiOpts;
-
+  const [open, setOpen] = useState(linked);
+  const rowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!expanded) return;
-    const opts = apiOptsRef.current;
-    if (!opts) return;
-    const detailKey = `${peer.workspace_id}::${peer.id}`;
-    // Mark fetched only AFTER a successful load (below), never up front: React's
-    // Strict-Mode dev double-invoke cancels the first run, and a pre-set ref made
-    // the second run early-return here — so details never loaded (— counts +
-    // "needs operator DB" even though the data was fetched).
-    if (fetchedRef.current === detailKey) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setDetails((d) => ({ ...d, loading: true, error: undefined }));
-      (async () => {
-        try {
-          const detailUrl =
-            `/api/operator/db?view=peer_detail&workspace_id=${encodeURIComponent(peer.workspace_id)}` +
-            `&peer_id=${encodeURIComponent(peer.id)}`;
-          const [sessionsPage, card, opDetail] = await Promise.all([
-            raw.peers.sessions(opts, peer.workspace_id, peer.id, { size: 1 }).catch(() => null),
-            raw.peers.card(opts, peer.workspace_id, peer.id).catch(() => null),
-            fetch(detailUrl, { cache: "no-store" })
-              .then((r) => r.json() as Promise<PeerDetailResp>)
-              .catch(() => null),
-          ]);
-          if (cancelled) return;
-          fetchedRef.current = detailKey;
-          const od = opDetail?.available ? opDetail : null;
-          setDetails({
-            loading: false,
-            sessions: sessionsPage?.total ?? null,
-            messages: od?.messages ?? null,
-            conclusions: od?.conclusions ?? null,
-            conclusionsList: od?.conclusionsList ?? null,
-            peerCard: card ?? [],
-          });
-        } catch (err) {
-          if (cancelled) return;
-          setDetails({
-            loading: false,
-            sessions: null,
-            messages: null,
-            conclusions: null,
-            conclusionsList: null,
-            peerCard: null,
-            error: formatApiError(err),
-          });
-        }
-      })();
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, peer.id, peer.workspace_id]);
-
-  const created = new Date(peer.created_at).toLocaleString();
-  const typeChip =
-    peer.derivedType === "user" ? (
-      <Chip tone="accent">USER</Chip>
-    ) : peer.derivedType === "agent" ? (
-      <Chip tone="purple">AGENT</Chip>
-    ) : (
-      <Chip tone="muted">PEER</Chip>
-    );
-
-  const cfg = (peer.configuration ?? {}) as { observe_me?: boolean; observeMe?: boolean };
-  const currentObserveMe = cfg.observe_me ?? cfg.observeMe ?? null;
-
-  const openEdit = () => {
-    // Honcho peers are observed by default unless observe_me is explicitly false.
-    setEditObserveMe(currentObserveMe ?? true);
-    setEditMetadata(JSON.stringify(peer.metadata ?? {}, null, 2));
-    setEditOpen(true);
-  };
-
-  const saveEdit = async () => {
-    if (!apiOpts) return;
-    let parsedMeta: Record<string, unknown>;
-    try {
-      parsedMeta = editMetadata.trim() ? JSON.parse(editMetadata) : {};
-      if (typeof parsedMeta !== "object" || parsedMeta === null || Array.isArray(parsedMeta)) {
-        throw new Error("not an object");
-      }
-    } catch {
-      push({ type: "error", message: "Metadata must be a JSON object" });
-      return;
-    }
-    const confirmed = await confirm({
-      title: "SAVE_PEER",
-      confirmLabel: "SAVE",
-      body: (
-        <>
-          Save changes to peer <span className="text-accent font-mono">{peer.id}</span> (type +
-          metadata) on the live instance?
-        </>
-      ),
-    });
-    if (!confirmed) return;
-    setSaving(true);
-    try {
-      // Peer-level config only meaningfully supports observe_me; reasoning is
-      // managed at the workspace level (see WORKSPACE_CONFIG).
-      const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
-      await peerObj.setConfiguration({ observeMe: editObserveMe });
-      await peerObj.setMetadata(parsedMeta);
-      push({ type: "success", message: `Peer ${peer.id} updated` });
-      setEditOpen(false);
-      onAction();
-    } catch (err) {
-      push({ type: "error", message: formatApiError(err) });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveCard = async (lines: string[]): Promise<boolean> => {
-    if (!apiOpts) return false;
-    const ok = await confirm({
-      title: "SAVE_PEER_CARD",
-      confirmLabel: "SAVE",
-      body: (
-        <>
-          Overwrite the peer card for <span className="text-accent font-mono">{peer.id}</span> on the
-          live instance ({lines.length} line{lines.length === 1 ? "" : "s"})?
-        </>
-      ),
-    });
-    if (!ok) return false;
-    try {
-      const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
-      const updated = await peerObj.setCard(lines);
-      setDetails((d) => ({ ...d, peerCard: updated ?? lines }));
-      push({ type: "success", message: "Peer card saved" });
-      return true;
-    } catch (err) {
-      push({ type: "error", message: formatApiError(err) });
-      return false;
-    }
-  };
-
-  const runPeerSearch = async () => {
-    const q = search.trim();
-    if (!apiOpts || !q) return;
-    setSearching(true);
-    try {
-      const msgs = await raw.peers.search(apiOpts, peer.workspace_id, peer.id, { query: q, limit: 20 });
-      setSearchResults(msgs);
-    } catch (err) {
-      push({ type: "error", message: formatApiError(err) });
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
+    if (linked) rowRef.current?.scrollIntoView({ block: "start" });
+  }, [linked]);
+  const reduceMotion = useReducedMotion();
+  const bodyId = useId();
+  const now = useNow(60_000);
   return (
-    <>
-    <motion.div className="bg-surface border border-border transition-colors duration-150 hover:border-accent/35">
-      <div className="flex items-start justify-between gap-3 p-3">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="w-8 h-8 border border-border-light text-text-muted flex items-center justify-center shrink-0">
-            <Icon name={peer.derivedType === "agent" ? "bot" : "user"} size={14} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-text-primary font-mono truncate">{peer.id}</span>
-              <span className="text-[10px] text-text-muted">@{peer.workspace_id}</span>
-              {typeChip}
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-text-muted mt-1.5">
-              <span className="flex items-center gap-1">
-                <Icon name="git-branch" size={10} />
-                {details.loading ? "…" : details.sessions ?? "—"} sessions
-              </span>
-              <span className="flex items-center gap-1">
-                <Icon name="message-square" size={10} />
-                {details.loading ? "…" : details.messages != null ? details.messages.toLocaleString() : "—"} msgs
-              </span>
-              <span className="flex items-center gap-1">
-                <Icon name="brain" size={10} />
-                {details.loading ? "…" : details.conclusions != null ? details.conclusions.toLocaleString() : "—"}{" "}
-                conclusions
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="text-right text-[10px] text-text-muted">
-            <div>created</div>
-            <div className="text-text-primary font-mono">{created}</div>
-          </div>
-          {canWrite ? (
-            <button
-              className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
-              title="Edit peer (type + metadata)"
-              aria-label="Edit peer"
-              onClick={openEdit}
-            >
-              <Icon name="settings" size={12} />
-            </button>
-          ) : null}
-          <motion.button
-            onClick={() => setExpanded((e) => !e)}
-            className="w-7 h-7 border border-border-light text-text-muted hover:text-text-primary flex items-center justify-center"
-            aria-label={expanded ? "Collapse" : "Expand"}
-            animate={{ rotate: expanded ? 0 : -90 }}
-            transition={{ type: "spring", stiffness: 400, damping: 22 }}
-          >
-            <Icon name="chevron-down" size={12} />
-          </motion.button>
-        </div>
-      </div>
-
+    <div ref={rowRef} className={cn("bg-surface border transition-colors duration-150 scroll-mt-3", open ? "border-accent/40" : "border-border hover:border-accent/35")}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full grid grid-cols-[36px_minmax(0,1fr)_auto_28px] sm:grid-cols-[36px_minmax(0,1fr)_auto_auto_28px] items-center gap-x-4 px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-accent"
+      >
+        <PeerAvatar type={peer.derivedType} active={open} />
+        <span className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={cn("font-mono text-[13px] truncate", open ? "text-accent" : "text-text-primary")}>{peer.id}</span>
+          <span className="text-[10px] text-text-muted">@{peer.workspace_id}</span>
+          <PeerTypeChip type={peer.derivedType} />
+        </span>
+        <span className="hidden sm:block text-right text-[10px] text-text-muted tabular-nums leading-tight min-w-[84px]">
+          <span className="block text-[11px] text-text-primary">{summary ? summary.conclusions.toLocaleString() : "—"}</span>
+          conclusions
+        </span>
+        <span className="text-right text-[10px] text-text-muted tabular-nums leading-tight min-w-[84px]">
+          <span className="block text-[11px] text-text-primary">
+            {summary ? (summary.last_message_at ? shortAge(summary.last_message_at, now) : "never") : new Date(peer.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
+          {summary ? "last message" : "created"}
+        </span>
+        <span className="w-7 h-7 border border-border-light text-text-muted flex items-center justify-center" aria-hidden>
+          <Icon name="chevron-down" size={12} className={cn("motion-safe:transition-transform motion-safe:duration-150", open ? "rotate-0" : "-rotate-90")} />
+        </span>
+      </button>
       <AnimatePresence initial={false}>
-        {expanded ? (
+        {open ? (
           <motion.div
-            key="expanded"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
+            id={bodyId}
+            key="body"
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, height: "auto" }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+            transition={{ duration: 0.18, ease: [0.25, 0.46, 0.45, 0.94] }}
             className="overflow-hidden"
           >
-            <div className="px-3 pb-3 space-y-3 border-t border-border pt-3">
-              <PeerCardSection
-                loading={details.loading && details.peerCard === null}
-                card={details.peerCard}
-                error={details.error}
-                canWrite={canWrite}
-                onSave={saveCard}
-              />
-              <ConclusionsSection
-                loading={details.loading && details.conclusionsList === null}
-                conclusions={details.conclusionsList}
-                total={details.conclusions}
-              />
-              <PeerSearchSection
-                value={search}
-                onChange={setSearch}
-                onSearch={runPeerSearch}
-                searching={searching}
-                results={searchResults}
-              />
-              <ObserveMeRow peer={peer} />
-              <div className="flex items-center gap-2 flex-wrap pt-1">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setWorkspaceId(peer.workspace_id);
-                    window.location.hash = `#/sessions?peer=${encodeURIComponent(peer.id)}`;
-                  }}
-                >
-                  VIEW_SESSIONS
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setWorkspaceId(peer.workspace_id);
-                    window.location.hash = `#/messages?peer=${encodeURIComponent(peer.id)}`;
-                  }}
-                >
-                  VIEW_MESSAGES
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setWorkspaceId(peer.workspace_id);
-                    window.location.hash = `#/context?peer=${encodeURIComponent(peer.id)}`;
-                  }}
-                >
-                  VIEW_CONTEXT
-                </Button>
-              </div>
-            </div>
+            <PeerRowBody peer={peer} onChanged={onChanged} />
           </motion.div>
         ) : null}
       </AnimatePresence>
-    </motion.div>
-
-    <Modal
-      title="EDIT_PEER"
-      open={editOpen}
-      onClose={() => setEditOpen(false)}
-      footer={
-        <>
-          <Button variant="secondary" onClick={() => setEditOpen(false)} disabled={saving}>
-            CANCEL
-          </Button>
-          <Button variant="primary" onClick={saveEdit} disabled={saving}>
-            {saving ? "SAVING…" : "SAVE"}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="PEER_ID" hint={`@${peer.workspace_id}`}>
-          <div className="w-full bg-void border border-border px-3 py-2 text-sm font-mono text-text-muted">
-            {peer.id}
-          </div>
-        </Field>
-
-        <div>
-          <Checkbox
-            checked={editObserveMe}
-            onChange={setEditObserveMe}
-            label="Observe me (enable reasoning about this peer)"
-            hint="When enabled, Honcho will reason over this peer's messages and build a representation (observe_me). Reasoning itself is configured at the workspace level."
-          />
-        </div>
-
-        <div className="border-t border-border pt-4">
-          <Field label="METADATA (JSON)" hint="Stored on the peer. Must be a JSON object.">
-            <textarea
-              value={editMetadata}
-              onChange={(e) => setEditMetadata(e.target.value)}
-              rows={6}
-              spellCheck={false}
-              className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
-            />
-          </Field>
-        </div>
-      </div>
-    </Modal>
-    </>
-  );
-}
-
-function PeerSearchSection({
-  value,
-  onChange,
-  onSearch,
-  searching,
-  results,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSearch: () => void;
-  searching: boolean;
-  results: ApiMessage[] | null;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon name="search" size={11} className="text-text-muted" />
-        <span className="text-[10px] text-text-muted uppercase tracking-wider">search_within_peer</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <TextInput
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && value.trim() && !searching) onSearch();
-          }}
-          placeholder="search this peer's messages…"
-          className="flex-1"
-        />
-        <Button variant="outline" size="sm" icon="search" onClick={onSearch} disabled={!value.trim() || searching}>
-          {searching ? "…" : "SEARCH"}
-        </Button>
-      </div>
-      {searching ? (
-        <div className="mt-2 space-y-1.5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-8 bg-border/40 animate-pulse" />
-          ))}
-        </div>
-      ) : results === null ? null : results.length === 0 ? (
-        <div className="mt-2 text-[11px] text-text-muted italic">No matching messages for that query.</div>
-      ) : (
-        <div className="mt-2 space-y-1.5">
-          {results.map((m) => (
-            <div key={m.id} className="px-2 py-1.5 bg-void/40 border border-border text-[11px]">
-              <div className="flex items-center gap-2 text-[9px] text-text-muted mb-0.5">
-                <span className="text-text-primary font-mono">{m.peer_id}</span>
-                <span>{new Date(m.created_at).toLocaleString()}</span>
-              </div>
-              <div className="text-text-primary line-clamp-2">
-                <Markdown inline text={m.content} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PeerCardSection({
-  loading,
-  card,
-  error,
-  canWrite,
-  onSave,
-}: {
-  loading: boolean;
-  card: string[] | null;
-  error?: string;
-  canWrite: boolean;
-  onSave: (lines: string[]) => Promise<boolean>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const startEdit = () => {
-    setDraft((card ?? []).join("\n"));
-    setEditing(true);
-  };
-  const save = async () => {
-    setBusy(true);
-    const ok = await onSave(
-      draft
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
-    setBusy(false);
-    if (ok) setEditing(false);
-  };
-
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon name="sparkles" size={11} className="text-accent" />
-        <span className="text-[10px] text-accent uppercase tracking-wider">peer_card</span>
-        {card ? (
-          <span className="text-[10px] text-text-muted">({card.length})</span>
-        ) : null}
-        {canWrite && !loading && !editing ? (
-          <button
-            onClick={startEdit}
-            className="ml-auto text-[10px] text-text-muted hover:text-accent flex items-center gap-1"
-            aria-label="Edit peer card"
-          >
-            <Icon name="edit" size={10} /> EDIT
-          </button>
-        ) : null}
-      </div>
-      {editing ? (
-        <div className="space-y-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={5}
-            spellCheck={false}
-            placeholder="one fact per line…"
-            className="w-full bg-void border border-border px-3 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:border-accent outline-none transition-colors duration-150 resize-y"
-          />
-          <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" onClick={save} disabled={busy}>
-              {busy ? "SAVING…" : "SAVE_CARD"}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => setEditing(false)} disabled={busy}>
-              CANCEL
-            </Button>
-            <span className="text-[10px] text-text-muted">one line per card entry</span>
-          </div>
-        </div>
-      ) : loading ? (
-        <div className="space-y-1.5">
-          <div className="h-2.5 bg-border/60 animate-pulse w-3/4" />
-          <div className="h-2.5 bg-border/60 animate-pulse w-2/3" />
-          <div className="h-2.5 bg-border/60 animate-pulse w-1/2" />
-        </div>
-      ) : error ? (
-        <div className="text-[11px] text-red-400">{error}</div>
-      ) : card === null || card.length === 0 ? (
-        <div
-          className={cn(
-            "text-[11px] text-text-muted italic",
-            "py-1",
-          )}
-        >
-          No peer card yet. The deriver fills this in once the peer has been observed in a
-          session.
-        </div>
-      ) : (
-        <ul className="space-y-1 text-xs text-text-primary">
-          {card.map((line, i) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, x: -4 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.03, duration: 0.15 }}
-              className="flex gap-2"
-            >
-              <span className="text-text-muted">•</span>
-              <span className="font-mono">{line}</span>
-            </motion.li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ConclusionsSection({
-  loading,
-  conclusions,
-  total,
-}: {
-  loading: boolean;
-  conclusions: PeerConclusion[] | null;
-  total: number | null;
-}) {
-  const count = total ?? conclusions?.length ?? 0;
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon name="brain" size={11} className="text-purple-400" />
-        <span className="text-[10px] text-purple-400 uppercase tracking-wider">conclusions</span>
-        {conclusions ? (
-          <span className="text-[10px] text-text-muted">
-            ({conclusions.length}
-            {count > conclusions.length ? ` of ${count.toLocaleString()}` : ""})
-          </span>
-        ) : null}
-      </div>
-      {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-9 bg-border/40 animate-pulse" />
-          ))}
-        </div>
-      ) : conclusions === null ? (
-        <div className="text-[11px] text-text-muted italic py-1">
-          Conclusions need the operator DB (HONCHO_DATABASE_URL).
-        </div>
-      ) : conclusions.length === 0 ? (
-        <div className="text-[11px] text-text-muted italic py-1">
-          No conclusions derived about this peer yet.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {conclusions.map((c, i) => {
-            const { border, text } = levelColors(c.level);
-            return (
-              <motion.div
-                key={c.id}
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: Math.min(i * 0.03, 0.2), duration: 0.15 }}
-                className={cn("border-l-2 pl-3 py-0.5", border)}
-              >
-                <div className="text-xs text-text-primary leading-snug">
-                  <Markdown inline text={c.content} />
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-[9px] text-text-muted tracking-wider">
-                  {c.level ? <span className={cn("uppercase", text)}>{c.level}</span> : null}
-                  <span>freq: {c.times_derived}</span>
-                  <span>{new Date(c.created_at).toLocaleDateString()}</span>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ObserveMeRow({ peer }: { peer: DecoratedPeer }) {
-  const cfg = (peer.configuration ?? {}) as { observe_me?: boolean; observeMe?: boolean };
-  const observeMe = cfg.observe_me ?? cfg.observeMe;
-  return (
-    <div className="text-[11px] text-text-muted">
-      observe_me:{" "}
-      <span
-        className={
-          observeMe === true
-            ? "text-accent"
-            : observeMe === false
-              ? "text-purple-400"
-              : "text-text-muted"
-        }
-      >
-        {observeMe === undefined ? "(unset)" : String(observeMe)}
-      </span>
     </div>
   );
 }

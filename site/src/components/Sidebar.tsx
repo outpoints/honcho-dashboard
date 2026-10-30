@@ -11,6 +11,9 @@ import { honcho } from "@/lib/honcho/client";
 import { useActiveWorkspace } from "@/lib/honcho/config";
 import { useHonchoQuery } from "@/lib/honcho/useQuery";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
+import { FAILED_TASKS_HREF, queuePollInterval, queueProgress } from "@/lib/syncStatus";
+import { useQueueFailures } from "@/lib/operator/queueFailures";
+import { RelativeAge } from "@/components/RelativeAge";
 
 export interface SidebarProps {
   current: RouteKey;
@@ -26,10 +29,13 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
   const queue = useHonchoQuery<ApiQueueStatus>(
     workspaceId ? `sdk/workspaces/${workspaceId}/queue/status` : null,
     (o) => honcho.queue.status(o, workspaceId!),
-    { refreshInterval: 10000 },
+    { refreshInterval: queuePollInterval },
   );
 
   const healthy = !health.error && health.data?.status === "ok";
+  const progress = queue.data ? queueProgress(queue.data) : null;
+  const syncing = progress?.state === "syncing";
+  const failed = useQueueFailures(workspaceId);
 
   return (
     <aside className="hidden md:sticky md:top-0 md:h-screen md:self-start md:flex shrink-0 bg-surface border-r border-border flex-col w-48 relative z-10">
@@ -114,15 +120,67 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
             value={
               !workspaceId ? (
                 <span className="text-text-muted">—</span>
-              ) : queue.isLoading ? (
-                <span className="text-text-muted">…</span>
               ) : queue.error ? (
-                <span className="text-text-muted">—</span>
+                <span className="text-text-muted">unavailable</span>
+              ) : !progress ? (
+                <span className="text-text-muted">…</span>
+              ) : progress.state === "empty" ? (
+                <span className="text-text-primary">no work yet</span>
               ) : (
-                <span className="text-accent">{queue.data?.pending_work_units ?? 0}</span>
+                // Icon and words carry the state as well as color.
+                <span className={cn("flex items-center gap-1 tabular-nums", syncing ? "text-yellow-400" : "text-accent")}>
+                  <Icon
+                    name={syncing ? "refresh" : "check"}
+                    size={10}
+                    className={cn(syncing && progress.running > 0 && "motion-safe:animate-spin")}
+                  />
+                  {syncing ? `${progress.pending.toLocaleString()} pending` : "caught up"}
+                </span>
               )
             }
           />
+          {workspaceId && progress && progress.state !== "empty" && !queue.error ? (
+            <div className="pt-1 space-y-1" title="Deriver work units for this workspace">
+              <div
+                className="h-1 bg-void border border-border overflow-hidden"
+                role="progressbar"
+                aria-label="Queue work units completed"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progress.percent ?? 0}
+              >
+                <div
+                  className={cn("h-full transition-[width] duration-300 ease-out", syncing ? "bg-yellow-400" : "bg-accent")}
+                  style={{ width: `${progress.percent ?? 0}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[9px] text-text-muted tabular-nums">
+                <span>
+                  {progress.done.toLocaleString()}/{progress.total.toLocaleString()} done
+                  {progress.running ? ` · ${progress.running} running` : ""}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          {failed ? (
+            <Row
+              label="failed"
+              value={
+                // Failed items stay until retried; link straight to them.
+                <a
+                  href={FAILED_TASKS_HREF}
+                  className="flex items-center gap-1 tabular-nums text-red-400 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                  title="Deriver queue items that failed and need a retry. Opens Reasoning filtered to failed tasks."
+                >
+                  <Icon name="warning" size={10} />
+                  {failed.toLocaleString()} · review
+                </a>
+              }
+            />
+          ) : null}
+          {workspaceId && queue.updatedAt !== undefined ? (
+            <div className="text-[9px] text-text-muted tabular-nums"><RelativeAge at={queue.updatedAt} /></div>
+          ) : null}
         </div>
       </div>
     </aside>

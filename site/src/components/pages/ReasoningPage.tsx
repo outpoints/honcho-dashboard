@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PageHeader } from "@/components/PageHeader";
 import { Markdown } from "@/components/Markdown";
@@ -124,6 +124,31 @@ export function ReasoningPage() {
     setDreamSession("");
     setDreamOpen(true);
   };
+
+  // The sidebar and status bar link here with `?status=failed` when the queue
+  // has failures. Apply it, including while this page is already open, then
+  // drop the flag so the hash stays a plain route.
+  useEffect(() => {
+    const apply = () => {
+      if (!/[?&]status=failed(?:&|$)/.test(window.location.hash)) return;
+      window.history.replaceState(null, "", "#/reasoning");
+      setStatusFilter("failed");
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
+
+  // The status bar's SCHEDULE_DREAM links here with `?dream=1`. Consume the flag
+  // once so Back or a refresh doesn't reopen the modal.
+  useEffect(() => {
+    if (!canWrite || !workspaceId || !/[?&]dream=1(?:&|$)/.test(window.location.hash)) return;
+    window.history.replaceState(null, "", "#/reasoning");
+    setDreamObserver("");
+    setDreamObserved("");
+    setDreamSession("");
+    setDreamOpen(true);
+  }, [canWrite, workspaceId]);
 
   const submitDream = async () => {
     if (!apiOpts || !workspaceId) return;

@@ -190,7 +190,9 @@ export function ToggleButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "px-2.5 h-7 text-[10px] uppercase tracking-wider transition-colors border",
         active
@@ -210,23 +212,28 @@ export function Tabs<T extends string>({
   onChange,
   className,
   layoutId = "tab-pill",
+  ariaLabel,
 }: {
-  items: { key: T; label: string; icon?: IconName }[];
+  /** `count` renders after the label in a muted, tabular style; `null` shows a placeholder while loading. */
+  items: { key: T; label: string; icon?: IconName; count?: number | null }[];
   current: T;
   onChange: (key: T) => void;
   className?: string;
   layoutId?: string;
+  ariaLabel?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-1 border-b border-border pb-px", className)}>
+    <div role="group" aria-label={ariaLabel} className={cn("flex items-center gap-1 border-b border-border pb-px overflow-x-auto", className)}>
       {items.map((item) => {
         const active = item.key === current;
         return (
           <button
             key={item.key}
+            type="button"
+            aria-pressed={active}
             onClick={() => onChange(item.key)}
             className={cn(
-              "relative flex items-center gap-1.5 px-4 py-2 text-[11px] uppercase tracking-wider transition-colors",
+              "relative shrink-0 whitespace-nowrap flex items-center gap-1.5 px-4 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-accent",
               active ? "text-accent" : "text-text-muted hover:text-text-primary",
             )}
           >
@@ -239,6 +246,11 @@ export function Tabs<T extends string>({
             ) : null}
             {item.icon ? <Icon name={item.icon} size={12} /> : null}
             <span className="relative">{item.label}</span>
+            {item.count !== undefined ? (
+              <span className={cn("relative tabular-nums", active ? "text-accent/70" : "text-text-muted/80")}>
+                {item.count === null ? "…" : item.count.toLocaleString()}
+              </span>
+            ) : null}
           </button>
         );
       })}

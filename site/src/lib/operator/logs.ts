@@ -1,79 +1,49 @@
 import "server-only";
-import { promises as fs } from "fs";
-import { resolve } from "path";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { resolve } from "node:path";
+import { parseLogChunk, type LogEntry } from "./logLines";
 
-export type LogLevel = "debug" | "info" | "warn" | "error" | "unknown";
+export type { LogEntry, LogLevel } from "./logLines";
 
-export interface LogEntry {
-  id: string;
-  timestamp?: string;
-  level: LogLevel;
-  source?: string;
-  message: string;
-}
-
-const LEVEL_PATTERNS: Array<[RegExp, LogLevel]> = [
-  [/\b(error|exception|fatal)\b/i, "error"],
-  [/\b(warn|warning)\b/i, "warn"],
-  [/\b(debug|trace)\b/i, "debug"],
-  [/\b(info|notice)\b/i, "info"],
-];
-
-function detectLevel(line: string): LogLevel {
-  for (const [re, lvl] of LEVEL_PATTERNS) if (re.test(line)) return lvl;
-  return "unknown";
-}
+/** Read at most this much from the end of the file per request. */
+export const LOG_TAIL_BYTES = 512 * 1024;
 
 export interface LogsResult {
   available: boolean;
   reason?: string;
   source?: string;
   entries?: LogEntry[];
+  /** File size when read; a smaller size later means rotation or truncation. */
+  size?: number;
+  truncated?: boolean;
+  read_at?: string;
 }
 
+/** The path is administrator configuration only; never accept it from a request. */
 export async function tailLogs(limit = 200): Promise<LogsResult> {
   const path = process.env.HONCHO_LOG_FILE;
   if (!path) return { available: false, reason: "HONCHO_LOG_FILE not set" };
   const abs = resolve(path);
+  let file: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const buf = await fs.readFile(abs, "utf8");
-    const lines = buf.split(/\r?\n/).filter(Boolean);
-    const tail = lines.slice(-Math.max(1, Math.min(2000, limit)));
-    const entries: LogEntry[] = tail.map((line, idx) => {
-      const tsMatch = line.match(
-        /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/,
-      );
-      let level: LogLevel = detectLevel(line);
-      let source: string | undefined;
-      try {
-        const j = JSON.parse(line);
-        if (typeof j === "object" && j) {
-          if (typeof j.level === "string") level = j.level.toLowerCase() as LogLevel;
-          if (typeof j.message === "string") {
-            return {
-              id: String(idx),
-              timestamp: typeof j.time === "string" ? j.time : tsMatch?.[1],
-              level,
-              source: typeof j.logger === "string" ? j.logger : undefined,
-              message: j.message,
-            };
-          }
-        }
-      } catch {
-        // not JSON
-      }
-      const sourceMatch = line.match(/\[([\w.-]+)\]/);
-      if (sourceMatch) source = sourceMatch[1];
-      return {
-        id: String(idx),
-        timestamp: tsMatch?.[1],
-        level,
-        source,
-        message: line,
-      };
-    });
-    return { available: true, source: abs, entries };
+    // O_NONBLOCK keeps a configured FIFO from hanging the request.
+    file = await open(abs, constants.O_RDONLY | constants.O_NONBLOCK);
+    const stat = await file.stat();
+    if (!stat.isFile()) return { available: false, reason: "HONCHO_LOG_FILE must point to a regular file." };
+    // Bounded read: never load a large log into memory.
+    const start = Math.max(0, stat.size - LOG_TAIL_BYTES);
+    const buffer = Buffer.alloc(stat.size - start);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    const entries = parseLogChunk(buffer.subarray(0, bytesRead), start, limit);
+    return { available: true, source: abs, entries, size: stat.size, truncated: start > 0, read_at: new Date().toISOString() };
   } catch (err) {
-    return { available: false, reason: err instanceof Error ? err.message : String(err) };
+    const code = (err as NodeJS.ErrnoException).code;
+    const reason = code === "ENOENT" ? "Configured log file was not found. Check the dashboard host mount."
+      : code === "EACCES" || code === "EPERM" ? "Dashboard cannot read the configured log file. Check file permissions."
+      : err instanceof Error ? err.message : String(err);
+    return { available: false, reason };
+  } finally {
+    await file?.close();
   }
 }

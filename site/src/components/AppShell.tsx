@@ -98,7 +98,9 @@ export function AppShell() {
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
         <MobileTopBar onMenu={() => setMenuOpen(true)} />
         <Header current={current} />
-        <main className="flex-1 p-3 sm:p-4 overflow-auto">
+        {/* overflow-x-clip, not overflow-auto: the document scrolls, and a scroll container here
+            would stop every position: sticky element inside the page from sticking. */}
+        <main className="flex-1 min-w-0 p-3 sm:p-4 overflow-x-clip">
           <Page />
         </main>
       </div>

@@ -21,7 +21,7 @@ import {
   instructionState,
   seedWorkspaceConfigForm,
   validateWorkspaceConfiguration,
-  withClearedKeys,
+  workspaceConfigBody,
   type InstructionKey,
   type InstructionModule,
   type InstructionState,
@@ -67,8 +67,10 @@ export function WorkspaceConfigModal({
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
-  const { customInstructions: instructionsState } = useHonchoCapabilities();
+  const { customInstructions: instructionsState, workspaceConfigReplace } = useHonchoCapabilities();
   const instructionsAvailable = instructionsState === "available";
+  // Honcho 3.5+ stores exactly the configuration sent; older servers merge it.
+  const replaces = workspaceConfigReplace === "available";
 
   const [mode, setMode] = useState<"form" | "json">("form");
   const [saving, setSaving] = useState(false);
@@ -109,7 +111,7 @@ export function WorkspaceConfigModal({
   }
 
   function buildConfig(): Config {
-    return buildWorkspaceConfiguration(base, form, { customInstructions: instructionsAvailable });
+    return buildWorkspaceConfiguration(base, form, { customInstructions: instructionsAvailable, replaces });
   }
 
   function resolveConfig(): Config | null {
@@ -158,7 +160,7 @@ export function WorkspaceConfigModal({
       push({ type: "error", message: err });
       return;
     }
-    const cfg = withClearedKeys(workspace.configuration, resolved);
+    const cfg = workspaceConfigBody(workspace.configuration, resolved, { replaces });
     const ok = await confirm({
       title: "SAVE_WORKSPACE_CONFIG",
       confirmLabel: "SAVE",
@@ -166,6 +168,12 @@ export function WorkspaceConfigModal({
         <>
           Save configuration for workspace{" "}
           <span className="text-accent font-mono">{workspace.id}</span> on the live instance?
+          {replaces ? (
+            <span className="block mt-2 text-text-muted">
+              This server replaces the stored configuration with the one you save, so settings you
+              cleared are removed and fall back to the defaults.
+            </span>
+          ) : null}
         </>
       ),
     });
@@ -263,7 +271,11 @@ export function WorkspaceConfigModal({
         {mode === "json" ? (
           <Field
             label="CONFIGURATION (JSON)"
-            hint="Full workspace configuration. Must be a JSON object. A removed section is saved as empty."
+            hint={
+              replaces
+                ? "Full workspace configuration. Must be a JSON object. This server stores exactly what you save, so a removed key is deleted."
+                : "Full workspace configuration. Must be a JSON object. A removed section is saved as empty."
+            }
           >
             <textarea
               value={jsonText}

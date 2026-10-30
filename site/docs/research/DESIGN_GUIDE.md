@@ -54,7 +54,8 @@ chrome; reserve larger sizes for headings/values.
 ## 3. Layout primitives
 
 - **`Panel`** (`components/Panel.tsx`) is the section container everywhere: titled header with a
-  status dot + `─ □ ×` window chrome, `bg-surface border border-border`, `p-3` body. Group related
+  status dot + `[ TITLE ]` on the left and the panel's `actions` (if any) on the right,
+  `bg-surface border border-border`, `p-3` body. Group related
   content — including form sections inside a modal — in `Panel`s. Use `status="idle"` for neutral
   sections, `"active"` (default, accent dot) for live ones, `"processing"` (pulsing) for in-flight.
 - **Page shell:** `PageHeader` (title + subtitle + right-aligned `actions`) at top, content in
@@ -165,6 +166,9 @@ still on mock data.
 6. No `Toggle` switch (broken) — use `Checkbox`.
 7. Labels/titles/buttons in `SCREAMING_SNAKE`; descriptions in sentence case.
 8. Never hardcode the Honcho base URL/token in a component — read from the config store.
+9. No decorative controls. A glyph that looks like a control (`×`, `□`, `─`, chevrons) must
+   be one. The old `─ □ ×` panel chrome was removed because it read as close / maximize
+   buttons that did nothing (issue #24).
 
 ## 10. Pre-ship checklist
 

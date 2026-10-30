@@ -130,11 +130,11 @@ const conclusions = [
 ];
 
 // A complete, generated provenance chain for the release screenshots.
-const demoConclusion = { ...conclusions[0], level: "deductive", times_derived: 4,
+const demoConclusion = { ...conclusions[0], level: "deductive", times_derived: 4, source_message_ids: null,
   source_ids: [conclusions[1].id], content: "Use generated demo data when sharing dashboard screenshots." };
-const demoParent = { ...conclusions[1], level: "explicit", times_derived: 2,
-  source_ids: [], content: "The demo user wants private memories kept out of public screenshots." };
-const demoDerived = { ...conclusions[2], level: "deductive", times_derived: 1,
+const demoParent = { ...conclusions[1], level: "explicit", times_derived: 2, source_ids: [],
+  source_message_ids: ["msg-demo-007"], content: "The demo user wants private memories kept out of public screenshots." };
+const demoDerived = { ...conclusions[2], level: "deductive", times_derived: 1, source_message_ids: null,
   source_ids: [demoConclusion.id], content: "Release images should be captured in an isolated synthetic workspace." };
 const provenance = [demoConclusion, demoParent, demoDerived];
 const demoEvidence = {
@@ -152,7 +152,7 @@ const demoTraces = ["llm.call.traced", "embedding.call.traced"].map((type, index
     agent_type: index ? "embedding" : "dialectic", call_purpose: index ? "Index session messages" : "Answer with memory evidence",
     transport: "http", provider: "demo-provider", provider_label: "Synthetic Demo", is_final_attempt: true,
     was_fallback: false, was_stream: false, was_truncated: false, finish_reason: "stop",
-    trace_id: "demo-trace-001", source_message_ids: ["msg-demo-007"], honcho_version: "3.2.1",
+    trace_id: "demo-trace-001", source_message_ids: ["msg-demo-007"], honcho_version: releaseSet ? "3.2.1" : "3.5.0",
     system_prompt_ref: "sha256:demo-prompt", provider_input_tokens: 840, provider_output_tokens: 120 },
 }));
 
@@ -225,16 +225,29 @@ function message(id, sessionId, peerId, content, hoursAgo, tokenCount) {
 }
 
 function conclusion(id, observerId, observedId, content, daysAgo) {
+  const level = daysAgo % 2 === 0 ? "explicit" : "deductive";
   return {
     id,
     content,
     observer_id: observerId,
     observed_id: observedId,
     session_id: "docs-review-002",
-    level: daysAgo % 2 === 0 ? "explicit" : "deductive",
+    level,
+    // Honcho 3.5: explicit conclusions cite their messages; derived ones carry null.
+    source_message_ids: level === "explicit" ? ["msg-demo-007"] : null,
     created_at: isoDaysAgo(daysAgo),
   };
 }
+
+// /openapi.json evidence the dashboard checks for each Honcho 3.5 feature.
+const honcho35Schemas = {
+  Conclusion: { properties: { id: {}, source_ids: {}, source_message_ids: {} } },
+  Scope: { properties: { id: {}, session_count: {} } },
+  Session: { properties: { id: {}, scopes: {} } },
+  WorkspaceSessionGet: { properties: { scope: {}, in_no_scope: {} } },
+  ScopeSessionsRemove: { properties: { session_ids: {} } },
+  WorkspaceUpdate: { properties: { configuration: { description: "Replaces the entire workspace configuration." } } },
+};
 
 function queue(total, completed, inProgress, pending) {
   return {
@@ -372,6 +385,10 @@ async function mockOperator(route, url) {
   if (view === "heatmap") return json(route, heatmapResponse());
   if (view === "sessions") return json(route, { available: true, sessions: sessionStats });
   if (view === "reasoning") return json(route, reasoningResponse());
+  if (view === "queue_failures") {
+    const id = url.searchParams.get("workspace_id");
+    return json(route, { available: true, workspace_id: id, failed: id === workspaceId ? 1 : 0, latest_failed_at: isoHoursAgo(18) });
+  }
   if (view === "conclusions") {
     return json(route, {
       available: true,
@@ -399,7 +416,10 @@ async function mockHoncho(route, request, url) {
 
   if (path === "/health") return json(route, { status: "ok" });
   if (path === "/openapi.json") {
-    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.1" } });
+    if (releaseSet) return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.2.1" } });
+    // The README set documents the current release: Honcho 3.5.0, with the
+    // schema entries the dashboard checks before using 3.5 features.
+    return json(route, { info: { title: "Honcho Synthetic Demo", version: "3.5.0" }, components: { schemas: honcho35Schemas } });
   }
   if (path === "/deriver/metrics") return json(route, {
     outstanding_work_seconds: 125, eligible_work_units: 18, claimed_work_units: 3, pending_items: 24,
@@ -407,7 +427,10 @@ async function mockHoncho(route, request, url) {
     measured_at: Math.floor(Date.now() / 1000), measurement_age_seconds: 2,
   });
   if (path.endsWith("/scopes/list")) return json(route, page([
-    { id: "demo_documentation", workspace_id: workspaceId, created_at: isoDaysAgo(7) },
+    {
+      id: "demo_documentation", workspace_id: workspaceId, created_at: isoDaysAgo(7),
+      ...(url.searchParams.get("include_session_count") === "true" ? { session_count: 2 } : {}),
+    },
   ]));
   if (path.endsWith("/scopes/demo_documentation/sessions/list")) return json(route, page(sessions.slice(0, 2)));
   if (path === "/v3/workspaces/list") return json(route, page(workspaces));
@@ -428,7 +451,12 @@ async function mockHoncho(route, request, url) {
   if (peerCreateMatch && method === "POST") return json(route, peerFor(body.id ?? "demo_user"));
 
   const sessionListMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/sessions\/list$/);
-  if (sessionListMatch) return json(route, page(sessions));
+  if (sessionListMatch) {
+    // Honcho 3.5 reports scope membership only when asked; the first two
+    // sessions are the members of demo_documentation listed above.
+    if (url.searchParams.get("include_scopes") !== "true") return json(route, page(sessions));
+    return json(route, page(sessions.map((item, index) => ({ ...item, scopes: index < 2 ? ["demo_documentation"] : [] }))));
+  }
 
   const sessionCreateMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/sessions$/);
   if (sessionCreateMatch && method === "POST") {
@@ -484,11 +512,17 @@ async function mockHoncho(route, request, url) {
 
   const chatMatch = path.match(/^\/v3\/workspaces\/([^/]+)(?:\/peers\/([^/]+))?\/chat$/);
   if (chatMatch) {
-    return json(route, {
-      content:
-        honcho321Set ? "Use synthetic data in an isolated workspace. Review every image before sharing." : releaseSet ? "Use generated demo data and keep private memories out of shared screenshots. Capture an isolated workspace, then review each image before posting." : "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.",
-      ...(body.include_evidence ? { evidence: chatMatch[2] ? demoEvidence : demoWorkspaceEvidence } : {}),
-    });
+    const content = honcho321Set ? "Use synthetic data in an isolated workspace. Review every image before sharing." : releaseSet ? "Use generated demo data and keep private memories out of shared screenshots. Capture an isolated workspace, then review each image before posting." : "This is a synthetic demo answer. The dashboard captures only generated fixtures, blocks unmocked API traffic, and reviews each image before it enters the repository.";
+    const evidence = body.include_evidence ? { evidence: chatMatch[2] ? demoEvidence : demoWorkspaceEvidence } : {};
+    // Chat streams by default; answer like Honcho, with evidence on the terminal event.
+    if (body.stream) {
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({ done: false, delta: { content } })}\n\ndata: ${JSON.stringify({ done: true, delta: {}, ...evidence })}\n\n`,
+      });
+    }
+    return json(route, { content, ...evidence });
   }
 
   const conclusionListMatch = path.match(/^\/v3\/workspaces\/([^/]+)\/conclusions\/list$/);
@@ -607,7 +641,7 @@ async function main() {
   } else if (honcho321Set) {
     await openRoute(page, "chat", "TRANSCRIPT");
     await page.getByRole("button", { name: "WORKSPACE", exact: true }).click();
-    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
+    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).check();
     await page.locator('input[placeholder^="ask across"]').fill("How should this workspace prepare screenshots for sharing?");
     await page.getByRole("button", { name: "SEND", exact: true }).click();
     await page.getByRole("button", { name: /SHOW_EVIDENCE/ }).click();
@@ -632,7 +666,7 @@ async function main() {
     await captureContext(page, "02-context-alignment.png");
   } else if (releaseSet) {
     await openRoute(page, "chat?peer=demo_agent", "TRANSCRIPT");
-    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
+    await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).check();
     await page.locator('input[placeholder^="ask demo_agent"]').fill("How should I prepare screenshots for sharing?");
     await page.getByRole("button", { name: "SEND", exact: true }).click();
     await page.getByRole("button", { name: /SHOW_EVIDENCE/ }).click();
@@ -670,7 +704,7 @@ async function main() {
 
   await openRoute(page, "chat?peer=demo_agent&session=support-intake-001", "TRANSCRIPT");
   const chatInput = page.locator('input[placeholder^="ask demo_agent"]');
-  await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).click();
+  await page.getByRole("checkbox", { name: "INCLUDE_EVIDENCE", exact: true }).check();
   await chatInput.fill("How is this screenshot kept privacy-safe?");
   await page.getByRole("button", { name: "SEND", exact: true }).click();
   await page.getByText("This is a synthetic demo answer.", { exact: false }).waitFor();

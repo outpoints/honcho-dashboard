@@ -124,7 +124,7 @@ This is an operator's console onto a self-hosted memory server, not a marketing
 dashboard. Every panel is a readout: a window onto workspaces, peers, sessions,
 conclusions, runtime, and queue health. The aesthetic borrows from terminals and
 IDEs — flat surfaces, square corners, hairline borders, monospace everywhere,
-bracketed window chrome (`[ TITLE ]` with `─ □ ×` controls), and a single blue
+bracketed panel titles (`[ TITLE ]` beside a status dot), and a single blue
 signal color that means "live / selected / acting" and nothing else. The mood is
 confidence and control: the operator should trust the numbers and feel the tool
 stay out of the way.
@@ -176,7 +176,7 @@ reserved semantic palette for status.
 - **Border Light** (`#262626`): Hover / emphasized borders and the resting border on
   low-emphasis controls (secondary buttons, the modal card edge).
 - **Text Primary** (`#ededed`): Primary readable text, values, headings.
-- **Text Muted** (`#737373`): Labels, hints, secondary text, window-chrome glyphs.
+- **Text Muted** (`#737373`): Labels, hints, secondary text, panel titles.
 
 ### Semantic (status only)
 - **Danger Red** (`oklch(70.4% 0.191 22.216)`): Errors and destructive hover states.
@@ -275,7 +275,8 @@ button has a shadow, it is wrong. Square corners only — `rounded-*` is prohibi
 ### Panel (signature)
 A titled section container used everywhere. `bg-surface border border-border`, no radius,
 no shadow. Header (`px-3 py-2`, bottom border) carries a status dot + `[ TITLE ]` on the
-left and `─ □ ×` window-chrome glyphs on the right (the `×` tints accent on hover). Body is
+left and the panel's actions, if any, on the right. No decorative window glyphs: anything
+that looks like a control is one. Body is
 `p-3`. Status dot: `idle` = muted, `active` = accent, `processing` = pulsing yellow. Entrance:
 fade + 10px rise, 0.25s, ease `[0.25,0.46,0.45,0.94]`.
 

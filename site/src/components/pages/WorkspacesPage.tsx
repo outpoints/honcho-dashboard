@@ -9,11 +9,14 @@ import { Button, Field, TextInput, RefreshButton } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { WorkspaceConfigModal } from "@/components/WorkspaceConfigModal";
+import { ServerUid } from "@/components/ServerUid";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
 import { honcho } from "@/lib/honcho/client";
-import { useActiveHonchoOptions } from "@/lib/honcho/config";
+import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
+import { ExportWorkspaceModal, ImportWorkspaceModal } from "@/components/WorkspaceTransfer";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
 import type { ApiWorkspace } from "@/lib/honcho/types";
 import { peersHash } from "@/lib/peerWorkspaceFilter";
@@ -33,6 +36,10 @@ export function WorkspacesPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [configTarget, setConfigTarget] = useState<ApiWorkspace | null>(null);
+  const [exportTarget, setExportTarget] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
+  const capabilities = useHonchoCapabilities();
 
   const workspaces = data?.items ?? [];
 
@@ -110,7 +117,10 @@ export function WorkspacesPage() {
           <div className="flex items-center gap-2">
             <RefreshButton label="REFRESH" onClick={() => refetch()} />
             {canWrite ? (
-              <Button icon="plus" onClick={openCreate}>NEW_WORKSPACE</Button>
+              <>
+                <Button variant="outline" icon="upload" onClick={() => setImportOpen(true)} disabled={!apiOpts}>IMPORT</Button>
+                <Button icon="plus" onClick={openCreate}>NEW_WORKSPACE</Button>
+              </>
             ) : null}
           </div>
         }
@@ -144,6 +154,7 @@ export function WorkspacesPage() {
                   workspace={w}
                   onRemove={() => remove(w.id)}
                   onConfig={() => setConfigTarget(w)}
+                  onExport={() => setExportTarget(w.id)}
                   canRemove={canWrite}
                 />
               </motion.div>
@@ -183,6 +194,34 @@ export function WorkspacesPage() {
         onClose={() => setConfigTarget(null)}
         onSaved={() => refetch()}
       />
+
+      {exportTarget ? (
+        <ExportWorkspaceModal
+          open
+          onClose={() => setExportTarget(null)}
+          apiOpts={apiOpts}
+          workspaceId={exportTarget}
+          scopesAvailable={capabilities.scopes === "available"}
+          honchoVersion={capabilities.version}
+        />
+      ) : null}
+
+      {importOpen ? (
+        <ImportWorkspaceModal
+          open
+          onClose={() => setImportOpen(false)}
+          apiOpts={apiOpts}
+          workspaces={workspaces.map((w) => w.id)}
+          defaultTarget={activeWorkspaceId}
+          scopesAvailable={capabilities.scopes === "available"}
+          honchoVersion={capabilities.version}
+          onImported={() => {
+            invalidate("workspaces");
+            invalidate("sdk/");
+            refetch();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -191,11 +230,13 @@ function WorkspaceCard({
   workspace,
   onRemove,
   onConfig,
+  onExport,
   canRemove,
 }: {
   workspace: ApiWorkspace;
   onRemove: () => void;
   onConfig: () => void;
+  onExport: () => void;
   canRemove: boolean;
 }) {
   const created = workspace.created_at
@@ -208,6 +249,7 @@ function WorkspaceCard({
     <Panel title={workspace.id.toUpperCase()}>
       <div className="space-y-1 text-[11px] mb-3">
         <Row k="id" v={<span className="text-text-primary font-mono">{workspace.id}</span>} />
+        <ServerUid uid={workspace.uid} />
         <Row k="created" v={<span className="text-text-primary">{created}</span>} />
         <Row
           k="configuration"
@@ -237,6 +279,16 @@ function WorkspaceCard({
           title="Edit workspace config"
         >
           <Icon name="settings" size={12} />
+        </motion.button>
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={onExport}
+          className="w-8 h-8 border border-border-light text-text-muted hover:text-accent flex items-center justify-center"
+          aria-label={`Export workspace ${workspace.id}`}
+          title="Export to JSON"
+        >
+          <Icon name="download" size={12} />
         </motion.button>
         {canRemove ? (
           <motion.button

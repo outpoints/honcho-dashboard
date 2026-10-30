@@ -66,10 +66,11 @@ body
 - Left: `■ instance: healthy | workspaces: 3 | peers: 1,304 | queue: 4 pending`
 - Right: `postgres: connected | honcho: v3.0.5`
 
-## Card Window Chrome
-Every panel card has this header bar (`flex items-center justify-between px-3 py-2 border-b border-border`):
+## Card Header
+Every panel card has this header bar (`flex items-center justify-between gap-2 px-3 py-2 border-b border-border`):
 - Left: `■` (w-2 h-2 bg-accent square) + `[ TITLE ]` (text-muted, text-xs)
-- Right: `─ □ ×` (three muted spans, text-xs)
+- Right: the panel's `actions` (buttons, chips), or nothing. No decorative `─ □ ×` window
+  glyphs: they read as close / maximize controls and do nothing (issue #24).
 
 Card body: `p-3` wrapper
 
@@ -111,7 +112,7 @@ Subtitle line under heading: `> <prose>` in muted text-xs.
 ## WORKSPACES page
 - Subtitle: `> top-level containers for organizing peers, sessions, and data`
 - Top-right action: `+ NEW_WORKSPACE` (blue outline button)
-- 3-card grid (md:grid-cols-2 lg:grid-cols-3): each card has window chrome + stats + config keys + VIEW_PEERS button row + gear + trash + footer (created/id)
+- 3-card grid (md:grid-cols-2 lg:grid-cols-3): each card has the panel header + stats + config keys + VIEW_PEERS button row + gear + trash + footer (created/id)
 
 ## PEERS page
 - Subtitle: `> users and agents that interact within sessions`

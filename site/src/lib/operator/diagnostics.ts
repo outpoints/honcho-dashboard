@@ -1,5 +1,6 @@
 import "server-only";
-import { dbHealth, dbStats } from "./db";
+import { dbHealth, dbSchemaFacts, dbStats } from "./db";
+import { schemaProbes } from "./schemaHealth";
 import { runtimeInfo } from "./runtime";
 import { tailLogs } from "./logs";
 import { isLocationAllowed } from "../honcho/allowlist";
@@ -125,42 +126,61 @@ async function probeHonchoWorkspaces(baseUrl: string, token?: string): Promise<P
   }
 }
 
-async function probeOpenapi(baseUrl: string): Promise<Probe> {
+async function probeOpenapi(baseUrl: string): Promise<{ probe: Probe; version: string | null }> {
   const start = Date.now();
   try {
     const res = await safeFetch(`${baseUrl.replace(/\/+$/, "")}/openapi.json`, {});
     if (!res.ok) {
       return {
+        version: null,
+        probe: {
+          id: "honcho.openapi",
+          category: "honcho",
+          label: "GET /openapi.json",
+          status: "warn",
+          timing_ms: Date.now() - start,
+          message: `HTTP ${res.status}`,
+        },
+      };
+    }
+    const j = (await res.json()) as { info?: { title?: string; version?: string } };
+    const version = typeof j.info?.version === "string" ? j.info.version : null;
+    return {
+      version,
+      probe: {
+        id: "honcho.openapi",
+        category: "honcho",
+        label: "GET /openapi.json",
+        status: "ok",
+        timing_ms: Date.now() - start,
+        message: `${j.info?.title ?? "OpenAPI"} ${version ?? ""}`,
+      },
+    };
+  } catch (err) {
+    return {
+      version: null,
+      probe: {
         id: "honcho.openapi",
         category: "honcho",
         label: "GET /openapi.json",
         status: "warn",
         timing_ms: Date.now() - start,
-        message: `HTTP ${res.status}`,
-      };
-    }
-    const j = (await res.json()) as { info?: { title?: string; version?: string } };
-    return {
-      id: "honcho.openapi",
-      category: "honcho",
-      label: "GET /openapi.json",
-      status: "ok",
-      timing_ms: Date.now() - start,
-      message: `${j.info?.title ?? "OpenAPI"} ${j.info?.version ?? ""}`,
-    };
-  } catch (err) {
-    return {
-      id: "honcho.openapi",
-      category: "honcho",
-      label: "GET /openapi.json",
-      status: "warn",
-      timing_ms: Date.now() - start,
-      message: err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err),
+      },
     };
   }
 }
 
-async function probeDb(): Promise<Probe[]> {
+/** Migration state: revision vs. server version, INVALID indexes, 3.4 queue indexes. */
+async function probeSchema(serverVersion: Promise<string | null>): Promise<Probe[]> {
+  const facts = await dbSchemaFacts();
+  if (!facts.available) {
+    return [{ id: "db.schema_revision", category: "database", label: "schema revision", status: "skip", message: facts.reason }];
+  }
+  return schemaProbes(facts, await serverVersion);
+}
+
+async function probeDb(serverVersion: Promise<string | null>): Promise<Probe[]> {
   const health = await dbHealth();
   if (!health.available) {
     return [
@@ -193,6 +213,7 @@ async function probeDb(): Promise<Probe[]> {
       ? `installed${stats.vector_count !== undefined ? ` · ${stats.vector_count} vector columns` : ""}`
       : "extension not installed",
   });
+  probes.push(...(await probeSchema(serverVersion)));
   if (stats.available) {
     probes.push({
       id: "db.size",
@@ -245,11 +266,12 @@ export async function diagnose(
   baseUrl: string,
   token?: string,
 ): Promise<DiagnosticsResult> {
-  const [honchoHealth, honchoWorkspaces, honchoOpenapi, dbProbes, logsProbe] = await Promise.all([
+  const openapi = probeOpenapi(baseUrl);
+  const [honchoHealth, honchoWorkspaces, { probe: honchoOpenapi }, dbProbes, logsProbe] = await Promise.all([
     probeHonchoHealth(baseUrl, token),
     probeHonchoWorkspaces(baseUrl, token),
-    probeOpenapi(baseUrl),
-    probeDb(),
+    openapi,
+    probeDb(openapi.then((result) => result.version)),
     probeLogs(),
   ]);
   const runtime = runtimeInfo();

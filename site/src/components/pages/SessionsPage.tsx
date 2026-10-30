@@ -12,6 +12,9 @@ import { Icon } from "@/components/icons";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Modal } from "@/components/Modal";
 import { SessionFileUploadModal } from "@/components/SessionFileUploadModal";
+import { ServerUid } from "@/components/ServerUid";
+import type { PeerKind } from "@/components/MessageLine";
+import { SessionTranscript } from "@/components/SessionTranscript";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
@@ -23,8 +26,8 @@ import { getSdk } from "@/lib/honcho/sdk";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import type { HonchoCapabilityState } from "@/lib/honcho/capabilities";
 import { listAllSessions } from "@/lib/honcho/sessionListing";
-import { toApiSession, toApiMessage, toApiPeer } from "@/lib/honcho/adapters";
-import type { ApiSession, ApiMessage } from "@/lib/honcho/types";
+import { toApiSession, toApiPeer } from "@/lib/honcho/adapters";
+import type { ApiSession } from "@/lib/honcho/types";
 import type { HonchoClientOptions } from "@/lib/honcho/client";
 import { cn } from "@/lib/utils";
 
@@ -81,14 +84,21 @@ function deriveStatus(active: boolean, lastMessageAt: string | null): StatusFilt
   return "idle";
 }
 
+/** Scope filter value for sessions that belong to no scope. */
+const NO_SCOPE = "__no_scope__";
+
 export function SessionsPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
   const { push } = useToast();
-  const { scopedSessionClone } = useHonchoCapabilities();
+  const { scopedSessionClone, sessionScopes } = useHonchoCapabilities();
+  // Honcho 3.5+: the session list reports each session's scopes in the same query.
+  const includeScopes = sessionScopes === "available";
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  /** "all", NO_SCOPE, or a scope name (3.5+). */
+  const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("__active__");
   const [open, setOpen] = useState<string | null>(null);
@@ -106,7 +116,9 @@ export function SessionsPage() {
   }, [workspaceFilter, activeWorkspaceId, wsList.data]);
 
   // Sessions + a peer-type map, fetched per targeted workspace and merged.
-  const sessionsKey = targetWorkspaces.length ? `sdk/sessions/${targetWorkspaces.join(",")}` : null;
+  const sessionsKey = targetWorkspaces.length
+    ? `sdk/sessions/${targetWorkspaces.join(",")}${includeScopes ? "?include_scopes" : ""}`
+    : null;
   const { data, error, isLoading, refetch } = useHonchoQuery<{
     items: ApiSession[];
     peerTypes: Record<string, PeerType>;
@@ -114,7 +126,7 @@ export function SessionsPage() {
     const perWs = await Promise.all(
       targetWorkspaces.map(async (ws) => {
         const [sessions, peers] = await Promise.all([
-          listAllSessions(getSdk(o, ws)).then((items) => items.map((s) => toApiSession(s))),
+          listAllSessions(getSdk(o, ws), { includeScopes }).then((items) => items.map((s) => toApiSession(s))),
           getSdk(o, ws)
             .peers({ size: 100 })
             .then((p) => p.items.map((peer) => toApiPeer(peer)))
@@ -148,6 +160,15 @@ export function SessionsPage() {
   const stats = useOperatorQuery<SessionStatsResp>(statsPath);
   const statsMap = stats.data?.available ? stats.data.sessions ?? {} : {};
 
+  // Message lines show a peer's type only when its configuration sets it.
+  const configuredPeerKind = useMemo(() => {
+    const map = data?.peerTypes ?? {};
+    return (workspaceId: string, peerId: string): PeerKind => {
+      const t = map[`${workspaceId}::${peerId}`];
+      return t === "user" || t === "agent" ? t : null;
+    };
+  }, [data?.peerTypes]);
+
   const resolvePeerType = useMemo(() => {
     const map = data?.peerTypes ?? {};
     return (workspaceId: string, peerId: string): PeerType => {
@@ -168,13 +189,26 @@ export function SessionsPage() {
     });
   }, [data?.items, statsMap]);
 
+  // Scope names seen on the loaded sessions. Only sessions listed with
+  // `include_scopes` carry `scopes`, so an empty list hides the filter.
+  const scopeNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const d of decorated) for (const name of d.session.scopes ?? []) names.add(name);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [decorated]);
+  const scopeFilterShown = includeScopes && scopeNames.length > 0;
+  const activeScopeFilter = scopeFilterShown && (scopeFilter === NO_SCOPE || scopeNames.includes(scopeFilter)) ? scopeFilter : "all";
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = decorated.filter((d) => {
       if (statusFilter !== "all" && d.status !== statusFilter) return false;
+      if (activeScopeFilter === NO_SCOPE && (d.session.scopes?.length ?? 0) > 0) return false;
+      if (activeScopeFilter !== "all" && activeScopeFilter !== NO_SCOPE && !d.session.scopes?.includes(activeScopeFilter)) return false;
       if (q) {
         const hay = `${d.session.id} ${(d.stat?.peers ?? []).join(",")}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+        // Honcho 3.4+ uid: match an exact paste only, so short queries stay readable.
+        if (!hay.includes(q) && d.session.uid?.toLowerCase() !== q) return false;
       }
       return true;
     });
@@ -204,7 +238,7 @@ export function SessionsPage() {
       }
     });
     return list;
-  }, [decorated, statusFilter, query, sort]);
+  }, [decorated, statusFilter, activeScopeFilter, query, sort]);
 
   const remove = async (workspaceId: string, sid: string) => {
     if (!apiOpts) return;
@@ -259,7 +293,8 @@ export function SessionsPage() {
         <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-void border border-border px-3 py-2">
           <Icon name="search" className="text-text-muted" size={12} />
           <input
-            placeholder="search sessions by id or peer name..."
+            placeholder="search by id, peer, or uid…"
+            aria-label="Search sessions by id or peer name, or paste a uid"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="bg-transparent text-xs flex-1 outline-none placeholder:text-text-muted"
@@ -275,6 +310,22 @@ export function SessionsPage() {
             triggerClassName="py-1.5"
           />
         </div>
+        {scopeFilterShown ? (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-text-muted">scope:</span>
+            <Select
+              value={activeScopeFilter}
+              onChange={setScopeFilter}
+              options={[
+                { value: "all", label: "any scope or none" },
+                { value: NO_SCOPE, label: "in no scope" },
+                ...scopeNames.map((name) => ({ value: name, label: name })),
+              ]}
+              className="min-w-[160px]"
+              triggerClassName="py-1.5"
+            />
+          </div>
+        ) : null}
         <div className="flex items-center gap-2 text-xs">
           <span className="text-text-muted">sort:</span>
           <Select
@@ -326,7 +377,7 @@ export function SessionsPage() {
       ) : filtered.length === 0 ? (
         <Panel title="NO_SESSIONS">
           <div className="text-xs text-text-muted py-4">
-            {query || statusFilter !== "all"
+            {query || statusFilter !== "all" || activeScopeFilter !== "all"
               ? "No sessions match the filter."
               : "No sessions in this workspace yet."}
           </div>
@@ -351,6 +402,7 @@ export function SessionsPage() {
                   open={open === d.session.id}
                   onToggle={() => setOpen(open === d.session.id ? null : d.session.id)}
                   resolvePeerType={resolvePeerType}
+                  configuredPeerKind={configuredPeerKind}
                   apiOpts={apiOpts}
                   cloneScoped={scopedSessionClone}
                   onRemove={() => setRemoveTarget(d.session.id)}
@@ -401,6 +453,7 @@ function SessionRow({
   open,
   onToggle,
   resolvePeerType,
+  configuredPeerKind,
   apiOpts,
   cloneScoped,
   onRemove,
@@ -413,6 +466,7 @@ function SessionRow({
   open: boolean;
   onToggle: () => void;
   resolvePeerType: (workspaceId: string, peerId: string) => PeerType;
+  configuredPeerKind: (workspaceId: string, peerId: string) => PeerKind;
   apiOpts: HonchoClientOptions | null;
   cloneScoped: HonchoCapabilityState;
   onRemove: () => void;
@@ -422,7 +476,6 @@ function SessionRow({
   const [detail, setDetail] = useState<{
     loading: boolean;
     loaded: boolean;
-    messages: ApiMessage[];
     peers: string[];
     hasSummary: boolean;
     summary: string | null;
@@ -432,7 +485,6 @@ function SessionRow({
   }>({
     loading: false,
     loaded: false,
-    messages: [],
     peers: [],
     hasSummary: false,
     summary: null,
@@ -472,11 +524,8 @@ function SessionRow({
       (async () => {
         try {
           const ses = await getSdk(opts, session.workspace_id).session(session.id);
-          const [msgs, summaries, sessionPeers] = await Promise.all([
-            ses
-              .messages({ size: 5, reverse: true })
-              .then((p) => p.items.map((m) => toApiMessage(m)))
-              .catch(() => []),
+          // The conversation itself loads in SessionTranscript.
+          const [summaries, sessionPeers] = await Promise.all([
             ses.summaries().catch(() => null),
             ses
               .peers()
@@ -489,7 +538,6 @@ function SessionRow({
           setDetail({
             loading: false,
             loaded: true,
-            messages: msgs,
             peers: sessionPeers,
             hasSummary: !!(short || long),
             summary: short?.content ?? long?.content ?? null,
@@ -631,6 +679,12 @@ function SessionRow({
                 SUMMARY
               </Chip>
             ) : null}
+            {/* Honcho 3.5+: the scopes this session is an active member of. */}
+            {(session.scopes ?? []).map((name) => (
+              <Chip key={name} tone="muted" icon="focus">
+                SCOPE · {name}
+              </Chip>
+            ))}
           </div>
           <div className="flex items-center gap-3 text-[10px] text-text-muted mt-1">
             <span className="flex items-center gap-1">
@@ -678,6 +732,7 @@ function SessionRow({
             className="border-t border-border overflow-hidden bg-void/30"
           >
             <div className="p-3 space-y-3">
+              <ServerUid uid={session.uid} className="justify-start gap-3" />
               <div>
                 <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">
                   SESSION_PEERS ({peers.length})
@@ -733,41 +788,13 @@ function SessionRow({
                 ) : null}
               </div>
 
-              <div>
-                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">
-                  RECENT_MESSAGES{detail.loaded ? ` (${detail.messages.length})` : ""}
-                </div>
-                {detail.loading && !detail.loaded ? (
-                  <div className="space-y-2">
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <div key={i} className="h-9 bg-border/40 animate-pulse" />
-                    ))}
-                  </div>
-                ) : detail.error ? (
-                  <div className="text-[11px] text-red-400">{detail.error}</div>
-                ) : detail.messages.length === 0 ? (
-                  <div className="text-[11px] text-text-muted italic">No messages in this session yet.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {detail.messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className="px-3 py-2 bg-surface border-l-2 border-blue-400/50 border-y border-r border-border"
-                      >
-                        <div className="flex items-center gap-2 mb-1 text-[10px]">
-                          <PeerAvatar type={resolvePeerType(session.workspace_id, m.peer_id)} />
-                          <span className="text-text-primary">{m.peer_id}</span>
-                          <span className="text-text-muted">{new Date(m.created_at).toLocaleString()}</span>
-                          <Chip tone="muted">{m.token_count} tok</Chip>
-                        </div>
-                        <div className="text-xs text-text-primary line-clamp-3">
-                          <Markdown inline text={m.content} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <SessionTranscript
+                apiOpts={apiOpts}
+                workspaceId={session.workspace_id}
+                sessionId={session.id}
+                peerKind={(peerId) => configuredPeerKind(session.workspace_id, peerId)}
+                refreshKey={detailVersion}
+              />
 
               {detail.summary ? (
                 <div>

@@ -80,7 +80,9 @@ checks above after capture and before sharing.
 
 ## README image set
 
-The default capture produces eleven synthetic-data views. The README embeds ten;
+The default capture produces eleven synthetic-data views from a synthetic server that
+identifies as Honcho 3.5.0, so the version label, scope labels, cited-message counts,
+and the sidebar's failed-queue count match the current release. The README embeds ten;
 `dashboard.png` documents the expanded session used to open the upload view.
 
 | File | Purpose |

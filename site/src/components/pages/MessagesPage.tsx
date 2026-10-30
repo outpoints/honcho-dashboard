@@ -1,100 +1,271 @@
 "use client";
 
-import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { Panel } from "@/components/Panel";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, RefreshButton } from "@/components/atoms";
-import { Markdown } from "@/components/Markdown";
-import { Select } from "@/components/Select";
+import { Button, RefreshButton, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
-import { useToast } from "@/components/toast";
-import { useActiveWorkspace } from "@/lib/honcho/config";
-import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
-import { useOperatorQuery } from "@/lib/operator/client";
+import { MessageLine, MessageLineHeader, type PeerKind } from "@/components/MessageLine";
+import { Select } from "@/components/Select";
+import { honcho as raw } from "@/lib/honcho/client";
+import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { getSdk } from "@/lib/honcho/sdk";
-import { toApiSession, toApiPeer, toApiMessage } from "@/lib/honcho/adapters";
-import type { ApiSession, ApiPeer } from "@/lib/honcho/types";
+import { toApiPeer, toApiSession } from "@/lib/honcho/adapters";
+import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import type { ApiPeer, ApiSession } from "@/lib/honcho/types";
+import { collapsedScope, useCollapsedSessions } from "@/lib/collapsedSessions";
+import {
+  LIVE_INTERVAL_MS,
+  STREAM_PAGE,
+  groupRuns,
+  matchesText,
+  mergeNewer,
+  middleTruncate,
+  peerColumnWidth,
+  readStreamHash,
+  streamHash,
+  streamRows,
+  streamUrl,
+  summarize,
+  type SessionGroup,
+  type StreamFilters,
+  type StreamMessage,
+} from "@/lib/messageStream";
+import { appendOlder, shortStamp } from "@/lib/sessionTranscript";
+import { useTextHighlight } from "@/lib/textHighlight";
 import { cn } from "@/lib/utils";
 
-type PeerType = "user" | "agent" | "unknown";
-
-interface StreamMessage {
-  id: string;
-  peer_id: string;
-  session_id: string;
-  content: string;
-  token_count: number;
-  created_at: string;
-}
-
-interface MessagesResp {
-  available: boolean;
-  reason?: string;
-  messages?: StreamMessage[];
-}
-
-function classifyPeerConfig(cfg: Record<string, unknown> | undefined): PeerType {
+/** A peer's type from `observe_me`; null when unset. Never guessed from the name. */
+function peerKindOf(cfg: Record<string, unknown> | undefined): PeerKind {
   const c = cfg ?? {};
-  const observeMe =
-    (c as { observe_me?: boolean }).observe_me ?? (c as { observeMe?: boolean }).observeMe;
-  if (observeMe === true) return "user";
-  if (observeMe === false) return "agent";
-  return "unknown";
+  const observeMe = (c as { observe_me?: boolean }).observe_me ?? (c as { observeMe?: boolean }).observeMe;
+  return observeMe === true ? "user" : observeMe === false ? "agent" : null;
 }
 
-function nameLooksAgent(name: string): boolean {
-  const n = name.toLowerCase();
-  return n.includes("bot") || n.includes("agent") || n === "assistant";
-}
-
-/** Both message sources return at most this many rows, newest first. */
-const STREAM_LIMIT = 100;
-
-/**
- * A picked session reads like a transcript, oldest first. The cross-session
- * feed stays newest first. Both sources arrive newest first, so equal or
- * unparseable timestamps fall back to that arrival order.
- */
-function orderForView<T extends { created_at: string }>(messages: T[], oldestFirst: boolean): T[] {
-  const dir = oldestFirst ? 1 : -1;
-  return messages
-    .map((m, i) => ({ m, i, t: Date.parse(m.created_at) || 0 }))
-    .sort((a, b) => dir * (a.t - b.t) || dir * (b.i - a.i))
-    .map(({ m }) => m);
-}
-
-function readHashParam(key: string): string | null {
-  if (typeof window === "undefined") return null;
-  const m = window.location.hash.match(new RegExp(`[?&]${key}=([^&]+)`));
-  return m ? decodeURIComponent(m[1]) : null;
-}
+// One session: the Sessions transcript's columns, peer | message | tokens | time.
+// The peer column width comes from --peer-col, set from the names shown.
+const LINE_GRID =
+  "grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[var(--peer-col,11rem)_minmax(0,1fr)_3.5rem_6.5rem] gap-x-3 gap-y-0.5";
+// Grouped by session: peer | message | time. The group header carries the token
+// total and an opened line names its own tokens.
+const GROUP_GRID =
+  "grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[var(--peer-col,11rem)_minmax(0,1fr)_6.5rem] gap-x-3 gap-y-0.5";
+const NO_IDS: ReadonlySet<string> = new Set();
+/** The reader counts as at the top when scrolled less than this. */
+const TOP_SLACK_PX = 48;
 
 function subscribeHash(notify: () => void) {
-  if (typeof window === "undefined") return () => undefined;
   window.addEventListener("hashchange", notify);
   return () => window.removeEventListener("hashchange", notify);
 }
 
+interface DbPage {
+  available: boolean;
+  reason?: string;
+  messages?: StreamMessage[];
+  hasMore?: boolean;
+}
+
+interface StreamState {
+  key: string;
+  status: "loading" | "ready" | "error" | "needs-db";
+  newestFirst: StreamMessage[];
+  hasMore: boolean;
+  source: "db" | "api";
+  /** Next API page number (API source only). */
+  nextPage: number | null;
+  error?: string;
+  reason?: string;
+}
+
+const EMPTY: StreamState = { key: "", status: "loading", newestFirst: [], hasMore: false, source: "db", nextPage: null };
+
+async function fetchDbPage(filters: StreamFilters, cursor?: Parameters<typeof streamUrl>[1]): Promise<DbPage> {
+  const res = await fetch(streamUrl(filters, cursor), { cache: "no-store" });
+  const body = (await res.json().catch(() => null)) as DbPage | { detail?: string } | null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(body as { detail?: string } | null)?.detail ?? res.statusText}`);
+  return body as DbPage;
+}
+
+/**
+ * Messages, kept newest first, a page at a time, plus live follow. The operator
+ * database covers the whole workspace and searches text on the server; without
+ * it, one session reads through the Honcho API (a raw list, never the SDK's
+ * get-or-create).
+ */
+function useMessageStream(filters: StreamFilters | null, refreshKey: number) {
+  const apiOpts = useActiveHonchoOptions();
+  const [state, setState] = useState<StreamState>(EMPTY);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<{ key: string; message: string } | null>(null);
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  const key = filters ? `${filters.workspaceId}|${filters.sessionId}|${filters.peerId}|${filters.q}|${refreshKey}` : "";
+
+  const apiPage = async (f: StreamFilters, page: number) => {
+    if (!apiOpts || !f.sessionId) throw new Error("No Honcho instance is configured.");
+    return raw.sessions.messages(apiOpts, f.workspaceId, f.sessionId, {
+      page,
+      size: STREAM_PAGE,
+      reverse: true,
+      filters: f.peerId ? { peer_id: f.peerId } : undefined,
+    });
+  };
+
+  useEffect(() => {
+    if (!filters || !apiOpts) return;
+    let cancelled = false;
+    const f = filters;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setState({ ...EMPTY, key });
+      setMoreError(null);
+    });
+    (async () => {
+      try {
+        const db = await fetchDbPage(f);
+        if (cancelled) return;
+        if (db.available) {
+          setState({ key, status: "ready", source: "db", newestFirst: db.messages ?? [], hasMore: !!db.hasMore, nextPage: null });
+          return;
+        }
+        if (!f.sessionId) {
+          setState({ ...EMPTY, key, status: "needs-db", reason: db.reason });
+          return;
+        }
+        const page = await apiPage(f, 1);
+        if (cancelled) return;
+        setState({
+          key,
+          status: "ready",
+          source: "api",
+          newestFirst: page.items,
+          hasMore: page.page < page.pages,
+          nextPage: page.page < page.pages ? page.page + 1 : null,
+          reason: db.reason,
+        });
+      } catch (err) {
+        if (!cancelled) setState({ ...EMPTY, key, status: "error", error: formatApiError(err) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `filters` is summarised by `key`; apiPage only reads apiOpts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, apiOpts]);
+
+  const loadMore = async () => {
+    if (!filters || loadingMore || state.key !== key || !state.hasMore) return;
+    setLoadingMore(true);
+    setMoreError(null);
+    try {
+      if (state.source === "db") {
+        const oldest = state.newestFirst.at(-1);
+        const db = await fetchDbPage(filters, oldest ? { before: oldest } : undefined);
+        if (!db.available) throw new Error(db.reason ?? "The operator database is unavailable.");
+        setState((s) => (s.key !== key ? s : { ...s, newestFirst: appendOlder(s.newestFirst, db.messages ?? []), hasMore: !!db.hasMore }));
+      } else if (state.nextPage !== null) {
+        const page = await apiPage(filters, state.nextPage);
+        const more = page.page < page.pages && page.items.length > 0;
+        setState((s) => (s.key !== key ? s : {
+          ...s,
+          newestFirst: appendOlder(s.newestFirst, page.items),
+          hasMore: more,
+          nextPage: more ? page.page + 1 : null,
+        }));
+      }
+    } catch (err) {
+      setMoreError(formatApiError(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Live follow: while the view is ready and the tab is visible, check for
+  // messages newer than the latest one shown. Reads only.
+  const ready = state.key === key && state.status === "ready";
+  const source = state.source;
+  useEffect(() => {
+    if (!filters || !ready) return;
+    const f = filters;
+    let cancelled = false;
+    let busy = false;
+    const tick = async () => {
+      if (busy || document.visibilityState !== "visible") return;
+      busy = true;
+      try {
+        const newest = stateRef.current.key === key ? stateRef.current.newestFirst[0] : undefined;
+        if (source === "db") {
+          const db = await fetchDbPage(f, newest ? { after: newest } : undefined);
+          if (cancelled) return;
+          if (!db.available) throw new Error(db.reason ?? "The operator database is unavailable.");
+          // More new messages than one check returns: merging would leave a gap,
+          // so start again from the latest page.
+          const latest = newest && db.hasMore ? await fetchDbPage(f) : null;
+          if (cancelled) return;
+          setState((cur) => {
+            if (cur.key !== key) return cur;
+            if (latest) return { ...cur, newestFirst: latest.messages ?? [], hasMore: !!latest.hasMore };
+            const { list } = mergeNewer(cur.newestFirst, db.messages ?? []);
+            return list === cur.newestFirst ? cur : { ...cur, newestFirst: list };
+          });
+        } else {
+          const page = await apiPage(f, 1);
+          if (cancelled) return;
+          setState((cur) => {
+            if (cur.key !== key) return cur;
+            const known = new Set(cur.newestFirst.map((m) => m.id));
+            // No overlap with what is shown means a gap: restart from this page.
+            if (cur.newestFirst.length && page.items.length && !page.items.some((m) => known.has(m.id))) {
+              const more = page.page < page.pages;
+              return { ...cur, newestFirst: page.items, hasMore: more, nextPage: more ? page.page + 1 : null };
+            }
+            const { list } = mergeNewer(cur.newestFirst, page.items);
+            return list === cur.newestFirst ? cur : { ...cur, newestFirst: list };
+          });
+        }
+        setLiveError(null);
+      } catch (err) {
+        if (!cancelled) setLiveError({ key, message: formatApiError(err) });
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = window.setInterval(() => void tick(), LIVE_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // `filters` is summarised by `key`; apiPage only reads apiOpts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, ready, source, apiOpts]);
+
+  const current = state.key === key ? state : { ...EMPTY, key };
+  return { ...current, loadingMore, moreError, loadMore, liveError: liveError?.key === key ? liveError.message : null };
+}
+
 export function MessagesPage() {
   const { workspaceId } = useActiveWorkspace();
+  const apiOpts = useActiveHonchoOptions();
+  const hash = useSyncExternalStore(subscribeHash, () => window.location.hash, () => "");
+  const { sessionId, peerId, q } = readStreamHash(hash);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const setFilters = (next: Partial<{ sessionId: string | null; peerId: string | null; q: string }>) => {
+    window.location.hash = streamHash({ sessionId, peerId, q, ...next });
+  };
 
-  const hashSession = useSyncExternalStore(subscribeHash, () => readHashParam("session"), () => null);
-  const hashPeer = useSyncExternalStore(subscribeHash, () => readHashParam("peer"), () => null);
-
-  const [query, setQuery] = useState("");
-  const [sessionOverride, setSessionOverride] = useState<string | null>(null);
-  const [peerFilter, setPeerFilter] = useState<string | null>(null);
-
-  // Effective session filter: explicit dropdown choice wins, else the hash link.
-  const sessionFilter = sessionOverride ?? hashSession ?? "";
-  const effectivePeer = peerFilter ?? hashPeer ?? null;
-
-  // Sessions + peer-type map for the workspace.
-  const metaKey = workspaceId ? `sdk/messages-meta/${workspaceId}` : null;
-  const meta = useHonchoQuery<{ sessions: ApiSession[]; peerTypes: Record<string, PeerType> }>(
-    metaKey,
+  // Sessions and peers for the pickers, plus each peer's configured type.
+  const meta = useHonchoQuery<{ sessions: ApiSession[]; peers: ApiPeer[] }>(
+    workspaceId ? `sdk/messages-meta/${workspaceId}` : null,
     async (o) => {
       const [sessions, peers] = await Promise.all([
         getSdk(o, workspaceId!)
@@ -106,391 +277,442 @@ export function MessagesPage() {
           .then((p) => p.items.map((peer) => toApiPeer(peer)))
           .catch(() => [] as ApiPeer[]),
       ]);
-      const peerTypes: Record<string, PeerType> = {};
-      for (const p of peers) peerTypes[p.id] = classifyPeerConfig(p.configuration);
-      return { sessions, peerTypes };
+      return { sessions, peers };
     },
   );
 
-  // Cross-session message stream from the operator/db layer.
-  const opPath = workspaceId
-    ? `/api/operator/db?view=messages&workspace_id=${encodeURIComponent(workspaceId)}${
-        sessionFilter ? `&session_id=${encodeURIComponent(sessionFilter)}` : ""
-      }`
-    : null;
-  const op = useOperatorQuery<MessagesResp>(opPath);
-
-  // Fallback to SDK per-session messages when the DB layer is unavailable.
-  const opUnavailable = !!op.data && !op.data.available;
-  const sdkKey =
-    workspaceId && sessionFilter && opUnavailable
-      ? `sdk/workspaces/${workspaceId}/sessions/${sessionFilter}/messages/list`
-      : null;
-  const sdk = useHonchoQuery<StreamMessage[]>(sdkKey, async (o) => {
-    const ses = await getSdk(o, workspaceId!).session(sessionFilter);
-    const page = await ses.messages({ size: STREAM_LIMIT, reverse: true });
-    return page.items.map((m) => {
-      const am = toApiMessage(m);
-      return {
-        id: am.id,
-        peer_id: am.peer_id,
-        session_id: am.session_id,
-        content: am.content,
-        token_count: am.token_count,
-        created_at: am.created_at,
-      };
-    });
-  });
-
-  const streamLoading = op.isLoading || (opUnavailable && sdk.isLoading);
-  const rawMessages: StreamMessage[] = op.data?.available
-    ? op.data.messages ?? []
-    : opUnavailable
-      ? sdk.data ?? []
-      : [];
-
-  const resolveType = useMemo(() => {
-    const map = meta.data?.peerTypes ?? {};
-    return (peerId: string): PeerType => {
-      const t = map[peerId];
-      if (t && t !== "unknown") return t;
-      return nameLooksAgent(peerId) ? "agent" : "user";
-    };
-  }, [meta.data?.peerTypes]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return rawMessages.filter((m) => {
-      if (effectivePeer && m.peer_id !== effectivePeer) return false;
-      if (q && !m.content.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [rawMessages, query, effectivePeer]);
-
-  const transcript = !!sessionFilter;
-  const ordered = useMemo(() => orderForView(filtered, transcript), [filtered, transcript]);
-
-  // A transcript opens at its latest message, like a chat log. Only on the first
-  // load of each session, so a refresh never yanks the reader's position.
-  const streamRef = useRef<HTMLDivElement | null>(null);
-  const scrolledFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!transcript) {
-      scrolledFor.current = null;
-      return;
-    }
-    const key = `${workspaceId}/${sessionFilter}`;
-    if (streamLoading || ordered.length === 0 || scrolledFor.current === key) return;
-    const frame = requestAnimationFrame(() => {
-      const el = streamRef.current;
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
-      scrolledFor.current = key;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [transcript, workspaceId, sessionFilter, streamLoading, ordered.length]);
-
-  const stats = useMemo(() => {
-    let tokens = 0;
-    let users = 0;
-    let agents = 0;
-    for (const m of filtered) {
-      tokens += m.token_count;
-      if (resolveType(m.peer_id) === "agent") agents += 1;
-      else users += 1;
-    }
-    return { total: filtered.length, tokens, users, agents };
-  }, [filtered, resolveType]);
-
-  const sessionOptions = useMemo(
-    () => [
-      { value: "", label: "all sessions" },
-      ...(meta.data?.sessions ?? []).map((s) => ({ value: s.id, label: s.id })),
-    ],
-    [meta.data?.sessions],
+  const filters = useMemo<StreamFilters | null>(
+    () => (workspaceId ? { workspaceId, sessionId, peerId, q } : null),
+    [workspaceId, sessionId, peerId, q],
   );
+  const stream = useMessageStream(filters, refreshKey);
 
-  const streamError = op.data?.available === false && opUnavailable ? sdk.error : op.error;
+  const kindOf = useMemo(() => {
+    const kinds = new Map((meta.data?.peers ?? []).map((p) => [p.id, peerKindOf(p.configuration)] as const));
+    return (id: string): PeerKind => kinds.get(id) ?? null;
+  }, [meta.data?.peers]);
+
+  // Without the database, the text filter can only look at loaded messages.
+  const localFilter = stream.source === "api" && !!q;
+  const visible = useMemo(
+    () => (localFilter ? stream.newestFirst.filter((m) => matchesText(m.content, q)) : stream.newestFirst),
+    [localFilter, stream.newestFirst, q],
+  );
+  const oneSession = !!sessionId;
+  // Newest first: the latest message is the top line.
+  const lines = visible;
+  // One session is a single list; across sessions, consecutive messages from a
+  // session form a group, and a session can be collapsed.
+  const rows = useMemo(() => (oneSession ? streamRows(lines, false) : []), [lines, oneSession]);
+  const groups = useMemo(() => (oneSession ? [] : groupRuns(lines)), [lines, oneSession]);
+  const { collapsed, toggle, expand } = useCollapsedSessions(apiOpts && workspaceId ? collapsedScope(apiOpts.baseUrl, workspaceId) : null);
+  const collapsedInView = useMemo(
+    () => [...new Set(groups.map((g) => g.sessionId))].filter((id) => collapsed.has(id)),
+    [groups, collapsed],
+  );
+  // Which lines are open, kept here because LOAD_MORE can regroup (and so
+  // remount) the bottom group. Cleared when the view changes.
+  const [openLines, setOpenLines] = useState<{ key: string; ids: ReadonlySet<string> }>({ key: "", ids: NO_IDS });
+  const openIds = openLines.key === stream.key ? openLines.ids : NO_IDS;
+  const setLineOpen = (id: string, open: boolean) =>
+    setOpenLines((cur) => {
+      const ids = new Set(cur.key === stream.key ? cur.ids : NO_IDS);
+      if (open) ids.add(id);
+      else ids.delete(id);
+      return { key: stream.key, ids };
+    });
+  const totals = summarize(visible);
+  const peerCol = useMemo(() => ({ "--peer-col": peerColumnWidth(visible.map((m) => m.peer_id)) }) as CSSProperties, [visible]);
+
+  // The stream opens at the top, on the latest message. New messages arrive
+  // above: a reader at the top sees them, a reader further down stays on the
+  // same line while a button counts them. LOAD_MORE adds older ones below,
+  // which never moves the reader.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const openedFor = useRef<string | null>(null);
+  const topLine = useRef<{ id: string; offset: number } | null>(null);
+  const [seen, setSeen] = useState<{ key: string; id: string | null }>({ key: "", id: null });
+  const markSeen = (key: string, id: string | null) => setSeen((s) => (s.key === key && s.id === id ? s : { key, id }));
+  // A line's distance from the top of the scrolled content, or null when not rendered.
+  const contentOffset = (box: HTMLElement, id: string) => {
+    const node = box.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+    return node ? node.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop : null;
+  };
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || stream.status !== "ready") return;
+    const key = stream.key;
+    const first = lines[0]?.id ?? null;
+    const prev = topLine.current;
+    if (openedFor.current !== key) {
+      el.scrollTop = 0;
+      openedFor.current = key;
+      queueMicrotask(() => markSeen(key, first));
+    } else if (prev && first && first !== prev.id) {
+      if (el.scrollTop <= TOP_SLACK_PX) {
+        // The reader was at the top: show the new messages.
+        el.scrollTop = 0;
+        queueMicrotask(() => markSeen(key, first));
+      } else {
+        // New lines pushed the content down: move with it so the reader's line stays put.
+        const now = contentOffset(el, prev.id);
+        if (now !== null) el.scrollTop += now - prev.offset;
+      }
+    }
+    topLine.current = first ? { id: first, offset: contentOffset(el, first) ?? 0 } : null;
+  }, [lines, stream.status, stream.key]);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el && el.scrollTop <= TOP_SLACK_PX) markSeen(stream.key, lines[0]?.id ?? null);
+  };
+  const seenId = seen.key === stream.key ? seen.id : null;
+  // Lines above the newest one the reader saw at the top are new to them.
+  const unseen = seenId ? Math.max(0, lines.findIndex((m) => m.id === seenId)) : 0;
+  const jumpToLatest = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  };
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useTextHighlight(listRef, q ? [q] : "", `${lines.length}:${lines[0]?.id}:${lines.at(-1)?.id}`);
+
+  const sessionOptions = useMemo(() => {
+    const ids = (meta.data?.sessions ?? []).map((s) => s.id);
+    if (sessionId && !ids.includes(sessionId)) ids.unshift(sessionId);
+    return [{ value: "", label: "all sessions" }, ...ids.map((id) => ({ value: id, label: id }))];
+  }, [meta.data?.sessions, sessionId]);
+  const peerOptions = useMemo(() => {
+    const ids = (meta.data?.peers ?? []).map((p) => p.id);
+    if (peerId && !ids.includes(peerId)) ids.unshift(peerId);
+    return [{ value: "", label: "all peers" }, ...ids.map((id) => ({ value: id, label: id }))];
+  }, [meta.data?.peers, peerId]);
+
+  const filtered = !!(peerId || q);
+  const readSession = (id: string) => setFilters({ sessionId: id, peerId: null, q: "" });
 
   return (
     <div className="space-y-3">
       <PageHeader
         title="MESSAGES"
-        subtitle="browse the message stream across a workspace's sessions"
-        actions={
-          <RefreshButton
-            label="REFRESH"
-            onClick={() => {
-              op.refetch();
-              sdk.refetch();
-            }}
-          />
-        }
+        subtitle="read what peers write as it happens, across a workspace or in one session"
+        actions={<RefreshButton label="REFRESH" onClick={() => setRefreshKey((k) => k + 1)} />}
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-void border border-border px-3 py-2">
-          <Icon name="search" className="text-text-muted" size={12} />
-          <input
-            placeholder="search message content..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="bg-transparent text-xs flex-1 outline-none placeholder:text-text-muted"
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="relative flex-1 min-w-[240px]">
+          <label htmlFor="messages-search" className="sr-only">Search message text</label>
+          <Icon name="search" size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+          <TextInput
+            id="messages-search"
+            key={q}
+            defaultValue={q}
+            className="pl-7"
+            placeholder="search message text, then press Enter…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") setFilters({ q: e.currentTarget.value.trim() });
+              if (e.key === "Escape") setFilters({ q: "" });
+            }}
           />
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-text-muted">session:</span>
+        <div role="group" aria-label="Session" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-text-muted">
+          <span aria-hidden>session</span>
           <Select
-            value={sessionFilter}
-            onChange={(id) => {
-              setSessionOverride(id);
-              window.location.hash = id ? `#/messages?session=${encodeURIComponent(id)}` : "#/messages";
-            }}
+            value={sessionId ?? ""}
+            onChange={(id) => setFilters({ sessionId: id || null })}
             options={sessionOptions}
-            className="min-w-[180px]"
+            className="w-[min(22rem,70vw)] normal-case tracking-normal"
             triggerClassName="py-1.5"
           />
         </div>
-        {effectivePeer ? (
-          <button
-            onClick={() => {
-              setPeerFilter(null);
-              if (hashPeer) window.location.hash = "#/messages";
-            }}
-            className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-accent border border-accent/30 bg-accent/10 px-2 py-1"
-            title="Clear peer filter"
-          >
-            peer: {effectivePeer}
-            <Icon name="x" size={10} />
-          </button>
+        <div role="group" aria-label="Peer" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-text-muted">
+          <span aria-hidden>peer</span>
+          <Select
+            value={peerId ?? ""}
+            onChange={(id) => setFilters({ peerId: id || null })}
+            options={peerOptions}
+            className="w-[min(14rem,60vw)] normal-case tracking-normal"
+            triggerClassName="py-1.5"
+          />
+        </div>
+        {filtered ? (
+          <Button variant="ghost" size="sm" icon="x" onClick={() => setFilters({ peerId: null, q: "" })}>
+            CLEAR_FILTERS
+          </Button>
         ) : null}
       </div>
 
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-8">
-          <Panel
-            title="MESSAGE_STREAM"
-            bodyClassName="p-0"
-            actions={
-              ordered.length > 0 ? (
-                <span className="text-[10px] text-text-muted">
-                  {transcript ? "oldest first" : "newest first"}
-                  {rawMessages.length >= STREAM_LIMIT ? ` · latest ${STREAM_LIMIT} only` : ""}
-                </span>
-              ) : null
-            }
-          >
-            {!workspaceId ? (
-              <div className="text-xs text-text-muted py-8 text-center">Select a workspace in the sidebar.</div>
-            ) : streamError ? (
-              <div className="text-xs text-red-400 p-3">{formatApiError(streamError)}</div>
-            ) : opUnavailable && !sessionFilter ? (
-              <div className="text-xs text-text-muted py-8 px-3 text-center">
-                Cross-session stream needs the operator DB ({op.data?.reason}). Pick a session to
-                view its messages via the API.
-              </div>
-            ) : streamLoading ? (
-              <div className="p-3 space-y-2">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-14 bg-border/40 animate-pulse" />
-                ))}
-              </div>
-            ) : ordered.length === 0 ? (
-              <div className="text-xs text-text-muted py-8 text-center">
-                {query || effectivePeer ? "No messages match the filter." : "No messages yet."}
-              </div>
+      <section aria-label={oneSession ? `Messages in session ${sessionId}` : "Messages across all sessions"}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 mb-2">
+          <p className="flex flex-wrap items-baseline gap-x-2 text-[10px] text-text-muted min-w-0">
+            <Icon name={oneSession ? "git-branch" : "message-square"} size={11} className="text-accent self-center" />
+            {oneSession ? (
+              <>
+                <span className="uppercase tracking-wider text-accent">session</span>
+                <span className="font-mono text-text-primary break-all">{sessionId}</span>
+                <button
+                  type="button"
+                  onClick={() => setFilters({ sessionId: null })}
+                  className="uppercase tracking-wider hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                >
+                  ← ALL_SESSIONS
+                </button>
+              </>
             ) : (
-              <div ref={streamRef} data-testid="message-stream" className="max-h-[600px] overflow-y-auto">
-                <AnimatePresence initial={false}>
-                  {ordered.map((m, i) => (
-                    <MessageRow
+              <span className="uppercase tracking-wider text-accent">all sessions</span>
+            )}
+            <span>
+              {oneSession ? "· latest first · select a line to open it" : "· grouped by session, latest first · select a session to collapse it, a line to open it"}
+            </span>
+            {collapsedInView.length ? (
+              <button
+                type="button"
+                onClick={() => expand(collapsedInView)}
+                className="uppercase tracking-wider hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              >
+                · EXPAND_ALL ({collapsedInView.length} collapsed)
+              </button>
+            ) : null}
+          </p>
+          {stream.status === "ready" ? (
+            <p className="text-[10px] text-text-muted tabular-nums" role="status">
+              {visible.length ? (
+                <>
+                  {totals.count.toLocaleString()} loaded{stream.hasMore ? " · more available" : ""} · {totals.tokens.toLocaleString()} tokens · {totals.peers} peer{totals.peers === 1 ? "" : "s"}
+                  {oneSession ? "" : ` · ${totals.sessions} session${totals.sessions === 1 ? "" : "s"}`} ·{" "}
+                </>
+              ) : null}
+              {stream.liveError ? (
+                <span className="text-red-400 break-words">live updates failed, retrying: {stream.liveError}</span>
+              ) : (
+                <span>live, checks every {LIVE_INTERVAL_MS / 1000} s</span>
+              )}
+            </p>
+          ) : null}
+        </div>
+        {stream.source === "api" && stream.status === "ready" ? (
+          <p className="text-[10px] text-text-muted mb-2">
+            Read through the Honcho API because the operator database is unavailable{stream.reason ? ` (${stream.reason})` : ""}.
+            {localFilter ? " The text search only covers the messages loaded so far." : ""}
+          </p>
+        ) : null}
+
+        {!workspaceId ? (
+          <p className="text-[11px] text-text-muted py-6">Select a workspace in the sidebar.</p>
+        ) : stream.status === "needs-db" ? (
+          <p className="text-[11px] text-text-muted py-6 max-w-[80ch]">
+            Reading across sessions needs the operator database{stream.reason ? ` (${stream.reason})` : ""}. Pick a session above to read
+            its messages through the Honcho API.
+          </p>
+        ) : stream.status === "error" ? (
+          <p role="alert" className="text-[11px] text-red-400 break-words py-2">
+            Could not load messages: {stream.error}. Check the instance in{" "}
+            <a href="#/config" className="underline underline-offset-2 hover:text-text-primary">CONFIG</a>.
+          </p>
+        ) : stream.status === "loading" ? (
+          <div className="border border-border bg-surface" aria-label="Loading messages">
+            {[72, 54, 80, 46, 64, 58].map((w) => (
+              <div key={w} className="flex items-center gap-3 px-3 py-2 border-b border-border last:border-b-0">
+                <div className="h-2.5 w-24 bg-border/60 animate-pulse" />
+                <div className="h-2.5 bg-border/40 animate-pulse" style={{ width: `${w}%` }} />
+              </div>
+            ))}
+          </div>
+        ) : lines.length === 0 ? (
+          <div className="py-6 text-[11px] text-text-muted flex flex-wrap items-center gap-3">
+            {filtered ? (
+              <>
+                <span>
+                  No messages{peerId ? <> from <span className="font-mono text-text-primary">{peerId}</span></> : null}
+                  {q ? <> containing &ldquo;<span className="text-text-primary">{q}</span>&rdquo;</> : null}
+                  {oneSession ? " in this session" : ""} yet. New ones appear here as they arrive.
+                </span>
+                <Button variant="ghost" size="sm" icon="x" onClick={() => setFilters({ peerId: null, q: "" })}>CLEAR_FILTERS</Button>
+              </>
+            ) : (
+              <span>
+                {oneSession ? "No messages in this session yet." : "No messages in this workspace yet."} New ones appear here as peers
+                write them.
+              </span>
+            )}
+          </div>
+        ) : (
+          <div ref={listRef} className={oneSession ? "border border-border bg-surface" : undefined} style={peerCol}>
+            <div
+              ref={scrollRef}
+              onScroll={onScroll}
+              data-testid="message-stream"
+              data-transcript-scroll=""
+              // The page keeps the reader's place itself when new messages
+              // arrive above; browser scroll anchoring would fight it.
+              className="max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain [overflow-anchor:none]"
+            >
+              {oneSession ? <MessageLineHeader grid={LINE_GRID} /> : null}
+              {unseen > 0 ? (
+                // Zero height, so it floats over the lines (below the column header) without moving them.
+                <div className={cn("sticky z-20 h-0 flex items-start justify-center pointer-events-none", oneSession ? "top-1 sm:top-7" : "top-1")}>
+                  {/* Opaque, since it floats over the lines. */}
+                  <Button size="sm" variant="primary" icon="chevron-up" className="mt-1 pointer-events-auto bg-surface" onClick={jumpToLatest}>
+                    {unseen} NEW
+                  </Button>
+                </div>
+              ) : null}
+              {oneSession ? (
+                <ol aria-label="Messages, newest first">
+                  {rows.map(({ message: m, repeatPeer }) => (
+                    <MessageLine
                       key={m.id}
                       message={m}
-                      isUser={resolveType(m.peer_id) !== "agent"}
-                      delay={Math.min(i * 0.03, 0.3)}
+                      kind={kindOf(m.peer_id)}
+                      grid={LINE_GRID}
+                      repeatPeer={repeatPeer}
+                      searchText={q}
+                      open={openIds.has(m.id)}
+                      onOpenChange={(open) => setLineOpen(m.id, open)}
                     />
                   ))}
-                </AnimatePresence>
-              </div>
-            )}
-          </Panel>
-        </div>
-
-        <div className="col-span-12 lg:col-span-4 space-y-3">
-          <Panel title="MESSAGE_STATS">
-            <div className="space-y-2 text-xs">
-              {[
-                ["total_displayed", String(stats.total), false],
-                ["total_tokens", stats.tokens.toLocaleString(), false],
-                ["user_messages", String(stats.users), true],
-                ["agent_messages", String(stats.agents), false],
-              ].map(([k, v, accent]) => (
-                <div
-                  key={k as string}
-                  className="flex justify-between py-1.5 border-b border-border last:border-0"
-                >
-                  <span className="text-text-muted">{k}</span>
-                  <span className={cn("text-text-primary tabular-nums", accent && "text-accent")}>{v}</span>
+                </ol>
+              ) : (
+                <div className="space-y-2">
+                  {groups.map((group) => (
+                    <SessionGroupBlock
+                      key={group.key}
+                      group={group}
+                      collapsed={collapsed.has(group.sessionId)}
+                      onToggle={() => toggle(group.sessionId)}
+                      onRead={readSession}
+                      kindOf={kindOf}
+                      searchText={q}
+                      openIds={openIds}
+                      onLineOpen={setLineOpen}
+                    />
+                  ))}
                 </div>
-              ))}
+              )}
+              {stream.hasMore ? (
+                <div className={cn("flex flex-wrap items-center gap-2 py-1.5", oneSession ? "px-3 border-t border-border" : "mt-1")}>
+                  <Button size="sm" variant="ghost" icon="chevron-down" onClick={() => void stream.loadMore()} disabled={stream.loadingMore}>
+                    {stream.loadingMore ? "LOADING…" : "LOAD_MORE"}
+                  </Button>
+                  {stream.moreError ? <span role="alert" className="text-[10px] text-red-400 break-words">{stream.moreError}</span> : null}
+                </div>
+              ) : null}
             </div>
-          </Panel>
-        </div>
-      </div>
+          </div>
+        )}
+      </section>
 
       <StatusBar />
     </div>
   );
 }
 
-/** Reading leading for message bodies; the collapse height is measured in it. */
-const BODY_LEADING = 1.65;
-/** Long messages clamp to about 14 lines until SHOW_MORE. */
-const COLLAPSE_EM = 14 * BODY_LEADING;
-/** Collapse only when it hides a real amount of text, never a line or two. */
-const COLLAPSE_SLACK = 1.25;
 /**
- * The clamp rarely lands on a line boundary (paragraph and heading spacing vary),
- * so an alpha mask fades the last lines out instead of slicing one in half. It
- * changes transparency only and paints no color.
+ * One run of consecutive messages from a session, newest first, under a header
+ * naming the session, when the run happened, its size and its peers. Selecting
+ * the header collapses the session: every group of it on the page closes
+ * together, and the headers stay so the reader can still see when it was active.
  */
-const FADE_MASK = "linear-gradient(to bottom, black calc(100% - 3em), transparent)";
-const CLAMP_STYLE = { maxHeight: `${COLLAPSE_EM}em`, maskImage: FADE_MASK, WebkitMaskImage: FADE_MASK };
-
-const MessageRow = memo(function MessageRow({
-  message: m,
-  isUser,
-  delay,
+function SessionGroupBlock({
+  group,
+  collapsed,
+  onToggle,
+  onRead,
+  kindOf,
+  searchText,
+  openIds,
+  onLineOpen,
 }: {
-  message: StreamMessage;
-  isUser: boolean;
-  delay: number;
+  group: SessionGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+  onRead: (sessionId: string) => void;
+  kindOf: (peerId: string) => PeerKind;
+  searchText: string;
+  openIds: ReadonlySet<string>;
+  onLineOpen: (id: string, open: boolean) => void;
 }) {
-  const { push } = useToast();
-  const [raw, setRaw] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1500);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(m.content);
-      setCopied(true);
-    } catch {
-      push({ type: "error", message: "Could not copy the message. The browser blocked clipboard access." });
-    }
-  };
-
+  const rowsId = useId();
+  const rows = streamRows(group.messages, false);
+  const count = group.messages.length;
+  const from = shortStamp(group.messages[count - 1].created_at);
+  const to = shortStamp(group.messages[0].created_at);
   return (
-    <motion.div
-      layout="position"
-      data-message-id={m.id}
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay, duration: 0.2 }}
-      className={cn(
-        "group flex gap-3 px-3 py-3 border-b border-border hover:bg-border/20 transition-colors duration-150 border-l-2",
-        isUser ? "border-l-blue-400/60" : "border-l-purple-400/60",
-      )}
-    >
+    <section data-session-group={group.sessionId} aria-label={`Session ${group.sessionId}`} className="border border-border bg-surface">
       <div
         className={cn(
-          "w-8 h-8 border flex items-center justify-center shrink-0",
-          isUser
-            ? "border-blue-400/40 text-blue-400 bg-blue-400/5"
-            : "border-purple-400/40 text-purple-400 bg-purple-400/5",
+          "flex items-center gap-x-3 pr-3 border-b transition-colors duration-200 hover:bg-border/20",
+          collapsed ? "border-transparent" : "border-border",
         )}
       >
-        <Icon name={isUser ? "user" : "bot"} size={12} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-[10px] mb-1 flex-wrap">
-          <span className="text-text-primary text-xs">{m.peer_id}</span>
-          <span className="text-text-muted">in {m.session_id}</span>
-          <span className="flex items-center gap-1 text-text-muted">
-            <Icon name="clock" size={10} /> {new Date(m.created_at).toLocaleString()}
-          </span>
-        </div>
-        <MessageBody content={m.content} raw={raw} />
-        <div className="flex flex-wrap items-center gap-2 mt-2 text-[10px]">
-          <Chip tone={isUser ? "blue" : "purple"}>{isUser ? "user" : "agent"}</Chip>
-          <span className="text-text-muted">{m.token_count} tokens</span>
-          <span className="text-text-muted break-all">#{m.id}</span>
-          {/* Revealed on hover or keyboard focus where hover exists; always shown on touch. */}
-          <div className="ml-auto flex items-center gap-1.5 transition-opacity duration-150 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
-            <Button size="sm" variant="ghost" icon="code" onClick={() => setRaw((r) => !r)}>
-              {raw ? "SHOW_FORMATTED" : "SHOW_RAW"}
-            </Button>
-            <Button size="sm" variant="ghost" icon={copied ? "check" : "copy"} onClick={copy}>
-              {copied ? "COPIED" : "COPY"}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-});
-
-/**
- * Message text, rendered as markdown or shown exactly as stored. Long bodies
- * clamp behind SHOW_MORE; the clamp is measured, so it follows the panel width.
- */
-function MessageBody({ content, raw }: { content: string; raw: boolean }) {
-  const bodyId = useId();
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [collapsible, setCollapsible] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // Fires once on observe, then whenever the width (and so the wrapping) changes.
-    const observer = new ResizeObserver(() => {
-      const limit = parseFloat(getComputedStyle(el).fontSize) * COLLAPSE_EM;
-      setCollapsible(el.scrollHeight > limit * COLLAPSE_SLACK);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [content, raw]);
-
-  const clamped = collapsible && !expanded;
-  return (
-    <div>
-      <div
-        id={bodyId}
-        ref={ref}
-        className={cn("max-w-[75ch] text-[13px] text-text-primary", clamped && "overflow-hidden")}
-        style={clamped ? CLAMP_STYLE : undefined}
-      >
-        {raw ? (
-          <pre className="whitespace-pre-wrap break-words" style={{ lineHeight: BODY_LEADING }}>
-            {content}
-          </pre>
-        ) : (
-          <Markdown text={content} />
-        )}
-      </div>
-      {collapsible ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={expanded ? "chevron-up" : "chevron-down"}
-          className="mt-2"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          onClick={() => {
-            setExpanded(!expanded);
-            // Collapsing a long message can leave its start above the fold.
-            if (expanded) requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "nearest" }));
-          }}
+        <button
+          type="button"
+          data-session-toggle=""
+          aria-expanded={!collapsed}
+          aria-controls={rowsId}
+          onClick={onToggle}
+          className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3.5 gap-y-1 py-2 pl-3 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
         >
-          {expanded ? "SHOW_LESS" : "SHOW_MORE"}
-        </Button>
-      ) : null}
-    </div>
+          <Icon name={collapsed ? "chevron-right" : "chevron-down"} size={11} className="shrink-0 -mr-2 text-text-muted" />
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            <Icon name="git-branch" size={11} className="text-accent shrink-0" />
+            <span className="sr-only">{collapsed ? "Expand" : "Collapse"} session </span>
+            <span
+              className={cn("min-w-0 truncate font-mono text-[11px]", collapsed ? "text-text-muted" : "text-text-primary")}
+              title={group.sessionId}
+            >
+              {middleTruncate(group.sessionId, 72)}
+            </span>
+          </span>
+          <span className="text-[10px] text-text-muted tabular-nums">
+            {from === to ? to : `${from} – ${to}`} · {count} message{count === 1 ? "" : "s"} · {group.tokens.toLocaleString()} tokens
+          </span>
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
+            {group.peers.map((peer) => {
+              const kind = kindOf(peer);
+              return (
+                <span key={peer} className="inline-flex items-center gap-1">
+                  {kind ? (
+                    <Icon name={kind === "agent" ? "bot" : "user"} size={10} className={kind === "agent" ? "text-purple-400" : "text-blue-400"} />
+                  ) : null}
+                  {peer}
+                </span>
+              );
+            })}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onRead(group.sessionId)}
+          className="shrink-0 text-[10px] uppercase tracking-wider text-text-muted hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+        >
+          READ_SESSION →
+        </button>
+      </div>
+      {/* Rows close by animating the grid track to zero; inert keeps hidden lines out of the tab order. */}
+      <div
+        id={rowsId}
+        inert={collapsed}
+        className="grid motion-safe:transition-[grid-template-rows] motion-safe:duration-200 ease-out"
+        style={{ gridTemplateRows: collapsed ? "0fr" : "1fr" }}
+      >
+        <ol className="min-h-0 overflow-hidden" aria-label={`${count} message${count === 1 ? "" : "s"}, newest first`}>
+          {rows.map(({ message: m, repeatPeer }) => (
+            <MessageLine
+              key={m.id}
+              message={m}
+              kind={kindOf(m.peer_id)}
+              grid={GROUP_GRID}
+              tokensColumn={false}
+              repeatPeer={repeatPeer}
+              searchText={searchText}
+              open={openIds.has(m.id)}
+              onOpenChange={(open) => onLineOpen(m.id, open)}
+            />
+          ))}
+        </ol>
+      </div>
+    </section>
   );
 }

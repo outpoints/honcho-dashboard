@@ -10,12 +10,15 @@ export interface QueryState<T> {
   error: Error | undefined;
   isLoading: boolean;
   isFetching: boolean;
+  /** Epoch ms of the last successful fetch, or undefined before one. */
+  updatedAt: number | undefined;
   refetch: () => void;
 }
 
 interface CacheEntry<T> {
   data?: T;
   error?: Error;
+  updatedAt?: number;
   promise?: Promise<unknown>;
   subscribers: Set<() => void>;
 }
@@ -49,7 +52,11 @@ export function invalidate(prefix: string): void {
 export function useHonchoQuery<T>(
   key: string | null,
   fetcher: (opts: HonchoClientOptions) => Promise<T>,
-  options?: { refreshInterval?: number; enabled?: boolean },
+  options?: {
+    /** Poll period in ms; a function picks it from the latest data (e.g. faster while busy). */
+    refreshInterval?: number | ((data: T | undefined) => number | undefined);
+    enabled?: boolean;
+  },
 ): QueryState<T> {
   const apiOpts = useActiveHonchoOptions();
   const enabled = (options?.enabled ?? true) && key !== null && apiOpts !== null;
@@ -70,6 +77,7 @@ export function useHonchoQuery<T>(
       .then((data) => {
         entry.data = data;
         entry.error = undefined;
+        entry.updatedAt = Date.now();
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
@@ -98,19 +106,22 @@ export function useHonchoQuery<T>(
     };
   }, [enabled, fullKey, run, tick]);
 
-  useEffect(() => {
-    if (!enabled || !options?.refreshInterval || !fullKey) return;
-    const id = setInterval(() => run(), options.refreshInterval);
-    return () => clearInterval(id);
-  }, [enabled, fullKey, options?.refreshInterval, run]);
-
   const entry = fullKey ? getEntry<T>(fullKey) : undefined;
   const data = entry?.data;
+  const refresh = options?.refreshInterval;
+  const interval = typeof refresh === "function" ? refresh(data) : refresh;
+
+  useEffect(() => {
+    if (!enabled || !interval || !fullKey) return;
+    const id = setInterval(() => run(), interval);
+    return () => clearInterval(id);
+  }, [enabled, fullKey, interval, run]);
+
   const error = entry?.error;
   const isFetching = !!entry?.promise;
   const isLoading = enabled && data === undefined && error === undefined;
 
-  return { data, error, isLoading, isFetching, refetch: run };
+  return { data, error, isLoading, isFetching, updatedAt: entry?.updatedAt, refetch: run };
 }
 
 export function formatApiError(err: unknown): string {

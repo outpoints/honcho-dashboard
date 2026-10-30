@@ -9,6 +9,7 @@ import { Button, Checkbox, Chip, Field, RefreshButton, TextInput } from "@/compo
 import { Honcho31Notice } from "@/components/Honcho31Notice";
 import { Icon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
+import { ScopeKeyPanel } from "@/components/ScopeKeyPanel";
 import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
@@ -17,7 +18,7 @@ import {
   useHonchoCapabilities,
 } from "@/lib/honcho/useCapabilities";
 import { getSdk } from "@/lib/honcho/sdk";
-import { listAllScopes, listAllScopeSessions } from "@/lib/honcho/scopeListing";
+import { listAllScopes, listAllScopeSessions, scopeBatches } from "@/lib/honcho/scopeListing";
 import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiSession } from "@/lib/honcho/adapters";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
@@ -44,6 +45,9 @@ export function ScopesPage() {
   const { enabled: canWrite } = useWriteActions();
   const capabilities = useHonchoCapabilities();
   const scopesAvailable = capabilities.scopes === "available";
+  // Honcho 3.5+: session counts in the scope list, and bulk member removal.
+  const withCounts = capabilities.scopeSessionCounts === "available";
+  const bulkRemove = canWrite && capabilities.scopeBulkRemove === "available";
 
   const [selectedScope, setSelectedScope] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -53,9 +57,11 @@ export function ScopesPage() {
   const [busy, setBusy] = useState(false);
 
   const scopes = useHonchoQuery<Scope[]>(
-    workspaceId && scopesAvailable ? `${scopeKey(workspaceId)}/list` : null,
-    (opts) => listAllScopes(getSdk(opts, workspaceId!)),
+    workspaceId && scopesAvailable ? `${scopeKey(workspaceId)}/list${withCounts ? "?counts" : ""}` : null,
+    (opts) => listAllScopes(getSdk(opts, workspaceId!), { includeSessionCount: withCounts }),
   );
+  // Members picked for bulk removal, kept per scope so switching scopes clears them.
+  const [removal, setRemoval] = useState<{ scope: string; ids: string[] }>({ scope: "", ids: [] });
 
   useEffect(() => {
     const items = scopes.data ?? [];
@@ -187,6 +193,59 @@ export function ScopesPage() {
     }
   };
 
+  const removalIds = removal.scope === selectedScope
+    ? removal.ids.filter((id) => memberIds.has(id))
+    : [];
+  const toggleRemoval = (sessionId: string, next: boolean) =>
+    setRemoval((current) => {
+      const ids = current.scope === selectedScope ? current.ids : [];
+      return { scope: selectedScope, ids: next ? [...new Set([...ids, sessionId])] : ids.filter((id) => id !== sessionId) };
+    });
+
+  /** Honcho 3.5+: one request per 100 sessions; each request is all-or-nothing. */
+  const removeSelected = async () => {
+    if (!apiOpts || !workspaceId || !activeScope || removalIds.length === 0) return;
+    const ids = removalIds;
+    const batches = scopeBatches(ids);
+    const ok = await confirm({
+      title: "REMOVE_SCOPE_SESSIONS",
+      confirmLabel: `REMOVE_${ids.length}`,
+      destructive: true,
+      body: (
+        <>
+          Remove {ids.length} {ids.length === 1 ? "session" : "sessions"} from scope{" "}
+          <span className="text-accent font-mono">{selectedScope}</span>
+          {batches.length > 1 ? ` in ${batches.length} requests of up to 100` : ""}? Honcho will
+          reconcile copied and derived conclusions asynchronously. If any session no longer exists,
+          Honcho rejects that request and removes none of its sessions.
+        </>
+      ),
+    });
+    if (!ok) return;
+    setBusy(true);
+    let removed = 0;
+    try {
+      for (const batch of batches) {
+        await activeScope.removeSessions(batch);
+        removed += batch.length;
+      }
+      setRemoval({ scope: selectedScope, ids: [] });
+      push({ type: "success", message: `${removed} ${removed === 1 ? "session" : "sessions"} removed from scope` });
+    } catch (err) {
+      // Earlier batches may have succeeded; say exactly how many before the failure.
+      push({
+        type: "error",
+        message: `${removed ? `${removed} removed, then ` : ""}${formatApiError(err)}`,
+      });
+    } finally {
+      setBusy(false);
+      invalidate(scopeKey(workspaceId));
+      members.refetch();
+      status.refetch();
+      scopes.refetch();
+    }
+  };
+
   const removeSession = async (sessionId: string) => {
     if (!apiOpts || !workspaceId || !activeScope) return;
     const ok = await confirm({
@@ -289,8 +348,11 @@ export function ScopesPage() {
                   onClick={() => setSelectedScope(scope.id)}
                 >
                   <span className="truncate">{scope.id}</span>
-                  <span className="text-[9px] opacity-70">
-                    {scope.id === selectedScope ? "ACTIVE" : "OPEN"}
+                  <span className="text-[9px] opacity-70 tabular-nums">
+                    {/* Honcho 3.5+ counts active member sessions in the list query. */}
+                    {scope.sessionCount !== undefined
+                      ? `${scope.sessionCount.toLocaleString()} ${scope.sessionCount === 1 ? "SESSION" : "SESSIONS"}`
+                      : scope.id === selectedScope ? "ACTIVE" : "OPEN"}
                   </span>
                 </Button>
               ))}
@@ -329,13 +391,31 @@ export function ScopesPage() {
               ) : null}
             </Panel>
 
+            {activeScope && workspaceId ? (
+              <ScopeKeyPanel
+                key={`${apiOpts?.baseUrl}/${workspaceId}/${activeScope.id}`}
+                apiOpts={apiOpts}
+                workspaceId={workspaceId}
+                scopeId={activeScope.id}
+                capability={capabilities.scopeKeys}
+                canWrite={canWrite}
+              />
+            ) : null}
+
             <Panel
               title="MEMBER_SESSIONS"
               actions={
                 canWrite ? (
-                  <Button size="sm" icon="plus" onClick={openAdd} disabled={members.isLoading}>
-                    ADD_SESSIONS
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    {bulkRemove && removalIds.length > 0 ? (
+                      <Button size="sm" variant="danger" icon="x" onClick={removeSelected} disabled={busy}>
+                        {busy ? "REMOVING…" : `REMOVE_${removalIds.length}`}
+                      </Button>
+                    ) : null}
+                    <Button size="sm" icon="plus" onClick={openAdd} disabled={members.isLoading}>
+                      ADD_SESSIONS
+                    </Button>
+                  </div>
                 ) : undefined
               }
             >
@@ -360,7 +440,16 @@ export function ScopesPage() {
                         key={session.id}
                         className="flex flex-wrap items-center gap-2 border border-border bg-void/30 px-3 py-2.5"
                       >
-                        <Icon name="git-branch" size={12} className="text-text-muted" />
+                        {bulkRemove ? (
+                          <Checkbox
+                            checked={removalIds.includes(session.id)}
+                            onChange={(next) => toggleRemoval(session.id, next)}
+                            label={<span className="sr-only">Select {session.id} for removal</span>}
+                            disabled={busy}
+                          />
+                        ) : (
+                          <Icon name="git-branch" size={12} className="text-text-muted" />
+                        )}
                         <span className="text-xs text-text-primary min-w-0 flex-1 truncate">
                           {session.id}
                         </span>

@@ -29,6 +29,7 @@ import {
   type Page,
 } from "./types.ts";
 import { parseDeriverMetrics } from "./deriverMetrics.ts";
+import { parseScopeKeyResponse, scopeKeyPath } from "./scopeKeys.ts";
 
 export interface HonchoClientOptions {
   baseUrl: string;
@@ -177,9 +178,9 @@ export const honcho = {
     return request<{ status: string }>(opts, "GET", "/health");
   },
 
-  /** Gap: SDK's `/openapi.json` isn't exposed; diagnostics needs version. */
+  /** Gap: SDK's `/openapi.json` isn't exposed; diagnostics needs version, capabilities need schemas. */
   openapi(opts: HonchoClientOptions) {
-    return request<{ info?: { title?: string; version?: string } }>(opts, "GET", "/openapi.json");
+    return request<{ info?: { title?: string; version?: string }; components?: { schemas?: Record<string, unknown> } }>(opts, "GET", "/openapi.json");
   },
 
   /**
@@ -228,6 +229,74 @@ export const honcho = {
     search(opts: HonchoClientOptions, workspaceId: string, peerId: string, body: { query: string; limit?: number }) {
       return request<ApiMessage[]>(opts, "POST", `${ws(workspaceId)}/peers/${encodeURIComponent(peerId)}/search`, body);
     },
+    /**
+     * Gap: SDK `peer(id)` get-or-creates before `representation()`. This read
+     * 404s for an unknown peer instead. Global, or this peer's view of `target`.
+     */
+    async representation(opts: HonchoClientOptions, workspaceId: string, peerId: string, body: { target?: string } = {}) {
+      const result = await request<{ representation?: unknown }>(opts, "POST",
+        `${ws(workspaceId)}/peers/${encodeURIComponent(peerId)}/representation`, body);
+      return typeof result?.representation === "string" ? result.representation : "";
+    },
+    /**
+     * Gap: SDK peer config types are camelCase and keep only the keys they model.
+     * Workspace import must write the stored API shape back unchanged.
+     */
+    create(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      body: { id: string; metadata?: Record<string, unknown>; configuration?: Record<string, unknown> },
+    ) {
+      return request<ApiPeer>(opts, "POST", `${ws(workspaceId)}/peers`, body);
+    },
+  },
+
+  /**
+   * Gap: SDK `session(id)` get-or-creates, and its config/message types drop
+   * stored keys and `created_at`. Workspace export needs non-creating reads;
+   * import needs exact bodies (timestamps, per-peer session config).
+   */
+  sessions: {
+    list(opts: HonchoClientOptions, workspaceId: string, params: ListParams = {}) {
+      return request<Page<ApiSession>>(opts, "POST", `${ws(workspaceId)}/sessions/list${listQuery(params)}`, listBody(params));
+    },
+    peers(opts: HonchoClientOptions, workspaceId: string, sessionId: string, params: ListParams = {}) {
+      return request<Page<ApiPeer>>(opts, "GET", `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/peers${listQuery(params)}`);
+    },
+    peerConfig(opts: HonchoClientOptions, workspaceId: string, sessionId: string, peerId: string) {
+      return request<{ observe_me?: boolean | null; observe_others?: boolean | null }>(opts, "GET",
+        `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/peers/${encodeURIComponent(peerId)}/config`);
+    },
+    messages(opts: HonchoClientOptions, workspaceId: string, sessionId: string, params: ListParams = {}) {
+      return request<Page<ApiMessage>>(opts, "POST",
+        `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/list${listQuery(params)}`, listBody(params));
+    },
+    create(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      body: {
+        id: string;
+        metadata?: Record<string, unknown>;
+        configuration?: Record<string, unknown>;
+        peers?: Record<string, { observe_me?: boolean | null; observe_others?: boolean | null }>;
+      },
+    ) {
+      return request<ApiSession>(opts, "POST", `${ws(workspaceId)}/sessions`, body);
+    },
+    addMessages(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      sessionId: string,
+      messages: {
+        peer_id: string;
+        content: string;
+        metadata?: Record<string, unknown>;
+        configuration?: Record<string, unknown>;
+        created_at?: string;
+      }[],
+    ) {
+      return request<ApiMessage[]>(opts, "POST", `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages`, { messages });
+    },
   },
 
   /** Keep the always-mounted shell from recreating a deleted active workspace. */
@@ -268,6 +337,14 @@ export const honcho = {
         "DELETE",
         `${ws(workspaceId)}/conclusions/${encodeURIComponent(conclusionId)}`,
       );
+    },
+    /** Honcho stores created conclusions as `explicit`, with new IDs. */
+    create(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      conclusions: { content: string; observer_id: string; observed_id: string; session_id?: string | null }[],
+    ) {
+      return request<ApiConclusion[]>(opts, "POST", `${ws(workspaceId)}/conclusions`, { conclusions });
     },
   },
 
@@ -319,6 +396,20 @@ export const honcho = {
         `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/upload`,
         form,
       );
+    },
+  },
+
+  /**
+   * Gap: the SDK has no key-minting call. Honcho 3.4 named-scope keys only; the
+   * caller gates on the `scopeKeys` capability and the write-actions toggle.
+   * Returns the key string so it never passes through query caches.
+   */
+  keys: {
+    async createScoped(
+      opts: HonchoClientOptions,
+      input: { workspaceId: string; scopeId: string; expiresAt?: string },
+    ): Promise<string> {
+      return parseScopeKeyResponse(await request<unknown>(opts, "POST", scopeKeyPath(input)));
     },
   },
 

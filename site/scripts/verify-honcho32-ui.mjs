@@ -53,7 +53,13 @@ async function contextFor(version, viewport) {
   if(path.endsWith('/sessions')) return reply(session);
   if(path.endsWith('/scopes/list')) return reply(pageOf([]));
   if(path.endsWith('/queue/status')) return reply({total_work_units:5,completed_work_units:3,in_progress_work_units:1,pending_work_units:1});
-  if(path.endsWith('/chat')) return reply({content:'Plan the morning around focused work.',...(body.include_evidence?{evidence:state.evidence}:{})});
+  if(path.endsWith('/chat')) {
+   const content='Plan the morning around focused work.';
+   const evidenceField=body.include_evidence?{evidence:state.evidence}:{};
+   // Chat streams by default; answer like Honcho, with evidence on the terminal SSE event.
+   if(body.stream) return route.fulfill({status:200,contentType:'text/event-stream',body:`data: ${JSON.stringify({done:false,delta:{content}})}\n\ndata: ${JSON.stringify({done:true,delta:{},...evidenceField})}\n\n`});
+   return reply({content,...evidenceField});
+  }
   if(path.endsWith('/messages/message-1') && state.messageStatus!==200) return reply({detail:'Message unavailable'},state.messageStatus);
   if(path.endsWith('/messages/message-1')) return reply({...evidence.messages[0],workspace_id:ws.id,content:'Please schedule planning before noon.',token_count:8,metadata:{}});
   if(path.endsWith('/conclusions/list')) {
@@ -86,7 +92,7 @@ try {
  for(const [label,viewport] of [['desktop',{width:1440,height:1050}],['mobile',{width:390,height:844}]]) {
   const {context,page,calls,state}=await contextFor(version,viewport);
   await page.goto(`${base}/#/chat?peer=alice`);
-  await page.getByRole('checkbox').click();
+  await page.getByRole('checkbox',{name:'INCLUDE_EVIDENCE',exact:true}).check();
   await page.locator('input[placeholder="ask alice…"]').fill('When should we plan?');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
@@ -230,7 +236,7 @@ try {
   }
   state.evidence=null;
   await page.goto(`${base}/#/chat?peer=alice`);
-  await page.getByRole('checkbox',{name:'INCLUDE_EVIDENCE',exact:true}).click();
+  await page.getByRole('checkbox',{name:'INCLUDE_EVIDENCE',exact:true}).check();
   await page.locator('input[placeholder="ask alice…"]').fill('What is recorded?');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByRole('button',{name:/SHOW_EVIDENCE/}).click();
@@ -253,7 +259,7 @@ try {
   const {context,page,calls}=await contextFor(version,{width:1100,height:800});
   await page.goto(`${base}/#/chat?peer=alice`);
   await page.locator('input[placeholder="ask alice…"]').waitFor();
-  assert.ok(await page.getByRole('checkbox').isDisabled());
+  assert.ok(await page.getByRole('checkbox',{name:'INCLUDE_EVIDENCE',exact:true}).isDisabled());
   await page.locator('input[placeholder="ask alice…"]').fill('Hello');
   await page.getByRole('button',{name:'SEND',exact:true}).click();
   await page.getByText('Plan the morning around focused work.').waitFor();

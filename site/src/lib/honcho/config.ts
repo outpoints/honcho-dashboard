@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   DEFAULT_BASE_URL_META,
   LEGACY_DEFAULT_BASE_URL,
@@ -219,8 +219,11 @@ export function useHonchoInstances() {
 
 export function useActiveHonchoOptions(): { baseUrl: string; token?: string } | null {
   const { active } = useHonchoInstances();
-  if (!active) return null;
-  return { baseUrl: active.baseUrl, token: active.token };
+  const baseUrl = active?.baseUrl;
+  const token = active?.token;
+  // Stable identity: effects and callbacks keyed on these options (query polling
+  // intervals among them) must not restart on every render.
+  return useMemo(() => (baseUrl === undefined ? null : { baseUrl, token }), [baseUrl, token]);
 }
 
 export function useActiveWorkspace(): {
