@@ -188,4 +188,4 @@ then `requireDashboardHeader()` (CSRF: the `X-Honcho-Dashboard: 1` header the UI
 `HONCHO_OPERATOR_WRITES` defaults to off and the client write toggle is only UI. Any new
 operator write must use the same guards, and `GET /api/operator/runtime` exposes
 `writes_enabled` so the UI never offers a refused action. Do not describe the operator DSN
-as strictly read-only.
+as strictly read-only. While writes are off the pool opens with `-c default_transaction_read_only=on` (`src/lib/operator/pool.ts`); pg lets values in the DSN override config, so that option is merged into the DSN's own `options`, never passed next to it.
