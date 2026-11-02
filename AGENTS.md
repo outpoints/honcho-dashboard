@@ -103,7 +103,8 @@ Next buffers only the first 10 MB of the body of any proxy-matched path and trun
 which corrupts large Honcho uploads (`scripts/dashboard-server.test.mjs` pins this against a real
 server). So every route handler calls `requireSession(req)` from `src/lib/auth/server.ts`, which
 runs the cross-site write check and the session check and fails closed: new API routes must do the
-same. Keep `/api/healthz` and `/api/auth/*`
+same (`scripts/auth-routes.test.mjs` fails when a route under `src/app/api` other than
+`auth/` and `healthz/` does not await it first). Keep `/api/healthz` and `/api/auth/*`
 unguarded; the Docker health check uses `/api/healthz`.
 
 API client lives in `src/lib/honcho/`. **Never hardcode the base URL or token in components** — read from the config store. Config is stored client-side in `localStorage` under `honcho-dashboard:instances` + `honcho-dashboard:activeId` (multi-instance).
