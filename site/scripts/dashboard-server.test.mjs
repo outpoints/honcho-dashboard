@@ -228,6 +228,19 @@ describe("auth on", () => {
     }
   });
 
+  test("login from a browser whose Origin does not match Host is refused unless X-Forwarded-Host matches", async () => {
+    // Same shape as plain HTTP behind an nginx that rewrites Host and sends no
+    // X-Forwarded-Host: Origin is the public name, Host is the upstream address.
+    const attempt = (extra) =>
+      fetch(`${ctx.dash.base}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://dash.example", ...extra },
+        body: JSON.stringify({ password: PASSWORD }),
+      });
+    assert.equal((await attempt({})).status, 403);
+    assert.equal((await attempt({ "x-forwarded-host": "dash.example" })).status, 204);
+  });
+
   test("other casings of the passthroughs do not skip the guard", async () => {
     const { upstream, dash } = ctx;
     for (const path of ["/V3/workspaces/list", "/HEALTH", "/OpenAPI.json", "/API/honcho/v3/workspaces/list", "/Api/Honcho/v3/x"]) {

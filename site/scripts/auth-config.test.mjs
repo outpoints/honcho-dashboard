@@ -204,3 +204,21 @@ test("CSRF: requests without browser headers (curl, server-to-server) pass", () 
   assert.equal(isCrossSiteWrite(w({ origin: "", host: "dash.test" })), false);
   assert.equal(isCrossSiteWrite(w({ secFetchSite: "", host: "dash.test" })), false);
 });
+
+test("CSRF: behind a proxy that rewrites Host without X-Forwarded-Host, plain-HTTP writes are rejected", () => {
+  // nginx `proxy_pass http://127.0.0.1:3000;` with no proxy_set_header sends
+  // Host: 127.0.0.1:3000 and no X-Forwarded-Host. A browser on plain HTTP sends
+  // Origin but no Sec-Fetch-Site (only sent to HTTPS or localhost), so the
+  // Origin/Host comparison is all there is, and it fails, login POST included.
+  const login = { method: "POST", origin: "http://dash.example", host: "127.0.0.1:3000" };
+  assert.equal(isCrossSiteWrite(login), true, "documented limitation: keep Host or set X-Forwarded-Host");
+  // The two documented remedies.
+  assert.equal(isCrossSiteWrite({ ...login, host: "dash.example" }), false, "proxy_set_header Host $host");
+  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "dash.example" }), false, "X-Forwarded-Host");
+  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "dash.example, 10.0.0.1" }), false, "first X-Forwarded-Host value");
+  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "10.0.0.1, dash.example" }), true, "only the first value counts");
+  // Over HTTPS the browser sends Sec-Fetch-Site, which decides on its own.
+  assert.equal(isCrossSiteWrite({ ...login, origin: "https://dash.example", secFetchSite: "same-origin" }), false);
+  // Without an Origin (curl, health checks, server-to-server) the Host is not consulted.
+  assert.equal(isCrossSiteWrite({ method: "POST", host: "127.0.0.1:3000" }), false);
+});

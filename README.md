@@ -305,7 +305,13 @@ Limits to know about:
 - **Cross-site writes.** While authentication is on, `POST`/`PUT`/`PATCH`/`DELETE` requests
   that the browser marks cross-site (`Sec-Fetch-Site`, or an `Origin` that does not match
   `Host` / `X-Forwarded-Host`) are rejected with `403`. Make sure your proxy forwards `Host`
-  or `X-Forwarded-Host` unchanged.
+  or `X-Forwarded-Host` unchanged. Browsers only send `Sec-Fetch-Site` over HTTPS (and to
+  `localhost`), so on plain HTTP the `Origin`/`Host` comparison is the only check, and a
+  proxy that rewrites `Host` without setting `X-Forwarded-Host` makes **every** write fail
+  with `403`, the login itself included. nginx does this by default: a bare
+  `proxy_pass http://dashboard:3000;` sends `Host: dashboard:3000`. Add
+  `proxy_set_header Host $host;` (or `proxy_set_header X-Forwarded-Host $host;`) to the
+  `location` block. Traefik, Caddy and Cloudflare keep `Host`, so they need nothing.
 - The unauthenticated page does not include the default Honcho URL; it appears after login.
 - This is one shared password, not user accounts, roles or SSO. Serve the dashboard over
   HTTPS when it is reachable beyond a trusted network.

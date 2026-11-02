@@ -124,3 +124,11 @@ test("requireSession: a password change or a lowered TTL logs everyone out", asy
     assert.equal(await requireSession(withToken()), null, "explicit default TTL");
   });
 });
+
+test("rejectCrossSiteWrite: the login POST from behind a Host-rewriting proxy gets 403 unless X-Forwarded-Host is set", () => {
+  const login = { origin: "http://dash.example", host: "127.0.0.1:3000" };
+  const refused = rejectCrossSiteWrite(req("POST", login));
+  assert.equal(refused?.status, 403);
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...login, "x-forwarded-host": "dash.example" })), null);
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...login, host: "dash.example" })), null);
+});

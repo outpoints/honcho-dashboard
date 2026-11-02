@@ -97,7 +97,7 @@ The dashboard itself can optionally require a shared password (`DASHBOARD_PASSWO
 `DASHBOARD_SESSION_SECRET`, default off). It is cookie based because reverse-proxy basic auth
 collides with the SDK's same-origin `Authorization` header. Pure logic lives in `src/lib/auth/`
 (import-free, tested by `scripts/auth-*.test.mjs`); `src/proxy.ts` (Next 16's renamed
-middleware) guards pages' data paths (`/api/*`, `/v3/*`, `/health`, `/openapi.json`) and must stay
+middleware) guards the data paths (`/api/*`, `/v3/*`, `/health`, `/openapi.json`) and must stay
 free of Node-only imports. Its matcher must NOT cover `/api/honcho` or `/v3` (any letter case):
 Next buffers only the first 10 MB of the body of any proxy-matched path and truncates silently,
 which corrupts large Honcho uploads (`scripts/dashboard-server.test.mjs` pins this against a real
