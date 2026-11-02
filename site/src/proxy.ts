@@ -18,10 +18,21 @@ import {
  * State-changing requests that browsers mark cross-site are rejected.
  *
  * Next applies the `next.config.ts` rewrites case-insensitively and runs this
- * file before them, so the matcher covers every path except Next internals and
- * the favicon, and `isGuardedPath` compares lowercased. Each data route
- * handler also calls `requireSession`, so a path this file misses still fails
- * closed. Keep this file free of Node-only imports.
+ * file before them, and `isGuardedPath` compares lowercased.
+ *
+ * The matcher deliberately leaves out `/api/honcho` and `/v3` (the SDK entry
+ * that is rewritten to `/api/honcho/v3`). Next buffers only the first 10 MB
+ * of the body of any path a proxy matches
+ * (`experimental.proxyClientMaxBodySize`) and truncates the rest silently,
+ * even when the proxy just returns `next()`, which would corrupt large Honcho
+ * uploads. Those paths are guarded by `requireSession` in the Honcho proxy
+ * route handler instead, which also runs the CSRF check and fails closed. The
+ * exclusions are spelled case-insensitively because the rewrites are, so a
+ * `/V3/...` upload is not buffered either; the handler is the only way to
+ * reach the upstream, so no spelling skips the guard.
+ *
+ * Do not add a path to this matcher that carries large bodies. Keep this file
+ * free of Node-only imports.
  */
 export async function proxy(request: NextRequest) {
   const config = currentAuthConfig();
@@ -45,7 +56,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next internals and the favicon (case-insensitive paths
-  // are handled in isGuardedPath, so do not narrow this to specific prefixes).
-  matcher: ["/((?!_next/|favicon\\.ico$).*)"],
+  // Everything except Next internals, the favicon and the two Honcho proxy
+  // entries (see above; the classes spell `api/honcho` and `v3` in any case).
+  matcher: [
+    "/((?!_next/|favicon\\.ico$|[aA][pP][iI]/[hH][oO][nN][cC][hH][oO](?:/|$)|[vV]3(?:/|$)).*)",
+  ],
 };
