@@ -5,6 +5,7 @@ import {
   DEFAULT_TOKEN_MANAGED_META,
   canonicalize,
   readRuntimeEnv,
+  resetInvalidTokenWarning,
   resolveRequestToken,
   serverDefaultToken,
   serverManagedToken,
@@ -87,4 +88,80 @@ test("HONCHO_PROXY_TOKEN is read by computed key from the runtime env", () => {
 test("the advertised meta names are stable and distinct", () => {
   assert.equal(DEFAULT_TOKEN_MANAGED_META, "honcho-dashboard:default-token-managed");
   assert.notEqual(DEFAULT_TOKEN_MANAGED_META, DEFAULT_BASE_URL_META);
+});
+
+// ---- invalid header values ----
+
+/** Capture console.warn and return what it was called with. */
+function captureWarnings(t) {
+  const calls = [];
+  t.mock.method(console, "warn", (...args) => calls.push(args.map(String).join(" ")));
+  return calls;
+}
+
+const INVALID = [
+  ["a newline mid-value", "abc\ndef"],
+  ["a carriage return mid-value", "abc\rdef"],
+  ["CRLF header injection", "abc\r\nX-Evil: 1"],
+  ["a NUL byte", "abc\0def"],
+  ["another control character", "abc\x07def"],
+  ["DEL", "abc\x7fdef"],
+  ["a non-ASCII character", "abcédef"],
+  ["a character above Latin-1", "abc☃def"],
+];
+
+test("env values with invalid header characters count as unset", (t) => {
+  captureWarnings(t);
+  for (const [name, value] of INVALID) {
+    resetInvalidTokenWarning();
+    assert.equal(serverManagedToken(value), undefined, name);
+    assert.equal(serverManagedToken(`  ${value}\n`), undefined, `${name}, padded`);
+    assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, value), undefined, name);
+    assert.equal(serverDefaultToken(defaultOrigin, SOURCES, value), undefined, name);
+  }
+});
+
+test("an invalid env value does not mask a token the browser sent", (t) => {
+  captureWarnings(t);
+  assert.equal(resolveRequestToken("browser-token", defaultOrigin, SOURCES, "abc\ndef"), "browser-token");
+});
+
+test("a rejected value warns once, and the warning never contains the value", (t) => {
+  const calls = captureWarnings(t);
+  resetInvalidTokenWarning();
+  const secret = "s3cr3t-line-one\ns3cr3t-line-two";
+  for (let i = 0; i < 5; i++) assert.equal(serverManagedToken(secret), undefined);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /HONCHO_PROXY_TOKEN/);
+  assert.equal(calls[0].includes("s3cr3t"), false);
+  assert.equal(calls[0].includes("line-one"), false);
+});
+
+test("valid values never warn, including unset, blank and padded ones", (t) => {
+  const calls = captureWarnings(t);
+  resetInvalidTokenWarning();
+  for (const ok of [undefined, "", "   ", "\n", TOKEN, `  ${TOKEN}\n`, "a.b-c_d~e+f/g=", "two words", "tab\tinside"]) {
+    serverManagedToken(ok);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("an accepted token is a valid Authorization header value", () => {
+  for (const ok of [TOKEN, "a.b-c_d~e+f/g=", "two words", "tab\tinside"]) {
+    const token = serverManagedToken(ok);
+    assert.equal(token, ok);
+    assert.doesNotThrow(() => new Headers().set("authorization", `Bearer ${token}`));
+  }
+});
+
+test("a line break or NUL in the value would have made Headers throw, with the value in the message", () => {
+  // Why the value must be dropped before it is used: this is the error
+  // /api/operator/diagnostics used to hand back to an unauthenticated caller.
+  for (const value of ["abc\ndef", "abc\rdef", "abc\0def", "abc\r\nX-Evil: 1"]) {
+    assert.throws(
+      () => new Headers().append("authorization", `Bearer ${value}`),
+      (err) => err.message.includes("abc"),
+      JSON.stringify(value),
+    );
+  }
 });

@@ -99,12 +99,35 @@ export function advertisedBaseUrl(sources: DefaultTargetSources): string | null 
   return url ? canonicalize(url) : null;
 }
 
+/** Visible ASCII, space and tab: what a header value may safely hold when sent as `Bearer <token>`. */
+const HEADER_SAFE = /^[\t\x20-\x7e]*$/;
+
+let warnedInvalidToken = false;
+
+/** Lets a test see the invalid-token warning again; the warning is otherwise once per process. */
+export function resetInvalidTokenWarning(): void {
+  warnedInvalidToken = false;
+}
+
 /**
  * The server-managed token (`HONCHO_PROXY_TOKEN`), trimmed; undefined when the
- * env is unset or blank.
+ * env is unset or blank. A value that cannot be an HTTP header value (a newline
+ * or other control or non-ASCII character in the middle) counts as unset, with
+ * one warning that never includes the value: left in, it would make every
+ * request that injects it fail inside `Headers`, and that error echoes the value.
  */
 export function serverManagedToken(envToken: string | undefined): string | undefined {
-  return present(envToken);
+  const token = present(envToken);
+  if (token === undefined) return undefined;
+  if (HEADER_SAFE.test(token)) return token;
+  if (!warnedInvalidToken) {
+    warnedInvalidToken = true;
+    console.warn(
+      "HONCHO_PROXY_TOKEN contains characters that are not valid in an HTTP header value " +
+        "(for example a line break); it is ignored until that is fixed.",
+    );
+  }
+  return undefined;
 }
 
 /**
