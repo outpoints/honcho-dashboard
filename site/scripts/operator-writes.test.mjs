@@ -12,6 +12,7 @@ import {
   operatorWritesEnabled,
   requireDashboardHeader,
   requireOperatorWrites,
+  serverWriteGate,
 } from "../src/lib/operator/writes.ts";
 
 const withValue = (value) => ({ [OPERATOR_WRITES_ENV]: value });
@@ -170,4 +171,32 @@ test("the dashboard header is enforced after the writes gate and before any acti
   const header = post.indexOf("requireDashboardHeader(");
   const action = post.indexOf('searchParams.get("action")');
   assert.ok(gate >= 0 && gate < header && header < action);
+});
+
+test("serverWriteGate: only error-free confirmed on enables the buttons", () => {
+  assert.deepEqual(serverWriteGate({ data: { writes_enabled: true }, error: undefined }), {
+    enabled: true,
+    hint: undefined,
+  });
+  assert.deepEqual(serverWriteGate({ data: { writes_enabled: true } }), { enabled: true, hint: undefined });
+});
+
+test("serverWriteGate: a failed refresh disables retries even with stale on data", () => {
+  const gate = serverWriteGate({ data: { writes_enabled: true }, error: new Error("HTTP 500") });
+  assert.equal(gate.enabled, false);
+  assert.match(gate.hint, /probe failed/);
+});
+
+test("serverWriteGate: error with no data, off, missing flag and loading all disable", () => {
+  assert.equal(serverWriteGate({ error: new Error("x") }).enabled, false);
+  assert.match(serverWriteGate({ error: new Error("x") }).hint, /probe failed/);
+  assert.deepEqual(serverWriteGate({ data: { writes_enabled: false } }), {
+    enabled: false,
+    hint: "server: HONCHO_OPERATOR_WRITES off",
+  });
+  assert.equal(serverWriteGate({ data: {} }).enabled, false);
+  assert.deepEqual(serverWriteGate({ data: undefined, error: undefined }), {
+    enabled: false,
+    hint: "checking server write gate…",
+  });
 });

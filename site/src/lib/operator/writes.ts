@@ -64,3 +64,22 @@ export function hasDashboardHeader(headers: Headers): boolean {
 export function requireDashboardHeader(headers: Headers): Response | null {
   return hasDashboardHeader(headers) ? null : forbidden(DASHBOARD_HEADER_REQUIRED_REASON);
 }
+
+/**
+ * What the UI knows about the server's write gate, from a `useOperatorQuery`
+ * state for `/api/operator/runtime`. `error` wins over `data`: the hook keeps
+ * the last good data after a failed refresh, and stale "on" must not enable the
+ * retry buttons. Only a confirmed, error-free "on" enables them; the server
+ * enforces the gate regardless.
+ */
+export function serverWriteGate(runtime: {
+  data?: { writes_enabled?: boolean } | undefined;
+  error?: unknown;
+}): { enabled: boolean; hint: string | undefined } {
+  if (runtime.error) {
+    return { enabled: false, hint: "server write gate unknown (runtime probe failed)" };
+  }
+  if (!runtime.data) return { enabled: false, hint: "checking server write gate…" };
+  if (runtime.data.writes_enabled === true) return { enabled: true, hint: undefined };
+  return { enabled: false, hint: "server: HONCHO_OPERATOR_WRITES off" };
+}

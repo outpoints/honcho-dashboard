@@ -23,7 +23,7 @@ import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
 import { INSTRUCTION_MODULES } from "@/lib/honcho/workspaceConfig";
-import { OPERATOR_WRITE_HEADERS } from "@/lib/operator/writes";
+import { OPERATOR_WRITE_HEADERS, serverWriteGate } from "@/lib/operator/writes";
 import { cn } from "@/lib/utils";
 
 type ChipTone = "blue" | "purple" | "yellow" | "orange" | "cyan" | "pink" | "muted";
@@ -76,14 +76,7 @@ export function ReasoningPage() {
   // Anything but a confirmed "on" (loading, probe failed, off) keeps them disabled
   // so we never offer a write the server will refuse.
   const runtime = useOperatorQuery<Pick<RuntimeInfo, "writes_enabled">>("/api/operator/runtime");
-  const serverWrites = runtime.data?.writes_enabled === true;
-  const serverWritesHint = serverWrites
-    ? undefined
-    : runtime.data
-      ? "server: HONCHO_OPERATOR_WRITES off"
-      : runtime.error
-        ? "server write gate unknown (runtime probe failed)"
-        : "checking server write gate…";
+  const { enabled: serverWrites, hint: serverWritesHint } = serverWriteGate(runtime);
   const metrics = useDeriverMetrics();
 
   const [statusFilter, setStatusFilter] = useState("all");
