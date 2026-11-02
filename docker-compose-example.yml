@@ -48,8 +48,9 @@ services:
       HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
 
       # ---- Operator modules (server-side, runtime, all optional) ----
-      # Postgres DSN — point at the SAME database Honcho uses. Read-only unless
-      # HONCHO_OPERATOR_WRITES is enabled below; a read-only role is recommended.
+      # Postgres DSN — point at the SAME database Honcho uses. The dashboard only
+      # reads through it unless HONCHO_OPERATOR_WRITES is enabled below; a
+      # read-only role is recommended.
       # Enables: throughput chart, 52-week heatmap, db size, pgvector status,
       # top-tables table, PostgreSQL diagnostic probe.
       HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}

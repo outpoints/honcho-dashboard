@@ -112,7 +112,7 @@ Three layers, each with a single job:
    `site/src/lib/operator/*` + `site/src/app/api/operator/*` route handlers.
    These are the metrics Honcho's REST API does not expose (uptime, db size,
    pgvector status, throughput timeseries, log tail, etc.). They read the same
-   Postgres database Honcho uses, **read-only** except for one opt-in action:
+   Postgres database Honcho uses and only read from it, except for one opt-in action:
    retrying failed reasoning tasks runs `UPDATE` on Honcho's `queue` table. That
    action is disabled unless `HONCHO_OPERATOR_WRITES=true` (enforced server-side)
    and needs a DB role with `UPDATE` on `queue`; use a read-only role otherwise.
