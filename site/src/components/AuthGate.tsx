@@ -194,7 +194,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
           <p role="alert" className="text-xs text-red-400 break-words">{error}</p>
         ) : null}
         <Button type="submit" variant="solid" icon="key" disabled={busy || password === ""} className="w-full">
-          {busy ? "SIGNING_IN" : "LOGIN"}
+          {busy ? "SIGNING_IN…" : "LOGIN"}
         </Button>
       </form>
     </Panel>

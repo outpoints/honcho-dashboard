@@ -206,7 +206,7 @@ function SessionPanel() {
       </p>
       <div className="mt-3">
         <Button variant="secondary" icon="power" onClick={onLogout} disabled={busy}>
-          LOGOUT
+          {busy ? "LOGGING_OUT…" : "LOGOUT"}
         </Button>
       </div>
     </Panel>
