@@ -4,6 +4,7 @@ import { schemaProbes } from "./schemaHealth";
 import { runtimeInfo } from "./runtime";
 import { tailLogs } from "./logs";
 import { isLocationAllowed } from "../honcho/allowlist";
+import { safeFetch as followAllowedRedirect } from "./safeFetch";
 
 export type ProbeStatus = "ok" | "warn" | "err" | "skip";
 
@@ -23,25 +24,8 @@ export interface DiagnosticsResult {
   probes: Probe[];
 }
 
-/**
- * Manual-redirect probe: refuse to follow 3xx unless the Location is on the
- * same proxy allowlist. Closes the loophole where a host on our allowlist
- * could 302 us to e.g. 169.254.169.254/latest/meta-data/.
- */
-async function safeFetch(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(url, { ...init, redirect: "manual", cache: "no-store" });
-  if (res.status >= 300 && res.status < 400) {
-    const location = res.headers.get("location");
-    if (!location || !isLocationAllowed(location)) {
-      const blocked = new Error(
-        `Blocked redirect to ${location ?? "(no Location)"} — not in proxy allowlist`,
-      );
-      blocked.name = "BlockedRedirect";
-      throw blocked;
-    }
-    return fetch(location, { ...init, redirect: "manual", cache: "no-store" });
-  }
-  return res;
+function safeFetch(url: string, init: RequestInit): Promise<Response> {
+  return followAllowedRedirect(url, init, isLocationAllowed);
 }
 
 async function probeHonchoHealth(baseUrl: string, token?: string): Promise<Probe> {
