@@ -10,7 +10,13 @@ import {
   signSession,
   verifySession,
 } from "../src/lib/auth/session.ts";
-import { LoginLimiter, clientKey } from "../src/lib/auth/rateLimit.ts";
+import {
+  LOGIN_GLOBAL_MAX_FAILURES,
+  LOGIN_MAX_FAILURES,
+  LOGIN_WINDOW_MS,
+  LoginLimiter,
+  clientKey,
+} from "../src/lib/auth/rateLimit.ts";
 import { processLogin } from "../src/lib/auth/login.ts";
 import { readAuthConfig } from "../src/lib/auth/config.ts";
 import { AUTH_REQUIRED_HEADER, isAuthRequiredResponse } from "../src/lib/auth/constants.ts";
@@ -231,6 +237,97 @@ test("limiter: blocked reservations are not recorded and release frees one slot"
   assert.equal(l.check("k", 2000).limited, false);
 });
 
+test("limiter defaults: 10 per client and 30 overall per 15 minutes", () => {
+  assert.equal(LOGIN_MAX_FAILURES, 10);
+  assert.equal(LOGIN_GLOBAL_MAX_FAILURES, 30);
+  assert.equal(LOGIN_WINDOW_MS, 15 * 60 * 1000);
+});
+
+test("limiter: rotating the client key cannot exceed the global cap", () => {
+  const l = new LoginLimiter();
+  const t0 = 5_000_000;
+  // 100 attempts, each from a "new" address (what a spoofed X-Forwarded-For does).
+  const results = Array.from({ length: 100 }, (_, i) => l.reserve(`10.0.0.${i}`, t0 + i));
+  assert.equal(results.filter((r) => !r.limited).length, LOGIN_GLOBAL_MAX_FAILURES);
+  assert.equal(results.filter((r) => r.limited).length, 100 - LOGIN_GLOBAL_MAX_FAILURES);
+  // A client that has never been seen is refused too, until the window passes.
+  const fresh = l.check("203.0.113.1", t0 + 1000);
+  assert.equal(fresh.limited, true);
+  assert.ok(fresh.retryAfterSeconds > 0 && fresh.retryAfterSeconds <= 900);
+});
+
+test("limiter: the global cap lifts on its own as failures age out", () => {
+  const l = new LoginLimiter();
+  const t0 = 9_000_000;
+  for (let i = 0; i < LOGIN_GLOBAL_MAX_FAILURES; i++) l.reserve(`k${i}`, t0 + i * 1000);
+  assert.equal(l.check("new", t0 + 30_000).limited, true);
+  // Retry-After points at the moment the oldest counted failure leaves the window.
+  assert.equal(l.check("new", t0 + 30_000).retryAfterSeconds, Math.ceil((t0 + LOGIN_WINDOW_MS - (t0 + 30_000)) / 1000));
+  // One millisecond before the oldest ages out: still blocked. At the boundary: one slot frees.
+  assert.equal(l.check("new", t0 + LOGIN_WINDOW_MS - 1).limited, true);
+  assert.equal(l.check("new", t0 + LOGIN_WINDOW_MS).limited, false);
+  assert.equal(l.reserve("new", t0 + LOGIN_WINDOW_MS).limited, false);
+  assert.equal(l.reserve("new2", t0 + LOGIN_WINDOW_MS).limited, true, "only one slot freed");
+  // Everything recovers once the whole window has passed.
+  const later = t0 + 2 * LOGIN_WINDOW_MS;
+  assert.equal(l.check("new2", later).limited, false);
+  assert.equal(Array.from({ length: 10 }, () => l.reserve("same", later)).filter((r) => !r.limited).length, 10);
+});
+
+test("limiter: one client stops at its own limit and leaves room for others", () => {
+  const l = new LoginLimiter();
+  const t0 = 1_000;
+  const flood = Array.from({ length: 100 }, () => l.reserve("attacker", t0));
+  assert.equal(flood.filter((r) => !r.limited).length, LOGIN_MAX_FAILURES);
+  assert.equal(l.check("operator", t0).limited, false, "the operator can still log in");
+  const operator = Array.from({ length: 20 }, () => l.reserve("operator", t0));
+  assert.equal(operator.filter((r) => !r.limited).length, LOGIN_MAX_FAILURES, "and still gets its own 10");
+});
+
+test("limiter: blocked reservations do not count against the global cap", () => {
+  const l = new LoginLimiter(2, 1000, 5);
+  for (let i = 0; i < 50; i++) l.reserve("one", 0); // 2 admitted, 48 refused
+  // 3 global slots remain, not 0: refused attempts were never recorded.
+  assert.equal(l.reserve("a", 1).limited, false);
+  assert.equal(l.reserve("b", 1).limited, false);
+  assert.equal(l.reserve("c", 1).limited, false);
+  assert.equal(l.reserve("d", 1).limited, true);
+});
+
+test("limiter: a successful login releases its global slot too", () => {
+  const l = new LoginLimiter(10, 1000, 2);
+  const a = l.reserve("a", 0);
+  l.reserve("b", 0);
+  assert.equal(l.reserve("c", 1).limited, true);
+  a.release();
+  a.release(); // idempotent: must not free a second slot
+  assert.equal(l.reserve("c", 2).limited, false);
+  assert.equal(l.reserve("d", 3).limited, true);
+});
+
+test("limiter: the stricter limit decides Retry-After", () => {
+  const l = new LoginLimiter(2, 10_000, 3);
+  l.reserve("a", 0);
+  l.reserve("a", 1_000); // "a" is now at its own cap, oldest failure at t=0
+  l.reserve("b", 6_000); // third global failure; the global oldest is also t=0
+  const a = l.check("a", 6_000);
+  assert.equal(a.limited, true);
+  assert.equal(a.retryAfterSeconds, 4);
+  // "c" is only blocked globally.
+  assert.equal(l.check("c", 6_000).limited, true);
+  assert.equal(l.check("c", 10_000).limited, false);
+});
+
+test("limiter: custom caps are honoured and reset() only forgets the client", () => {
+  const l = new LoginLimiter(3, 1000, 4);
+  for (let i = 0; i < 3; i++) l.reserve("a", 0);
+  assert.equal(l.check("a", 1).limited, true);
+  l.reset("a");
+  assert.equal(l.check("a", 1).limited, false, "per-client count is gone");
+  assert.equal(l.reserve("a", 1).limited, false);
+  assert.equal(l.reserve("a", 1).limited, true, "but its earlier failures still count globally");
+});
+
 test("clientKey: last x-forwarded-for hop by default, n-th from the right when configured", () => {
   const h = (o) => new Headers(o);
   // The client-supplied value is on the left; the proxy appended the right-most.
@@ -348,4 +445,38 @@ test("processLogin: the issued cookie verifies under the config and dies with a 
   assert.equal(await verifySession(changed, token), false);
   const shorter = readAuthConfig({ DASHBOARD_PASSWORD: "pw", DASHBOARD_SESSION_SECRET: SECRET, DASHBOARD_SESSION_TTL_HOURS: "24" });
   assert.equal(await verifySession(shorter, token), false, "168 h token under a 24 h TTL");
+});
+
+test("processLogin: rotating a spoofed X-Forwarded-For hits the global cap, the right password is refused, and it recovers", async () => {
+  const limiter = new LoginLimiter();
+  let clock = 50_000_000;
+  const now = () => clock;
+  // No reverse proxy: the client controls the only X-Forwarded-For entry.
+  const spoofed = (password, i) => ({
+    url: "http://dash.test/api/auth/login",
+    headers: new Headers({ "x-forwarded-for": `198.51.100.${i % 250}` }),
+    json: async () => ({ password }),
+  });
+  const statuses = [];
+  for (let i = 0; i < 40; i++) statuses.push((await processLogin(spoofed("bad", i), cfg, limiter, now)).status);
+  assert.equal(statuses.filter((s) => s === 401).length, LOGIN_GLOBAL_MAX_FAILURES);
+  assert.equal(statuses.filter((s) => s === 429).length, 40 - LOGIN_GLOBAL_MAX_FAILURES);
+
+  // Even the correct password is refused while the global cap holds, with Retry-After.
+  const blocked = await processLogin(spoofed("pw", 200), cfg, limiter, now);
+  assert.equal(blocked.status, 429);
+  assert.ok(Number(blocked.headers.get("retry-after")) > 0);
+
+  // The attacker stops; once the failures age out the operator can log in again.
+  clock += LOGIN_WINDOW_MS;
+  assert.equal((await processLogin(spoofed("pw", 201), cfg, limiter, now)).status, 204);
+});
+
+test("processLogin: a correct login never uses up the global budget", async () => {
+  const limiter = new LoginLimiter();
+  for (let i = 0; i < 100; i++) {
+    const res = await processLogin(loginReq("pw", `192.0.2.${i}`), cfg, limiter);
+    assert.equal(res.status, 204, `login ${i}`);
+  }
+  assert.equal(limiter.check("anyone").limited, false);
 });

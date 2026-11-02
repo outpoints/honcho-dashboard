@@ -265,10 +265,19 @@ What is protected when a password is set:
 
 Limits to know about:
 
-- **Rate limit.** Failed logins are limited to 10 per client address per 15 minutes (then
-  `429` with `Retry-After`). Attempts are counted as soon as they arrive, so concurrent
-  guesses cannot slip past the limit. The limiter is **in memory and per process**: it resets
-  on restart and is not shared between replicas.
+- **Rate limit.** Failed logins are limited to **10 per client address and 30 across all
+  clients, per rolling 15 minutes** (then `429` with `Retry-After`). The overall cap exists
+  because without a reverse proxy a client chooses its own `X-Forwarded-For` and could
+  otherwise rotate its "address" forever; with it, guessing is bounded to 30 attempts per
+  15 minutes (about 2,900 a day) whatever the headers say. Both limits are sliding windows
+  and lift on their own: each failure stops counting 15 minutes after it happened, and a
+  successful login does not count. The trade-off is that a sustained flood of wrong passwords
+  (30 per 15 minutes from any mix of addresses) keeps *new logins* blocked, yours included,
+  until it stops; sessions that already exist are not affected. A single client cannot do
+  this on its own: it is stopped at its 10, which leaves room under the 30. Attempts are
+  counted as soon as they arrive, so concurrent guesses cannot slip past the limits. The
+  limiter is **in memory and per process**: it resets on restart and is not shared between
+  replicas.
 - **Which address is "the client".** The limiter keys on the **last** entry of
   `X-Forwarded-For` (the address your reverse proxy appended), or the n-th from the right when
   `DASHBOARD_TRUSTED_PROXIES=n` (use `2` for e.g. Cloudflare in front of Traefik). Everything
@@ -283,7 +292,7 @@ Limits to know about:
   - With **no** reverse proxy, a client that sends no `X-Forwarded-For` is keyed on its real
     connection address (Next.js fills the header from the socket), but a client can send its
     own header and rotate the value to evade the limit. Put the dashboard behind a correctly
-    configured proxy, or rely on a strong password.
+    configured proxy, or rely on a strong password; the overall cap still applies.
 - **Sessions are stateless.** Logging out only clears the cookie in that browser: a captured
   cookie stays valid until it expires. To invalidate every session at once, change
   `DASHBOARD_PASSWORD` or `DASHBOARD_SESSION_SECRET` and restart: the signing key is derived

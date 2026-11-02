@@ -2,12 +2,30 @@
  * Failed-login limiter, in memory and therefore per process: it is not shared
  * across replicas and resets on restart. Import-free so it is testable.
  *
+ * Two limits apply to every attempt, both over the same sliding window:
+ *
+ * - per client address: {@link LOGIN_MAX_FAILURES} failures;
+ * - across all clients: {@link LOGIN_GLOBAL_MAX_FAILURES} failures. Without a
+ *   reverse proxy the client picks its own `X-Forwarded-For`, so it can change
+ *   its "address" on every request and never reach the per-client limit; the
+ *   global limit bounds guessing regardless of what the headers say.
+ *
+ * Both are sliding windows: each failure stops counting after the window, so a
+ * limit lifts on its own once the guessing stops. The price of a global limit
+ * is that a sustained flood of bad attempts keeps everyone, the operator
+ * included, locked out of *logging in* (existing sessions are unaffected). The
+ * global number is three times the per-client one so a single client, which is
+ * stopped at its own limit first, cannot lock the others out.
+ *
  * Attempts are reserved *before* the request body is awaited and released when
  * the login succeeds, so a burst of concurrent slow requests cannot all slip
  * past the check.
  */
 
+/** Failed logins allowed per client address within {@link LOGIN_WINDOW_MS}. */
 export const LOGIN_MAX_FAILURES = 10;
+/** Failed logins allowed across all clients within {@link LOGIN_WINDOW_MS}. */
+export const LOGIN_GLOBAL_MAX_FAILURES = 30;
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 /** Hard cap on tracked clients so a flood of spoofed IPs cannot grow memory without bound. */
@@ -26,12 +44,19 @@ export interface Reservation extends LimitState {
 
 export class LoginLimiter {
   private readonly attempts = new Map<string, number[]>();
+  private globalAttempts: number[] = [];
   private readonly maxFailures: number;
   private readonly windowMs: number;
+  private readonly globalMaxFailures: number;
 
-  constructor(maxFailures: number = LOGIN_MAX_FAILURES, windowMs: number = LOGIN_WINDOW_MS) {
+  constructor(
+    maxFailures: number = LOGIN_MAX_FAILURES,
+    windowMs: number = LOGIN_WINDOW_MS,
+    globalMaxFailures: number = LOGIN_GLOBAL_MAX_FAILURES,
+  ) {
     this.maxFailures = maxFailures;
     this.windowMs = windowMs;
+    this.globalMaxFailures = globalMaxFailures;
   }
 
   private recent(key: string, now: number): number[] {
@@ -41,19 +66,30 @@ export class LoginLimiter {
     return kept;
   }
 
-  /** Whether `key` is currently blocked (does not count an attempt). */
+  private recentGlobal(now: number): number[] {
+    this.globalAttempts = this.globalAttempts.filter((t) => now - t < this.windowMs);
+    return this.globalAttempts;
+  }
+
+  private blockedFor(kept: number[], max: number, now: number): number {
+    if (kept.length < max) return 0;
+    return Math.max(1, Math.ceil((kept[0] + this.windowMs - now) / 1000));
+  }
+
+  /** Whether `key` is currently blocked, per client or globally (does not count an attempt). */
   check(key: string, now: number = Date.now()): LimitState {
-    const kept = this.recent(key, now);
-    if (kept.length < this.maxFailures) return { limited: false, retryAfterSeconds: 0 };
-    const retryMs = kept[0] + this.windowMs - now;
-    return { limited: true, retryAfterSeconds: Math.max(1, Math.ceil(retryMs / 1000)) };
+    const retryAfterSeconds = Math.max(
+      this.blockedFor(this.recent(key, now), this.maxFailures, now),
+      this.blockedFor(this.recentGlobal(now), this.globalMaxFailures, now),
+    );
+    return { limited: retryAfterSeconds > 0, retryAfterSeconds };
   }
 
   /**
    * Atomically check and count one attempt. Synchronous on purpose: call it
    * before the first `await` of the request. When not limited, the attempt is
-   * recorded as a failure until `release()` is called (on success). When
-   * limited, nothing is recorded.
+   * recorded as a failure (for the client and globally) until `release()` is
+   * called (on success). When limited, nothing is recorded.
    */
   reserve(key: string, now: number = Date.now()): Reservation {
     const state = this.check(key, now);
@@ -62,6 +98,7 @@ export class LoginLimiter {
     const list = this.recent(key, now);
     list.push(now);
     this.attempts.set(key, list);
+    this.recentGlobal(now).push(now);
     let released = false;
     return {
       ...state,
@@ -69,15 +106,18 @@ export class LoginLimiter {
         if (released) return;
         released = true;
         const current = this.attempts.get(key);
-        if (!current) return;
-        const i = current.indexOf(now);
-        if (i >= 0) current.splice(i, 1);
-        if (current.length === 0) this.attempts.delete(key);
+        if (current) {
+          const i = current.indexOf(now);
+          if (i >= 0) current.splice(i, 1);
+          if (current.length === 0) this.attempts.delete(key);
+        }
+        const g = this.globalAttempts.indexOf(now);
+        if (g >= 0) this.globalAttempts.splice(g, 1);
       },
     };
   }
 
-  /** Forget a client entirely. */
+  /** Forget a client entirely (its share of the global count stays until it ages out). */
   reset(key: string): void {
     this.attempts.delete(key);
   }
