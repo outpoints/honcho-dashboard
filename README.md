@@ -116,6 +116,11 @@ Three layers, each with a single job:
    retrying failed reasoning tasks runs `UPDATE` on Honcho's `queue` table. That
    action is disabled unless `HONCHO_OPERATOR_WRITES=true` (enforced server-side)
    and needs a DB role with `UPDATE` on `queue`; use a read-only role otherwise.
+   While writes are off, the connection is also opened with
+   `options=-c default_transaction_read_only=on` (merged with any `options` already in
+   your DSN), so Postgres itself refuses writes. A pooler that rejects the `options`
+   startup parameter (PgBouncer does by default) needs
+   `ignore_startup_parameters = options`, or point the DSN straight at Postgres.
    (This is about the database connection only; the dashboard's Honcho REST
    screens still create/update/delete through the `/api/honcho` proxy when the
    in-app write toggle is on.)

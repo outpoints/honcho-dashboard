@@ -2,6 +2,8 @@ import "server-only";
 import { Pool } from "pg";
 import { webhookQueueStatus, type WebhookQueueStatus } from "./webhookStatus";
 import { QUEUE_PENDING_INDEXES, type SchemaFacts } from "./schemaHealth";
+import { operatorPoolTarget } from "./pool";
+import { operatorWritesEnabled } from "./writes";
 
 let pool: Pool | null = null;
 let lastUrl: string | null = null;
@@ -9,16 +11,21 @@ let lastUrl: string | null = null;
 function getPool(): Pool | null {
   const url = process.env.HONCHO_DATABASE_URL;
   if (!url) return null;
-  const normalized = url.replace(/^postgresql\+psycopg:\/\//, "postgresql://");
-  if (pool && lastUrl === normalized) return pool;
+  // With writes off, Postgres itself enforces read-only (default_transaction_read_only),
+  // not just the route gate. Both inputs are read per call, so the pool is rebuilt
+  // if either changes.
+  const writes = operatorWritesEnabled();
+  const target = operatorPoolTarget(url, writes);
+  const key = `${writes ? "rw" : "ro"}|${target.connectionString}|${target.options ?? ""}`;
+  if (pool && lastUrl === key) return pool;
   pool?.end().catch(() => undefined);
   pool = new Pool({
-    connectionString: normalized,
+    ...target,
     max: 4,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
   });
-  lastUrl = normalized;
+  lastUrl = key;
   return pool;
 }
 
