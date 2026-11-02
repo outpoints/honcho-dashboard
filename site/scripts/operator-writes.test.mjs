@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
-  CROSS_SITE_REJECTED_REASON,
+  DASHBOARD_HEADER,
+  DASHBOARD_HEADER_REQUIRED_REASON,
+  DASHBOARD_HEADER_VALUE,
   OPERATOR_WRITES_DISABLED_REASON,
   OPERATOR_WRITES_ENV,
-  isSameOriginRequest,
+  OPERATOR_WRITE_HEADERS,
+  hasDashboardHeader,
   operatorWritesEnabled,
+  requireDashboardHeader,
   requireOperatorWrites,
-  requireSameOrigin,
 } from "../src/lib/operator/writes.ts";
 
 const withValue = (value) => ({ [OPERATOR_WRITES_ENV]: value });
@@ -69,71 +73,101 @@ test("requireOperatorWrites returns null when enabled", () => {
   assert.equal(requireOperatorWrites(withValue("1")), null);
 });
 
-const URL_ = "http://dash.test:3000/api/operator/db?action=retry_all_failed_reasoning";
 const h = (o) => new Headers(o);
+const GOOD = { "x-honcho-dashboard": "1" };
 
-test("same-origin: Sec-Fetch-Site same-origin or none is allowed", () => {
-  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "same-origin" }), URL_), true);
-  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "none" }), URL_), true);
+test("the UI header constant is X-Honcho-Dashboard: 1", () => {
+  assert.equal(DASHBOARD_HEADER, "X-Honcho-Dashboard");
+  assert.equal(DASHBOARD_HEADER_VALUE, "1");
+  assert.deepEqual(OPERATOR_WRITE_HEADERS, { "X-Honcho-Dashboard": "1" });
+  // What the client sends must satisfy the server check.
+  assert.equal(hasDashboardHeader(new Headers(OPERATOR_WRITE_HEADERS)), true);
 });
 
-test("same-origin: cross-site and same-site Sec-Fetch-Site are rejected", () => {
-  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "cross-site" }), URL_), false);
-  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "same-site" }), URL_), false);
+test("dashboard header: the correct header is accepted, case-insensitively", () => {
+  assert.equal(hasDashboardHeader(h(GOOD)), true);
+  assert.equal(hasDashboardHeader(h({ "X-HONCHO-DASHBOARD": "1" })), true);
+  assert.equal(requireDashboardHeader(h(GOOD)), null);
 });
 
-test("same-origin: missing headers (curl, server-to-server) are allowed", () => {
-  assert.equal(isSameOriginRequest(h({}), URL_), true);
-  assert.equal(isSameOriginRequest(h({ host: "dash.test:3000" }), URL_), true);
+test("dashboard header: missing header is rejected, with and without browser headers", async () => {
+  for (const headers of [
+    {},
+    { host: "dash.test:3000" },
+    { origin: "http://dash.test:3000", host: "dash.test:3000" },
+    { "sec-fetch-site": "same-origin" },
+    { "sec-fetch-site": "none" },
+  ]) {
+    assert.equal(hasDashboardHeader(h(headers)), false, JSON.stringify(headers));
+    const res = requireDashboardHeader(h(headers));
+    assert.ok(res instanceof Response);
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { ok: false, reason: DASHBOARD_HEADER_REQUIRED_REASON });
+  }
 });
 
-test("same-origin: Origin host must match the Host header", () => {
-  const host = "dash.test:3000";
-  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3000", host }), URL_), true);
-  assert.equal(isSameOriginRequest(h({ origin: "http://evil.test", host }), URL_), false);
-  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3001", host }), URL_), false);
-  assert.equal(isSameOriginRequest(h({ origin: "null", host }), URL_), false);
-  assert.equal(isSameOriginRequest(h({ origin: "not a url", host }), URL_), false);
+test("dashboard header: wrong values are rejected", () => {
+  for (const v of ["", "0", "true", "yes", "2", "11", "1 1", "one"]) {
+    assert.equal(hasDashboardHeader(h({ "x-honcho-dashboard": v })), false, `value ${JSON.stringify(v)}`);
+    assert.ok(requireDashboardHeader(h({ "x-honcho-dashboard": v })) instanceof Response);
+  }
+  // Headers trims surrounding whitespace, so " 1 " arrives as "1".
+  assert.equal(hasDashboardHeader(h({ "x-honcho-dashboard": " 1 " })), true);
 });
 
-test("same-origin: falls back to the request URL host, honours x-forwarded-host", () => {
-  assert.equal(isSameOriginRequest(h({ origin: "http://dash.test:3000" }), URL_), true);
-  assert.equal(isSameOriginRequest(h({ origin: "http://evil.test" }), URL_), false);
+test("dashboard header: similarly named headers do not satisfy the check", () => {
+  assert.equal(hasDashboardHeader(h({ "x-honcho": "1" })), false);
+  assert.equal(hasDashboardHeader(h({ "x-dashboard": "1" })), false);
+  assert.equal(hasDashboardHeader(h({ "x-honcho-dashboard-x": "1" })), false);
+});
+
+test("dashboard header: a cross-site request carrying it is still accepted (the browser would have preflighted it)", () => {
+  // The server cannot tell; the protection is that a cross-origin page cannot add
+  // the header without a preflight the route never approves. Documented here so
+  // nobody adds Origin logic back "for safety".
   assert.equal(
-    isSameOriginRequest(
-      h({ origin: "https://dash.example", host: "internal:3000", "x-forwarded-host": "dash.example" }),
-      URL_,
-    ),
-    true,
+    requireDashboardHeader(h({ ...GOOD, "sec-fetch-site": "cross-site", origin: "http://evil.test" })),
+    null,
   );
 });
 
-test("same-origin: Sec-Fetch-Site decides alone when present (Host rewritten by a proxy)", () => {
-  // nginx `proxy_pass http://dashboard:3000;` rewrites Host and sends no X-Forwarded-Host.
+test("dashboard header: works behind a Host-rewriting proxy (Origin host differs from Host)", () => {
+  // nginx `proxy_pass http://dashboard:3000;` on a plain-HTTP install: the browser
+  // sends Origin only, Host is rewritten, no X-Forwarded-Host.
   assert.equal(
-    isSameOriginRequest(
-      h({ "sec-fetch-site": "same-origin", origin: "https://dash.example", host: "dashboard:3000" }),
-      "http://dashboard:3000/api/operator/db",
-    ),
-    true,
+    requireDashboardHeader(h({ ...GOOD, origin: "http://192.168.1.20", host: "dashboard:3000" })),
+    null,
   );
   assert.equal(
-    isSameOriginRequest(h({ "sec-fetch-site": "same-origin", origin: "http://evil.test", host: "dash.test:3000" }), URL_),
-    true,
-    "Origin is not consulted when Sec-Fetch-Site says same-origin",
+    requireDashboardHeader(h({ ...GOOD, origin: "https://dash.example", host: "dashboard:3000" })),
+    null,
   );
+  // And without the header the same request is refused whatever Origin/Host say.
+  assert.ok(requireDashboardHeader(h({ origin: "http://192.168.1.20", host: "192.168.1.20" })) instanceof Response);
 });
 
-test("same-origin: cross-site Sec-Fetch-Site rejects even when Origin matches Host", () => {
-  assert.equal(
-    isSameOriginRequest(h({ "sec-fetch-site": "cross-site", origin: "http://dash.test:3000", host: "dash.test:3000" }), URL_),
-    false,
-  );
+// Route source with comment lines removed, so the comments may name what is absent.
+const routeSource = () =>
+  readFileSync(new URL("../src/app/api/operator/db/route.ts", import.meta.url), "utf8")
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+
+test("the operator db route answers no CORS preflight", () => {
+  // The route imports server-only code, so check the source: a preflight for the
+  // custom header must fail, which needs no OPTIONS handler and no CORS headers.
+  const src = routeSource();
+  assert.doesNotMatch(src, /export\s+(async\s+)?function\s+OPTIONS|export\s+const\s+OPTIONS/);
+  assert.doesNotMatch(src, /access-control-/i);
+  assert.match(src, /requireDashboardHeader\(req\.headers\)/);
+  assert.doesNotMatch(src, /requireSameOrigin|isSameOrigin|sec-fetch-site|origin/i);
 });
 
-test("requireSameOrigin returns null or a 403 with the cross-site reason", async () => {
-  assert.equal(requireSameOrigin(h({}), URL_), null);
-  const res = requireSameOrigin(h({ "sec-fetch-site": "cross-site" }), URL_);
-  assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: CROSS_SITE_REJECTED_REASON });
+test("the dashboard header is enforced after the writes gate and before any action", () => {
+  const src = routeSource();
+  const post = src.slice(src.indexOf("export async function POST"));
+  const gate = post.indexOf("requireOperatorWrites()");
+  const header = post.indexOf("requireDashboardHeader(");
+  const action = post.indexOf('searchParams.get("action")');
+  assert.ok(gate >= 0 && gate < header && header < action);
 });

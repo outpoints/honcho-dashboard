@@ -19,7 +19,23 @@ export function operatorWritesEnabled(
   return TRUTHY.has(raw.trim().toLowerCase());
 }
 
-export const CROSS_SITE_REJECTED_REASON = "cross-site request rejected";
+/**
+ * Custom header the dashboard's own UI sends with every operator write. A
+ * cross-origin page cannot attach a non-safelisted header without a CORS
+ * preflight, and /api/operator/db never approves one (no OPTIONS handler, no
+ * Access-Control-Allow-* headers), so requiring it blocks CSRF. It does not
+ * depend on Origin, Host or Sec-Fetch-Site, so it also works on plain-HTTP
+ * installs and behind proxies that rewrite Host.
+ */
+export const DASHBOARD_HEADER = "X-Honcho-Dashboard";
+export const DASHBOARD_HEADER_VALUE = "1";
+
+/** Headers the dashboard UI must send on every operator write. */
+export const OPERATOR_WRITE_HEADERS: Record<string, string> = {
+  [DASHBOARD_HEADER]: DASHBOARD_HEADER_VALUE,
+};
+
+export const DASHBOARD_HEADER_REQUIRED_REASON = `${DASHBOARD_HEADER}: ${DASHBOARD_HEADER_VALUE} header required`;
 
 function forbidden(reason: string): Response {
   return Response.json({ ok: false, reason }, { status: 403 });
@@ -35,43 +51,16 @@ export function requireOperatorWrites(
   return operatorWritesEnabled(env) ? null : forbidden(OPERATOR_WRITES_DISABLED_REASON);
 }
 
-/**
- * CSRF check for bodyless POSTs that carry no custom header. Browsers send
- * Sec-Fetch-Site (and Origin on cross-origin POSTs). Sec-Fetch-Site decides when
- * present; Origin is compared with Host/X-Forwarded-Host only when it is absent; non-browser clients such
- * as curl send neither and are allowed, since CSRF only concerns browsers.
- */
-export function isSameOriginRequest(headers: Headers, requestUrl: string): boolean {
-  // Sec-Fetch-Site is set by the browser and cannot be forged by page script, and
-  // it stays correct behind proxies that rewrite Host. Decide on it alone.
-  const site = headers.get("sec-fetch-site");
-  if (site !== null) return site === "same-origin" || site === "none";
-
-  // Older browsers: fall back to comparing Origin with the Host we were reached on.
-  const origin = headers.get("origin");
-  if (origin !== null) {
-    let originHost: string;
-    try {
-      originHost = new URL(origin).host;
-    } catch {
-      return false; // includes the opaque "null" origin
-    }
-    const hosts = [headers.get("host"), headers.get("x-forwarded-host")]
-      .filter((h): h is string => !!h)
-      .map((h) => h.split(",")[0].trim());
-    if (hosts.length === 0) {
-      try {
-        hosts.push(new URL(requestUrl).host);
-      } catch {
-        return false;
-      }
-    }
-    if (!hosts.includes(originHost)) return false;
-  }
-  return true;
+/** True only for the exact header value the dashboard UI sends. */
+export function hasDashboardHeader(headers: Headers): boolean {
+  return headers.get(DASHBOARD_HEADER) === DASHBOARD_HEADER_VALUE;
 }
 
-/** Route guard: null for same-origin/non-browser requests, otherwise a 403. */
-export function requireSameOrigin(headers: Headers, requestUrl: string): Response | null {
-  return isSameOriginRequest(headers, requestUrl) ? null : forbidden(CROSS_SITE_REJECTED_REASON);
+/**
+ * CSRF guard for bodyless POSTs: null when the request carries
+ * `X-Honcho-Dashboard: 1`, otherwise a ready-to-return 403. Scripts (curl)
+ * must send the header too.
+ */
+export function requireDashboardHeader(headers: Headers): Response | null {
+  return hasDashboardHeader(headers) ? null : forbidden(DASHBOARD_HEADER_REQUIRED_REASON);
 }

@@ -218,7 +218,11 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
 - **Retrying reasoning tasks (optional):** Set `HONCHO_OPERATOR_WRITES=true` to let the
   dashboard re-queue failed tasks. This is the only direct database write the dashboard
   performs: an `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave
-  it unset (and use a read-only role) if you only want to observe.
+  it unset (and use a read-only role) if you only want to observe. Retry requests are
+  protected against cross-site requests by a required `X-Honcho-Dashboard: 1` header that the
+  dashboard sends itself; a cross-origin page cannot add it, and the route never answers a CORS
+  preflight. This works over plain HTTP and behind proxies that rewrite `Host`. To call the
+  endpoint yourself (for example with `curl -X POST`), send that header too.
 - **Live Logs:** Set host path for `Honcho Log File Mount` to your `honcho-aio` log directory:
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
   - Container Path: `/honcho.log` (Read-only)

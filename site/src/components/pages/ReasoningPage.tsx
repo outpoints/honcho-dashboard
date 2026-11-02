@@ -23,6 +23,7 @@ import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
 import { INSTRUCTION_MODULES } from "@/lib/honcho/workspaceConfig";
+import { OPERATOR_WRITE_HEADERS } from "@/lib/operator/writes";
 import { cn } from "@/lib/utils";
 
 type ChipTone = "blue" | "purple" | "yellow" | "orange" | "cyan" | "pink" | "muted";
@@ -220,7 +221,7 @@ export function ReasoningPage() {
       const res = await fetch(
         `/api/operator/db?action=retry_reasoning&workspace_id=${encodeURIComponent(workspaceId)}` +
           `&id=${encodeURIComponent(target.id)}`,
-        { method: "POST" },
+        { method: "POST", headers: OPERATOR_WRITE_HEADERS },
       );
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
       if (!res.ok || !body.ok) throw new Error(body.reason || `HTTP ${res.status}`);
@@ -254,7 +255,7 @@ export function ReasoningPage() {
     try {
       const res = await fetch(
         `/api/operator/db?action=retry_all_failed_reasoning&workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST" },
+        { method: "POST", headers: OPERATOR_WRITE_HEADERS },
       );
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;

@@ -184,7 +184,7 @@ before replacing any image referenced by the README.
 Operator DB writes are server-gated. The only direct database writes are the queue retry
 `UPDATE`s in `src/lib/operator/db.ts`, reached via `POST /api/operator/db` (Honcho REST writes
 go through the separate `/api/honcho` proxy). That route calls `requireOperatorWrites()` and
-then `requireSameOrigin()` (CSRF) from `src/lib/operator/writes.ts` before anything else;
+then `requireDashboardHeader()` (CSRF: the `X-Honcho-Dashboard: 1` header the UI sends; the route must never gain an OPTIONS handler or CORS headers, and no Origin/Host/Sec-Fetch-Site logic) from `src/lib/operator/writes.ts` before anything else;
 `HONCHO_OPERATOR_WRITES` defaults to off and the client write toggle is only UI. Any new
 operator write must use the same guards, and `GET /api/operator/runtime` exposes
 `writes_enabled` so the UI never offers a refused action. Do not describe the operator DSN
