@@ -51,7 +51,7 @@ export async function proxy(request: NextRequest) {
   if (!config.ok) {
     return Response.json({ error: config.error }, { status: 500, headers: NO_STORE });
   }
-  if (await hasValidSession(h, config.secret)) return NextResponse.next();
+  if (await hasValidSession(h, config)) return NextResponse.next();
   return authRequiredResponse();
 }
 

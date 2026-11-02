@@ -18,49 +18,122 @@ import { AUTH_REQUIRED_HEADER, isAuthRequiredResponse } from "../src/lib/auth/co
 const SECRET = "k".repeat(48);
 const OTHER = "z".repeat(48);
 const NOW = 1_800_000_000_000;
+const PASSWORD = "correct horse";
+const params = (o = {}) => ({ secret: SECRET, password: PASSWORD, ttlSeconds: 3600, ...o });
 
 test("sign/verify round trip", async () => {
-  const token = await signSession(SECRET, 3600, NOW);
+  const token = await signSession(params(), NOW);
   assert.match(token, /^\d+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
-  assert.equal(await verifySession(SECRET, token, NOW), true);
-  assert.equal(await verifySession(SECRET, token, NOW + 3599_000), true);
+  assert.equal(await verifySession(params(), token, NOW), true);
+  assert.equal(await verifySession(params(), token, NOW + 3599_000), true);
 });
 
 test("tokens are unique per call (random nonce)", async () => {
-  const a = await signSession(SECRET, 60, NOW);
-  const b = await signSession(SECRET, 60, NOW);
+  const a = await signSession(params({ ttlSeconds: 60 }), NOW);
+  const b = await signSession(params({ ttlSeconds: 60 }), NOW);
   assert.notEqual(a, b);
 });
 
 test("expired token is rejected, at and after the expiry second", async () => {
-  const token = await signSession(SECRET, 3600, NOW);
-  assert.equal(await verifySession(SECRET, token, NOW + 3600_000), false);
-  assert.equal(await verifySession(SECRET, token, NOW + 99_999_000), false);
+  const token = await signSession(params(), NOW);
+  assert.equal(await verifySession(params(), token, NOW + 3600_000), false);
+  assert.equal(await verifySession(params(), token, NOW + 99_999_000), false);
 });
 
 test("token signed with another secret is rejected", async () => {
-  const token = await signSession(OTHER, 3600, NOW);
-  assert.equal(await verifySession(SECRET, token, NOW), false);
+  const token = await signSession(params({ secret: OTHER }), NOW);
+  assert.equal(await verifySession(params(), token, NOW), false);
+});
+
+test("changing the password ends every existing session", async () => {
+  const token = await signSession(params(), NOW);
+  assert.equal(await verifySession(params(), token, NOW), true);
+  for (const password of ["correct horse2", "Correct horse", " correct horse", "correct horse ", "x", "pässword"]) {
+    assert.equal(await verifySession(params({ password }), token, NOW), false, JSON.stringify(password));
+  }
+  // The new password signs sessions of its own, which the old one rejects.
+  const fresh = await signSession(params({ password: "new password" }), NOW);
+  assert.equal(await verifySession(params({ password: "new password" }), fresh, NOW), true);
+  assert.equal(await verifySession(params(), fresh, NOW), false);
+});
+
+test("unicode and long passwords sign and verify", async () => {
+  for (const password of ["pässword-密码-🔑", "p".repeat(10_000)]) {
+    const token = await signSession(params({ password }), NOW);
+    assert.equal(await verifySession(params({ password }), token, NOW), true);
+    assert.equal(await verifySession(params(), token, NOW), false);
+  }
+});
+
+test("a password is not interchangeable with the secret", async () => {
+  // Swapping the two values must not produce the same key.
+  const token = await signSession({ secret: SECRET, password: OTHER, ttlSeconds: 3600 }, NOW);
+  assert.equal(await verifySession({ secret: OTHER, password: SECRET, ttlSeconds: 3600 }, token, NOW), false);
+});
+
+test("a TTL change does not alter the signing key, only the accepted lifetime", async () => {
+  const token = await signSession(params({ ttlSeconds: 60 }), NOW);
+  assert.equal(await verifySession(params({ ttlSeconds: 86_400 }), token, NOW), true);
+});
+
+test("lowering the TTL rejects tokens that outlive it, with exact boundaries", async () => {
+  const week = 168 * 3600;
+  const day = 24 * 3600;
+  const token = await signSession(params({ ttlSeconds: week }), NOW);
+  const at = (secondsLater) => NOW + secondsLater * 1000;
+  // Issued under 168 h, checked under a 24 h TTL: only the last 24 h remain valid.
+  assert.equal(await verifySession(params({ ttlSeconds: day }), token, at(0)), false, "just issued");
+  assert.equal(await verifySession(params({ ttlSeconds: day }), token, at(week - day - 1)), false, "1 s too early");
+  assert.equal(await verifySession(params({ ttlSeconds: day }), token, at(week - day)), true, "exactly ttl remaining");
+  assert.equal(await verifySession(params({ ttlSeconds: day }), token, at(week - 1)), true, "last second");
+  assert.equal(await verifySession(params({ ttlSeconds: day }), token, at(week)), false, "expired");
+  // Unchanged TTL: valid for the whole lifetime.
+  assert.equal(await verifySession(params({ ttlSeconds: week }), token, at(0)), true);
+  assert.equal(await verifySession(params({ ttlSeconds: week }), token, at(week - 1)), true);
+  assert.equal(await verifySession(params({ ttlSeconds: week }), token, at(week)), false);
+  // Raising the TTL never extends an existing token.
+  assert.equal(await verifySession(params({ ttlSeconds: week * 2 }), token, at(week)), false);
+});
+
+test("TTL boundary: a fresh token is valid iff the verifying TTL is at least its own", async () => {
+  const token = await signSession(params({ ttlSeconds: 3600 }), NOW);
+  assert.equal(await verifySession(params({ ttlSeconds: 3600 }), token, NOW), true);
+  assert.equal(await verifySession(params({ ttlSeconds: 3599 }), token, NOW), false);
+  assert.equal(await verifySession(params({ ttlSeconds: 3599.9 }), token, NOW), false);
+  assert.equal(await verifySession(params({ ttlSeconds: 3600.9 }), token, NOW), true);
+  assert.equal(await verifySession(params({ ttlSeconds: 0 }), token, NOW), false);
+});
+
+test("sub-second clock values use whole seconds on both sides", async () => {
+  const token = await signSession(params({ ttlSeconds: 60 }), NOW + 999);
+  assert.equal(await verifySession(params({ ttlSeconds: 60 }), token, NOW + 999), true);
+  assert.equal(await verifySession(params({ ttlSeconds: 60 }), token, NOW + 59_999), true);
+  assert.equal(await verifySession(params({ ttlSeconds: 60 }), token, NOW + 60_000), false);
+});
+
+test("a token with an absurdly distant expiry is refused even if correctly signed", async () => {
+  const farFuture = await signSession(params({ ttlSeconds: 10 * 365 * 86_400 }), NOW);
+  assert.equal(await verifySession(params({ ttlSeconds: 365 * 86_400 }), farFuture, NOW), false);
 });
 
 test("tampered signature is rejected", async () => {
-  const token = await signSession(SECRET, 3600, NOW);
+  const token = await signSession(params(), NOW);
   const [exp, nonce, sig] = token.split(".");
   const flipped = (sig[0] === "A" ? "B" : "A") + sig.slice(1);
-  assert.equal(await verifySession(SECRET, `${exp}.${nonce}.${flipped}`, NOW), false);
-  assert.equal(await verifySession(SECRET, `${exp}.${nonce}.${sig.slice(0, -2)}`, NOW), false);
-  assert.equal(await verifySession(SECRET, `${exp}.${nonce}.${sig}AA`, NOW), false);
+  assert.equal(await verifySession(params(), `${exp}.${nonce}.${flipped}`, NOW), false);
+  assert.equal(await verifySession(params(), `${exp}.${nonce}.${sig.slice(0, -2)}`, NOW), false);
+  assert.equal(await verifySession(params(), `${exp}.${nonce}.${sig}AA`, NOW), false);
 });
 
 test("tampered expiry or nonce is rejected", async () => {
-  const token = await signSession(SECRET, 60, NOW);
+  const token = await signSession(params({ ttlSeconds: 60 }), NOW);
   const [exp, nonce, sig] = token.split(".");
-  assert.equal(await verifySession(SECRET, `${Number(exp) + 100000}.${nonce}.${sig}`, NOW), false);
-  assert.equal(await verifySession(SECRET, `${exp}.${nonce}x.${sig}`, NOW), false);
+  assert.equal(await verifySession(params(), `${Number(exp) + 100000}.${nonce}.${sig}`, NOW), false);
+  assert.equal(await verifySession(params(), `${exp}.${nonce}x.${sig}`, NOW), false);
 });
 
 test("malformed tokens are rejected without throwing", async () => {
-  const good = await signSession(SECRET, 3600, NOW);
+  const good = await signSession(params(), NOW);
   const bad = [
     undefined,
     null,
@@ -79,11 +152,11 @@ test("malformed tokens are rejected without throwing", async () => {
     `${good}.extra`,
     "x".repeat(10_000),
   ];
-  for (const t of bad) assert.equal(await verifySession(SECRET, t, NOW), false, String(t).slice(0, 30));
+  for (const t of bad) assert.equal(await verifySession(params(), t, NOW), false, String(t).slice(0, 30));
 });
 
 test("a legacy-looking unsigned token (exp.nonce.empty) is rejected", async () => {
-  assert.equal(await verifySession(SECRET, `${Math.floor(NOW / 1000) + 100}.abc.`, NOW), false);
+  assert.equal(await verifySession(params(), `${Math.floor(NOW / 1000) + 100}.abc.`, NOW), false);
 });
 
 test("parseCookie finds the session among several cookies", () => {
@@ -264,4 +337,15 @@ test("guard 401 marker: only the dashboard's own 401 counts as auth-required", (
   assert.equal(isAuthRequiredResponse(res(403, "required")), false);
   assert.equal(isAuthRequiredResponse(res(200, "required")), false);
   assert.equal(isAuthRequiredResponse(res(401, "nope")), false);
+});
+
+test("processLogin: the issued cookie verifies under the config and dies with a password change", async () => {
+  const res = await processLogin(loginReq("pw", "8.8.8.8"), cfg, new LoginLimiter());
+  assert.equal(res.status, 204);
+  const token = /session=([^;]+)/.exec(res.headers.get("set-cookie"))[1];
+  assert.equal(await verifySession(cfg, token), true);
+  const changed = readAuthConfig({ DASHBOARD_PASSWORD: "pw2", DASHBOARD_SESSION_SECRET: SECRET });
+  assert.equal(await verifySession(changed, token), false);
+  const shorter = readAuthConfig({ DASHBOARD_PASSWORD: "pw", DASHBOARD_SESSION_SECRET: SECRET, DASHBOARD_SESSION_TTL_HOURS: "24" });
+  assert.equal(await verifySession(shorter, token), false, "168 h token under a 24 h TTL");
 });

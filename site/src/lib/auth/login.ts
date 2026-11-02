@@ -50,7 +50,7 @@ export async function processLogin(
   }
 
   reservation.release();
-  const token = await signSession(config.secret, config.ttlSeconds, now());
+  const token = await signSession(config, now());
   const secure = isSecureRequest(req.headers.get("x-forwarded-proto"), new URL(req.url).protocol);
   return new Response(null, {
     status: 204,

@@ -231,9 +231,9 @@ tails and the redacted environment). Set a single shared password to protect all
 
 | Variable | Meaning |
 | --- | --- |
-| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behaviour. |
-| `DASHBOARD_SESSION_SECRET` | **Required** when the password is set, at least 32 characters. Signs the session cookie. There is no default and it is never derived from the password. |
-| `DASHBOARD_SESSION_TTL_HOURS` | Optional session lifetime in hours. Default `168` (7 days); values below one minute are raised to one minute. |
+| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behaviour. Changing it ends every existing session. |
+| `DASHBOARD_SESSION_SECRET` | **Required** when the password is set, at least 32 characters. Signs the session cookie (together with the password). There is no default and it is never derived from the password. Rotating it ends every existing session. |
+| `DASHBOARD_SESSION_TTL_HOURS` | Optional session lifetime in hours. Default `168` (7 days); values below one minute are raised to one minute. Lowering it also shortens sessions that were issued under a longer value; raising it never extends them. |
 | `DASHBOARD_TRUSTED_PROXIES` | Optional number of reverse proxies in front of the dashboard (default `1`, max `10`). Only used to pick the client address for the login rate limiter; see below. |
 
 Generate a secret with:
@@ -285,9 +285,11 @@ Limits to know about:
     own header and rotate the value to evade the limit. Put the dashboard behind a correctly
     configured proxy, or rely on a strong password.
 - **Sessions are stateless.** Logging out only clears the cookie in that browser: a captured
-  cookie stays valid until it expires. Changing `DASHBOARD_PASSWORD` does **not** invalidate
-  existing sessions. To invalidate every session at once, rotate `DASHBOARD_SESSION_SECRET`
-  and restart.
+  cookie stays valid until it expires. To invalidate every session at once, change
+  `DASHBOARD_PASSWORD` or `DASHBOARD_SESSION_SECRET` and restart: the signing key is derived
+  from both. A session is also refused when its expiry is further away than the current
+  `DASHBOARD_SESSION_TTL_HOURS`, so lowering the lifetime cuts existing sessions down to it
+  (a 7-day session under a new 24 hour setting stays valid only for its last 24 hours).
 - **Expiry.** When a session expires while the app is open, the next request returns the
   guard's `401` (marked with an `x-dashboard-auth: required` header) and the dashboard shows
   the login screen again; a Honcho `401` (bad API key) is not affected.

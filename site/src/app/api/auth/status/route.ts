@@ -12,6 +12,6 @@ export async function GET(req: Request) {
   if (!config.enabled) {
     return Response.json({ enabled: false, authenticated: true }, { headers: NO_STORE });
   }
-  const authenticated = config.ok && (await hasValidSession(req.headers, config.secret));
+  const authenticated = config.ok && (await hasValidSession(req.headers, config));
   return Response.json({ enabled: true, authenticated }, { headers: NO_STORE });
 }

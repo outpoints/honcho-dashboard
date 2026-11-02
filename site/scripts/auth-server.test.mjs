@@ -6,6 +6,7 @@ import { signSession } from "../src/lib/auth/session.ts";
 const SECRET = "k".repeat(48);
 const PASSWORD = "pw";
 const NOW = Date.now();
+const params = (o = {}) => ({ secret: SECRET, password: PASSWORD, ttlSeconds: 3600, ...o });
 
 /** Run `fn` with the given dashboard auth env and restore the previous values. */
 async function withEnv(env, fn) {
@@ -28,7 +29,7 @@ async function withEnv(env, fn) {
 
 const ON = { DASHBOARD_PASSWORD: PASSWORD, DASHBOARD_SESSION_SECRET: SECRET };
 const req = (method, headers = {}) => ({ method, headers: new Headers(headers) });
-const sessionCookie = async () => `honcho_dashboard_session=${await signSession(SECRET, 3600, NOW)}`;
+const sessionCookie = async () => `honcho_dashboard_session=${await signSession(params(), NOW)}`;
 
 test("requireSession: auth off lets everything through, cross-site writes included", async () => {
   await withEnv({}, async () => {
@@ -105,4 +106,21 @@ test("rejectCrossSiteWrite does not look at auth config or cookies", () => {
   assert.equal(rejectCrossSiteWrite(req("POST", { "sec-fetch-site": "cross-site" }))?.status, 403);
   assert.equal(rejectCrossSiteWrite(req("POST", { "sec-fetch-site": "same-origin" })), null);
   assert.equal(rejectCrossSiteWrite(req("GET", { "sec-fetch-site": "cross-site" })), null);
+});
+
+test("requireSession: a password change or a lowered TTL logs everyone out", async () => {
+  const token = await signSession(params({ ttlSeconds: 168 * 3600 }), NOW);
+  const withToken = () => req("GET", { cookie: `honcho_dashboard_session=${token}` });
+  await withEnv({ ...ON }, async () => {
+    assert.equal(await requireSession(withToken()), null, "same config: still logged in");
+  });
+  await withEnv({ DASHBOARD_PASSWORD: "another", DASHBOARD_SESSION_SECRET: SECRET }, async () => {
+    assert.equal((await requireSession(withToken()))?.status, 401, "password changed");
+  });
+  await withEnv({ ...ON, DASHBOARD_SESSION_TTL_HOURS: "24" }, async () => {
+    assert.equal((await requireSession(withToken()))?.status, 401, "TTL lowered below the token's lifetime");
+  });
+  await withEnv({ ...ON, DASHBOARD_SESSION_TTL_HOURS: "168" }, async () => {
+    assert.equal(await requireSession(withToken()), null, "explicit default TTL");
+  });
 });

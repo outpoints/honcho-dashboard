@@ -6,7 +6,7 @@
 import { readAuthConfig, type AuthConfig } from "./config.ts";
 import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE } from "./constants.ts";
 import { isCrossSiteWrite } from "./guard.ts";
-import { SESSION_COOKIE_NAME, parseCookie, verifySession } from "./session.ts";
+import { SESSION_COOKIE_NAME, parseCookie, verifySession, type SessionParams } from "./session.ts";
 
 // The proxy and each route are bundled separately, so a module-level flag would
 // log once per bundle. A global keeps it to one line per process.
@@ -23,13 +23,13 @@ export function currentAuthConfig(): AuthConfig {
   return config;
 }
 
-/** True when the request carries a valid, unexpired session cookie. */
+/** True when the request carries a session cookie that is valid under the current config. */
 export async function hasValidSession(
   headers: { get(name: string): string | null },
-  secret: string,
+  session: SessionParams,
 ): Promise<boolean> {
   const token = parseCookie(headers.get("cookie"), SESSION_COOKIE_NAME);
-  return verifySession(secret, token);
+  return verifySession(session, token);
 }
 
 export const NO_STORE = { "cache-control": "no-store" } as const;
@@ -84,6 +84,6 @@ export async function requireSession(request: GuardedRequest): Promise<Response 
   if (!config.ok) {
     return Response.json({ error: config.error }, { status: 500, headers: NO_STORE });
   }
-  if (await hasValidSession(request.headers, config.secret)) return null;
+  if (await hasValidSession(request.headers, config)) return null;
   return authRequiredResponse();
 }

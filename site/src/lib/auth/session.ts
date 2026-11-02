@@ -3,7 +3,13 @@
  *
  * Token format: `<exp>.<nonce>.<signature>` where `exp` is the expiry in Unix
  * seconds, `nonce` is 16 random bytes (base64url) and `signature` is
- * base64url(HMAC-SHA256(secret, `${exp}.${nonce}`)).
+ * base64url(HMAC-SHA256(signingKey, `${exp}.${nonce}`)).
+ *
+ * The signing key is derived from both the session secret and the dashboard
+ * password (see {@link signingKey}), so changing either one ends every
+ * existing session. `verifySession` also rejects an `exp` further out than the
+ * configured TTL allows, so lowering `DASHBOARD_SESSION_TTL_HOURS` shortens
+ * sessions that were issued under a longer one.
  *
  * Only Web Crypto (`crypto.subtle`) and `btoa`/`atob` are used, so the same
  * module runs in the Next.js proxy and in Node route handlers. No imports.
@@ -33,40 +39,63 @@ function fromBase64Url(value: string): Uint8Array | null {
   }
 }
 
-function hmacKey(secret: string, usage: "sign" | "verify"): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+/** What signs and validates a session; the verified `AuthConfig` has all three. */
+export interface SessionParams {
+  /** `DASHBOARD_SESSION_SECRET`. */
+  secret: string;
+  /** `DASHBOARD_PASSWORD`. Changing it invalidates every session. */
+  password: string;
+  /** Session lifetime in seconds: the signing TTL and the upper bound `verifySession` accepts. */
+  ttlSeconds: number;
+}
+
+const KEY_CONTEXT = "honcho-dashboard/session-key/v1";
+
+/**
+ * HMAC key for tokens: HMAC-SHA256(secret, context + NUL + password). Keyed by
+ * the secret, so the password is not recoverable from it, and it changes
+ * whenever the password or the secret does.
+ */
+async function signingKey(
+  params: Pick<SessionParams, "secret" | "password">,
+  usage: "sign" | "verify",
+): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(secret),
+    encoder.encode(params.secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    [usage],
+    ["sign"],
   );
+  const derived = await crypto.subtle.sign("HMAC", base, encoder.encode(`${KEY_CONTEXT}\0${params.password}`));
+  return crypto.subtle.importKey("raw", derived, { name: "HMAC", hash: "SHA-256" }, false, [usage]);
 }
 
 /**
- * Create a session token valid for `ttlSeconds` from `nowMs`.
+ * Create a session token valid for `params.ttlSeconds` from `nowMs`.
  * `nonce` is injectable for tests; production callers omit it.
  */
 export async function signSession(
-  secret: string,
-  ttlSeconds: number,
+  params: SessionParams,
   nowMs: number = Date.now(),
   nonce?: string,
 ): Promise<string> {
-  const exp = Math.floor(nowMs / 1000) + Math.floor(ttlSeconds);
+  const exp = Math.floor(nowMs / 1000) + Math.floor(params.ttlSeconds);
   const n = nonce ?? toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const payload = `${exp}.${n}`;
-  const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"), encoder.encode(payload));
+  const sig = await crypto.subtle.sign("HMAC", await signingKey(params, "sign"), encoder.encode(payload));
   return `${payload}.${toBase64Url(new Uint8Array(sig))}`;
 }
 
 /**
- * True when `token` is well formed, signed with `secret`, and not expired at
- * `nowMs`. Never throws on bad input. The signature check is
- * `crypto.subtle.verify`, which compares in constant time.
+ * True when `token` is well formed, signed with the key for `params.secret`
+ * and `params.password`, not expired at `nowMs`, and not valid for longer than
+ * `params.ttlSeconds` from `nowMs` (a token issued under a longer TTL is
+ * refused once the TTL is lowered). Never throws on bad input. The signature
+ * check is `crypto.subtle.verify`, which compares in constant time.
  */
 export async function verifySession(
-  secret: string,
+  params: SessionParams,
   token: string | null | undefined,
   nowMs: number = Date.now(),
 ): Promise<boolean> {
@@ -81,7 +110,7 @@ export async function verifySession(
   try {
     valid = await crypto.subtle.verify(
       "HMAC",
-      await hmacKey(secret, "verify"),
+      await signingKey(params, "verify"),
       sigBytes as BufferSource,
       encoder.encode(`${exp}.${nonce}`),
     );
@@ -89,7 +118,9 @@ export async function verifySession(
     return false;
   }
   if (!valid) return false;
-  return Number(exp) > Math.floor(nowMs / 1000);
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const expSeconds = Number(exp);
+  return expSeconds > nowSeconds && expSeconds <= nowSeconds + Math.floor(params.ttlSeconds);
 }
 
 /** Extract one cookie value from a `Cookie` request header. */

@@ -44,7 +44,7 @@ export default async function RootLayout({
   // screen), so do not advertise the internal Honcho URL to them. AuthGate
   // reloads after login, which re-renders this with a session.
   const auth = currentAuthConfig();
-  const visible = !auth.enabled || (auth.ok && (await hasValidSession(await headers(), auth.secret)));
+  const visible = !auth.enabled || (auth.ok && (await hasValidSession(await headers(), auth)));
   const defaultBaseUrl = visible ? serverAdvertisedBaseUrl() : null;
   return (
     <html

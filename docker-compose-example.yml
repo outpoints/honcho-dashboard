@@ -69,11 +69,12 @@ services:
       HONCHO_OPERATOR_CONFIG_KEYS: ${HONCHO_OPERATOR_CONFIG_KEYS:-}
 
       # ---- Optional dashboard login (uncomment both to require a password) ----
+      # Changing the password or the secret ends every existing session.
       # DASHBOARD_SESSION_SECRET is required when DASHBOARD_PASSWORD is set, at
       # least 32 characters, no default. Generate with: openssl rand -base64 48
       # DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       # DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:-}
-      # Session lifetime in hours (default 168).
+      # Session lifetime in hours (default 168); lowering it also shortens existing sessions.
       # DASHBOARD_SESSION_TTL_HOURS: ${DASHBOARD_SESSION_TTL_HOURS:-}
       # Reverse proxies in front of the dashboard (default 1), for the login rate limiter.
       # DASHBOARD_TRUSTED_PROXIES: ${DASHBOARD_TRUSTED_PROXIES:-}
