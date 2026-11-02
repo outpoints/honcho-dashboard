@@ -25,9 +25,9 @@ services:
       # Service on the same server by name, see the `networks:` block at the bottom
       # and use http://api:8000.
       NEXT_PUBLIC_HONCHO_BASE_URL: ${HONCHO_BASE_URL:?}
-      # Comma-separated origins the same-origin proxy may forward to. Required: the
-      # proxy fails closed when empty. Usually the same value as HONCHO_BASE_URL.
-      HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:?}
+      # Optional. Only needed for extra Honcho servers added under CONFIG: the
+      # proxy already allows the HONCHO_BASE_URL above on its own. Comma-separated origins.
+      HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
 
       # Optional read-only Postgres DSN for the operator modules. See the README
       # for a dashboard_ro role. With the networks block below this can be
