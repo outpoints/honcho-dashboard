@@ -3,9 +3,10 @@
  * the data route handlers. Only Web APIs and the pure auth modules are used,
  * so it stays free of Node-only imports (`node:crypto`, `fs`, `pg`).
  */
-import { readAuthConfig, type AuthConfig } from "./config";
-import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE } from "./constants";
-import { SESSION_COOKIE_NAME, parseCookie, verifySession } from "./session";
+import { readAuthConfig, type AuthConfig } from "./config.ts";
+import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE } from "./constants.ts";
+import { isCrossSiteWrite } from "./guard.ts";
+import { SESSION_COOKIE_NAME, parseCookie, verifySession } from "./session.ts";
 
 // The proxy and each route are bundled separately, so a module-level flag would
 // log once per bundle. A global keeps it to one line per process.
@@ -40,16 +41,46 @@ export function authRequiredResponse(): Response {
   );
 }
 
-/**
- * Session check for data route handlers (defense in depth behind `proxy.ts`).
- * Returns the 401/500 response to send, or null when the caller may proceed
- * (auth disabled, or a valid session).
- */
-export async function requireSession(request: {
+/** The slice of `Request` the guards need (`Request` and `NextRequest` both fit). */
+export interface GuardedRequest {
+  method: string;
   headers: { get(name: string): string | null };
-}): Promise<Response | null> {
+}
+
+/**
+ * The 403 to send when `request` is a state-changing request that the browser
+ * marks cross-site, or null. Callers decide whether auth is on.
+ */
+export function rejectCrossSiteWrite(request: GuardedRequest): Response | null {
+  const h = request.headers;
+  if (
+    !isCrossSiteWrite({
+      method: request.method,
+      secFetchSite: h.get("sec-fetch-site"),
+      origin: h.get("origin"),
+      host: h.get("host"),
+      forwardedHost: h.get("x-forwarded-host"),
+    })
+  ) {
+    return null;
+  }
+  return Response.json({ error: "cross-site request rejected" }, { status: 403, headers: NO_STORE });
+}
+
+/**
+ * Guard for data route handlers: the only guard for the Honcho proxy paths
+ * (`/api/honcho`, `/v3`), which `proxy.ts` leaves out of its matcher so large
+ * bodies are not buffered, and defense in depth for the other routes. Rejects
+ * cross-site writes (403), then requests without a valid session (401, or 500
+ * when auth is misconfigured). Returns the response to send, or null when the
+ * caller may proceed (auth disabled, or an acceptable request with a session).
+ * With auth disabled it does nothing at all.
+ */
+export async function requireSession(request: GuardedRequest): Promise<Response | null> {
   const config = currentAuthConfig();
   if (!config.enabled) return null;
+  const crossSite = rejectCrossSiteWrite(request);
+  if (crossSite) return crossSite;
   if (!config.ok) {
     return Response.json({ error: config.error }, { status: 500, headers: NO_STORE });
   }

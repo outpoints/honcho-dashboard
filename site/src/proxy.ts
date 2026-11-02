@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { isCrossSiteWrite, isGuardedPath } from "@/lib/auth/guard";
+import { isGuardedPath } from "@/lib/auth/guard";
 import {
   NO_STORE,
   authRequiredResponse,
   currentAuthConfig,
   hasValidSession,
+  rejectCrossSiteWrite,
 } from "@/lib/auth/server";
 
 /**
@@ -29,17 +30,9 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const h = request.headers;
 
-  if (
-    (isGuardedPath(pathname) || pathname.toLowerCase().startsWith("/api/auth/")) &&
-    isCrossSiteWrite({
-      method: request.method,
-      secFetchSite: h.get("sec-fetch-site"),
-      origin: h.get("origin"),
-      host: h.get("host"),
-      forwardedHost: h.get("x-forwarded-host"),
-    })
-  ) {
-    return Response.json({ error: "cross-site request rejected" }, { status: 403, headers: NO_STORE });
+  if (isGuardedPath(pathname) || pathname.toLowerCase().startsWith("/api/auth/")) {
+    const crossSite = rejectCrossSiteWrite(request);
+    if (crossSite) return crossSite;
   }
 
   if (!isGuardedPath(pathname)) return NextResponse.next();
