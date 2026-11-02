@@ -50,7 +50,9 @@ services:
       # Optional bearer token the proxy sends to the default upstream above when a
       # request carries none. Applies only to that URL and never reaches the
       # browser. Anyone who can reach the dashboard can use it through the proxy,
-      # so keep the dashboard behind its own auth or a private network.
+      # so whenever you set it also set DASHBOARD_PASSWORD (or keep the dashboard
+      # on a private network). A value with a line break or other invalid header
+      # character is ignored, with a warning in the container log.
       HONCHO_PROXY_TOKEN: ${HONCHO_PROXY_TOKEN:-}
 
       # ---- Operator modules (server-side, runtime, all optional) ----

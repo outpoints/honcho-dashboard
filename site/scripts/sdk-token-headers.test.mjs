@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalize, resolveRequestToken } from "../src/lib/honcho/defaultTarget.ts";
 import { getSdk, invalidateSdk, sdkDefaultHeaders } from "../src/lib/honcho/sdk.ts";
+import { honcho } from "../src/lib/honcho/client.ts";
 
 const BASE = "http://honcho.synthetic.invalid:18100/";
 const json = (data) => new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
@@ -51,7 +52,7 @@ test("without a token the SDK keeps its placeholder apiKey so it still sends req
 test("through the proxy's token rule: a saved token beats HONCHO_PROXY_TOKEN, no token gets the server's", async (t) => {
   const origin = canonicalize(BASE);
   const sources = { proxyBaseUrl: BASE };
-  const resolve = (headers) => resolveRequestToken(headers.get("x-honcho-token"), origin, sources, "server-token");
+  const resolve = (headers) => resolveRequestToken(headers.get("x-honcho-token"), origin, sources, "server-token", headers.has("x-honcho-base-url"));
 
   const [withToken] = await sentHeaders(t, { baseUrl: BASE, token: "restricted-token" });
   assert.equal(resolve(withToken), "restricted-token");
@@ -75,4 +76,47 @@ test("sdkDefaultHeaders strips trailing slashes and omits the token header when 
     "X-Honcho-Base-Url": "http://h.invalid:1",
     "X-Honcho-Token": "t",
   });
+});
+
+// ---- every browser-to-proxy call names its target ----
+// The proxy injects HONCHO_PROXY_TOKEN only for requests carrying
+// X-Honcho-Base-Url, so a UI call that dropped it would silently lose the
+// server token. The operator query hook (lib/operator/client.ts, a React hook)
+// is the third caller; it is covered by reading, not here.
+
+const rawOpts = { baseUrl: BASE, token: "raw-token" };
+
+async function rawHeaders(t, call) {
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    seen.push({ url: String(url), headers: new Headers(init.headers) });
+    return json({ id: "x", items: [], total: 0, page: 1, size: 1, pages: 0 });
+  });
+  await call();
+  assert.ok(seen.length > 0, "no request was made");
+  return seen;
+}
+
+test("raw client GET, POST and multipart calls all send the base URL, and the token when set", async (t) => {
+  const calls = {
+    health: () => honcho.health(rawOpts),
+    workspaces: () => honcho.workspaces.list(rawOpts),
+    upload: () =>
+      honcho.sessionFiles.upload(rawOpts, "ws", "s1", { file: new File(["x"], "a.txt"), peerId: "alice" }),
+  };
+  for (const [name, call] of Object.entries(calls)) {
+    for (const { url, headers } of await rawHeaders(t, call)) {
+      assert.ok(url.startsWith("/api/honcho/"), `${name}: ${url}`);
+      assert.equal(headers.get("x-honcho-base-url"), "http://honcho.synthetic.invalid:18100", name);
+      assert.equal(headers.get("x-honcho-token"), "raw-token", name);
+    }
+    t.mock.restoreAll();
+  }
+});
+
+test("raw client calls without a token send the base URL and no token header", async (t) => {
+  for (const { headers } of await rawHeaders(t, () => honcho.workspaces.list({ baseUrl: BASE }))) {
+    assert.equal(headers.get("x-honcho-base-url"), "http://honcho.synthetic.invalid:18100");
+    assert.equal(headers.has("x-honcho-token"), false);
+  }
 });

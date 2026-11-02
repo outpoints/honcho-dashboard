@@ -20,53 +20,57 @@ const OTHER = "http://second.synthetic.invalid:8000";
 const SOURCES = { proxyBaseUrl: DEFAULT };
 const TOKEN = "server-token-synthetic";
 
+/** resolveRequestToken for a request that named its target, as every dashboard call does. */
+const resolve = (headerToken, origin, sources, envToken, baseUrlSent = true) =>
+  resolveRequestToken(headerToken, origin, sources, envToken, baseUrlSent);
+
 const defaultOrigin = canonicalize(DEFAULT);
 const otherOrigin = canonicalize(OTHER);
 
 test("env unset: no token is injected, with or without a header", () => {
-  assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, undefined), undefined);
-  assert.equal(resolveRequestToken("hdr", defaultOrigin, SOURCES, undefined), "hdr");
+  assert.equal(resolve(null, defaultOrigin, SOURCES, undefined), undefined);
+  assert.equal(resolve("hdr", defaultOrigin, SOURCES, undefined), "hdr");
 });
 
 test("env set, header present: the header wins", () => {
-  assert.equal(resolveRequestToken("browser-token", defaultOrigin, SOURCES, TOKEN), "browser-token");
-  assert.equal(resolveRequestToken("browser-token", otherOrigin, SOURCES, TOKEN), "browser-token");
+  assert.equal(resolve("browser-token", defaultOrigin, SOURCES, TOKEN), "browser-token");
+  assert.equal(resolve("browser-token", otherOrigin, SOURCES, TOKEN), "browser-token");
 });
 
 test("env set, no header, origin is the default: the env token is used", () => {
-  assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, TOKEN), TOKEN);
+  assert.equal(resolve(null, defaultOrigin, SOURCES, TOKEN), TOKEN);
 });
 
 test("env set, no header, another allowlisted origin: nothing is injected", () => {
-  assert.equal(resolveRequestToken(null, otherOrigin, SOURCES, TOKEN), undefined);
+  assert.equal(resolve(null, otherOrigin, SOURCES, TOKEN), undefined);
   assert.equal(serverDefaultToken(otherOrigin, SOURCES, TOKEN), undefined);
 });
 
 test("env set to whitespace or empty is treated as unset", () => {
   for (const blank of ["", "   ", "\n\t"]) {
     assert.equal(serverManagedToken(blank), undefined);
-    assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, blank), undefined);
+    assert.equal(resolve(null, defaultOrigin, SOURCES, blank), undefined);
   }
 });
 
 test("the env token is trimmed", () => {
-  assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, `  ${TOKEN}\n`), TOKEN);
+  assert.equal(resolve(null, defaultOrigin, SOURCES, `  ${TOKEN}\n`), TOKEN);
 });
 
 test("a blank header does not mask the server token", () => {
-  assert.equal(resolveRequestToken("", defaultOrigin, SOURCES, TOKEN), TOKEN);
-  assert.equal(resolveRequestToken("  ", defaultOrigin, SOURCES, TOKEN), TOKEN);
+  assert.equal(resolve("", defaultOrigin, SOURCES, TOKEN), TOKEN);
+  assert.equal(resolve("  ", defaultOrigin, SOURCES, TOKEN), TOKEN);
 });
 
 test("the default is matched on the canonical origin, whichever source supplies it", () => {
   const sources = { runtimePublicBaseUrl: `${DEFAULT}/`, buildPublicBaseUrl: "http://localhost:8000" };
-  assert.equal(resolveRequestToken(null, defaultOrigin, sources, TOKEN), TOKEN);
-  assert.equal(resolveRequestToken(null, "http://localhost:8000", sources, TOKEN), undefined);
+  assert.equal(resolve(null, defaultOrigin, sources, TOKEN), TOKEN);
+  assert.equal(resolve(null, "http://localhost:8000", sources, TOKEN), undefined);
 });
 
 test("no default target configured: the env token has nowhere to apply", () => {
-  assert.equal(resolveRequestToken(null, defaultOrigin, {}, TOKEN), undefined);
-  assert.equal(resolveRequestToken(null, defaultOrigin, { proxyBaseUrl: "not a url" }, TOKEN), undefined);
+  assert.equal(resolve(null, defaultOrigin, {}, TOKEN), undefined);
+  assert.equal(resolve(null, defaultOrigin, { proxyBaseUrl: "not a url" }, TOKEN), undefined);
 });
 
 test("a look-alike origin does not receive the token", () => {
@@ -76,7 +80,7 @@ test("a look-alike origin does not receive the token", () => {
     "http://honcho.synthetic.invalid",
     "http://honcho.synthetic.invalid.evil.invalid:18100",
   ]) {
-    assert.equal(resolveRequestToken(null, canonicalize(lookalike), SOURCES, TOKEN), undefined, lookalike);
+    assert.equal(resolve(null, canonicalize(lookalike), SOURCES, TOKEN), undefined, lookalike);
   }
 });
 
@@ -116,14 +120,14 @@ test("env values with invalid header characters count as unset", (t) => {
     resetInvalidTokenWarning();
     assert.equal(serverManagedToken(value), undefined, name);
     assert.equal(serverManagedToken(`  ${value}\n`), undefined, `${name}, padded`);
-    assert.equal(resolveRequestToken(null, defaultOrigin, SOURCES, value), undefined, name);
+    assert.equal(resolve(null, defaultOrigin, SOURCES, value), undefined, name);
     assert.equal(serverDefaultToken(defaultOrigin, SOURCES, value), undefined, name);
   }
 });
 
 test("an invalid env value does not mask a token the browser sent", (t) => {
   captureWarnings(t);
-  assert.equal(resolveRequestToken("browser-token", defaultOrigin, SOURCES, "abc\ndef"), "browser-token");
+  assert.equal(resolve("browser-token", defaultOrigin, SOURCES, "abc\ndef"), "browser-token");
 });
 
 test("a rejected value warns once, and the warning never contains the value", (t) => {
@@ -164,4 +168,21 @@ test("a line break or NUL in the value would have made Headers throw, with the v
       JSON.stringify(value),
     );
   }
+});
+
+// ---- cross-site requests: the server token needs X-Honcho-Base-Url ----
+
+test("a request without X-Honcho-Base-Url gets no server token, even for the default target", () => {
+  assert.equal(resolve(null, defaultOrigin, SOURCES, TOKEN, false), undefined);
+  assert.equal(resolve("", defaultOrigin, SOURCES, TOKEN, false), undefined);
+  assert.equal(resolve("  ", defaultOrigin, SOURCES, TOKEN, false), undefined);
+});
+
+test("a request with X-Honcho-Base-Url still gets the server token on the default target only", () => {
+  assert.equal(resolve(null, defaultOrigin, SOURCES, TOKEN, true), TOKEN);
+  assert.equal(resolve(null, otherOrigin, SOURCES, TOKEN, true), undefined);
+});
+
+test("an explicit X-Honcho-Token is the caller's own credential and passes without the base URL header", () => {
+  assert.equal(resolve("browser-token", defaultOrigin, SOURCES, TOKEN, false), "browser-token");
 });

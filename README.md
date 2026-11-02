@@ -166,8 +166,13 @@ servers, add them under **CONFIG** and list them in `HONCHO_PROXY_ALLOWED_BASES`
 `HONCHO_PROXY_TOKEN` (optional) is a server-side bearer token the proxy sends to Honcho when
 a request carries none, so browsers need no token under **CONFIG**. It applies only to the
 default base URL (never to other allowlisted servers), a token entered in **CONFIG** overrides
-it, and it never reaches the browser. Anyone who can reach the dashboard can use it through the
-proxy, so keep the dashboard behind its own auth or a private network, as with the proxy itself.
+it, and it never reaches the browser. The proxy adds it only to requests that carry an
+`X-Honcho-Base-Url` header (every dashboard call does), so a page on another site cannot use it
+with a plain cross-site form post. Anyone who can reach the
+dashboard can still use it through the proxy: **whenever you set `HONCHO_PROXY_TOKEN`, also set
+`DASHBOARD_PASSWORD`**, or keep the dashboard on a private network. A value containing a line
+break or another character that is not valid in an HTTP header is ignored, with a warning in the
+container log (the value is never logged).
 
 A `docker-compose-example.yml` template is included at the repo root. Copy it to
 `docker-compose.yml` (which is gitignored, so your local edits stay local). To wire the

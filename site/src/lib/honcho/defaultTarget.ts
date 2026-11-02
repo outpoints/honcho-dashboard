@@ -150,14 +150,22 @@ export function serverDefaultToken(
  * The bearer token for a proxied request: an explicit `X-Honcho-Token` header
  * always wins (a blank header counts as absent), else the server default for
  * the default target.
+ *
+ * The server default applies only when the request named its target with
+ * `X-Honcho-Base-Url` (`baseUrlSent`). Every dashboard call sends it, and a
+ * page on another site cannot add a custom header without a CORS preflight the
+ * proxy never answers. Without that gate a cross-site `text/plain` form POST,
+ * which needs no preflight, would reach Honcho carrying the token.
  */
 export function resolveRequestToken(
   headerToken: string | null,
   origin: string,
   sources: DefaultTargetSources,
   envToken: string | undefined,
+  baseUrlSent: boolean,
 ): string | undefined {
   if (headerToken && headerToken.trim()) return headerToken;
+  if (!baseUrlSent) return undefined;
   return serverDefaultToken(origin, sources, envToken);
 }
 

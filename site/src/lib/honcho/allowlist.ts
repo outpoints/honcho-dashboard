@@ -138,12 +138,14 @@ export function resolveHonchoTarget(headers: Headers): ResolveOk | ResolveErr {
   }
 
   // An explicit header token wins; otherwise HONCHO_PROXY_TOKEN applies, but
-  // only to the default target so it never reaches a second instance.
+  // only to the default target so it never reaches a second instance, and only
+  // when the request named its target (see resolveRequestToken).
   const token = resolveRequestToken(
     headers.get("x-honcho-token"),
     origin,
     defaultTargetSources(),
     serverTokenEnv(),
+    headerUrl !== null,
   );
   return { ok: true, baseUrl: origin, token };
 }
