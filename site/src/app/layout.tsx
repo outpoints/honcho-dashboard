@@ -7,6 +7,7 @@ import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme";
 import { serverAdvertisedBaseUrl } from "@/lib/honcho/allowlist";
 import { DEFAULT_BASE_URL_META } from "@/lib/honcho/defaultTarget";
 import { currentAuthConfig, hasValidSession } from "@/lib/auth/server";
+import { AuthRequiredProvider } from "@/components/AuthGate";
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
@@ -57,7 +58,9 @@ export default async function RootLayout({
         {defaultBaseUrl ? <meta name={DEFAULT_BASE_URL_META} content={defaultBaseUrl} /> : null}
       </head>
       <body className="min-h-screen antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <AuthRequiredProvider required={auth.enabled}>{children}</AuthRequiredProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

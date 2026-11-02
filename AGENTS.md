@@ -100,7 +100,7 @@ collides with the SDK's same-origin `Authorization` header. Pure logic lives in 
 middleware) guards pages' data paths (`/api/*`, `/v3/*`, `/health`, `/openapi.json`) and must stay
 free of Node-only imports. Its matcher must NOT cover `/api/honcho` or `/v3` (any letter case):
 Next buffers only the first 10 MB of the body of any proxy-matched path and truncates silently,
-which corrupts large Honcho uploads (`scripts/upload-body.test.mjs` pins this against a real
+which corrupts large Honcho uploads (`scripts/dashboard-server.test.mjs` pins this against a real
 server). So every route handler calls `requireSession(req)` from `src/lib/auth/server.ts`, which
 runs the cross-site write check and the session check and fails closed: new API routes must do the
 same. Keep `/api/healthz` and `/api/auth/*`

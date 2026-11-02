@@ -5,6 +5,7 @@ import { Button, Field, TextInput } from "@/components/atoms";
 import { Panel } from "@/components/Panel";
 import { fetchAuthStatus, installAuthFetchInterceptor, login, logout, type AuthStatus } from "@/lib/auth/client";
 import { AUTH_REQUIRED_EVENT } from "@/lib/auth/constants";
+import { initialAuthStatus } from "@/lib/auth/gate";
 import { invalidate } from "@/lib/honcho/useQuery";
 
 interface AuthContextValue {
@@ -19,6 +20,23 @@ const AuthContext = createContext<AuthContextValue>({
   logout: async () => undefined,
 });
 
+/**
+ * Whether the server has a dashboard password, as read by the root layout.
+ * Defaults to true (ask the server) so a missing provider can only cause an
+ * extra status call, never skip the login screen.
+ */
+const AuthRequiredContext = createContext(true);
+
+export function AuthRequiredProvider({
+  required,
+  children,
+}: {
+  required: boolean;
+  children: React.ReactNode;
+}) {
+  return <AuthRequiredContext.Provider value={required}>{children}</AuthRequiredContext.Provider>;
+}
+
 export function useAuth(): AuthContextValue {
   return useContext(AuthContext);
 }
@@ -28,16 +46,25 @@ type GateState =
   | { kind: "error"; message: string }
   | { kind: "ready"; status: AuthStatus };
 
+function initialGateState(required: boolean): GateState {
+  const status = initialAuthStatus(required);
+  return status ? { kind: "ready", status } : { kind: "loading" };
+}
+
 /**
  * Renders the app only when auth is off or the visitor holds a valid session;
  * otherwise renders the login screen. The app mounts after login, so no data
  * request is made before the session exists. Logging in reloads the page.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<GateState>({ kind: "loading" });
+  const required = useContext(AuthRequiredContext);
+  const [state, setState] = useState<GateState>(() => initialGateState(required));
   const [attempt, setAttempt] = useState(0);
 
+  // With no password set there is nothing to ask the server: no status call,
+  // so a failing /api/auth/status can never block (or error) the dashboard.
   useEffect(() => {
+    if (!required) return;
     const controller = new AbortController();
     fetchAuthStatus(controller.signal)
       .then((status) => setState({ kind: "ready", status }))
@@ -46,11 +73,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         setState({ kind: "error", message: err instanceof Error ? err.message : "Auth check failed" });
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, required]);
 
   // Session expired or cleared while the app was open: the guard's 401 sends
   // the visitor back to the login screen instead of surfacing "access denied".
   useEffect(() => {
+    if (!required) return;
     const uninstall = installAuthFetchInterceptor();
     const onRequired = () => setState({ kind: "ready", status: { enabled: true, authenticated: false } });
     window.addEventListener(AUTH_REQUIRED_EVENT, onRequired);
@@ -58,7 +86,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       window.removeEventListener(AUTH_REQUIRED_EVENT, onRequired);
       uninstall();
     };
-  }, []);
+  }, [required]);
 
   // Reload so the server renders the page with a session (the default Honcho
   // URL meta tag is omitted for unauthenticated page loads).

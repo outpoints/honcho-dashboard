@@ -1,31 +1,38 @@
-// End-to-end regression test: large request bodies must reach Honcho intact.
+// End-to-end tests against a real Next.js server and a stub Honcho upstream.
 //
-// Next.js buffers only the first 10 MB of a request body for any path the
-// `src/proxy.ts` matcher covers (`experimental.proxyClientMaxBodySize`) and
-// truncates silently. SDK uploads enter through `/v3/*` (rewritten to
-// `/api/honcho/v3/*`), so both entry paths must stay out of the matcher.
+// 1. Large bodies. Next.js buffers only the first 10 MB of a request body for any
+//    path the `src/proxy.ts` matcher covers (`experimental.proxyClientMaxBodySize`)
+//    and truncates silently. SDK uploads enter through `/v3/*` (rewritten to
+//    `/api/honcho/v3/*`), so both entry paths must stay out of the matcher: a
+//    12.6 MB upload must reach the upstream byte-complete, with a password set
+//    and without.
+// 2. The auth gate. With no DASHBOARD_PASSWORD the page renders the app straight
+//    away and never waits on /api/auth/status.
 //
-// This starts a real `next dev` server against a stub upstream, once with
-// DASHBOARD_PASSWORD unset and once with it set, and posts a 12.6 MB body.
+// One `next dev` server per auth mode, run one after the other: `next dev` locks
+// the project directory, so two cannot run at once (and `npm test` runs test
+// files in parallel, which is why everything that starts a server lives here).
+// Set UPLOAD_TEST_COMMAND=start to run `next start` against an existing
+// `npm run build` instead.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { dirname, resolve } from "node:path";
-import { describe, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { initialAuthStatus } from "../src/lib/auth/gate.ts";
 
 const SITE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const NEXT_BIN = resolve(SITE_DIR, "node_modules/next/dist/bin/next");
+const SERVER_START_TIMEOUT_MS = 120_000;
+const NEXT_COMMAND = process.env.UPLOAD_TEST_COMMAND === "start" ? "start" : "dev";
 const UPLOAD_BYTES = 12_600_000;
-const PASSWORD = "upload-test-password";
+const PASSWORD = "e2e-test-password";
 const SECRET = "s".repeat(48);
 const UPLOAD_PATH = "/workspaces/w1/sessions/s1/messages/upload";
-const SERVER_START_TIMEOUT_MS = 120_000;
-// `next dev` by default; UPLOAD_TEST_COMMAND=start runs the production server
-// against an existing `npm run build` instead.
-const NEXT_COMMAND = process.env.UPLOAD_TEST_COMMAND === "start" ? "start" : "dev";
+const WAITING = "checking session";
 
 function freePort() {
   return new Promise((resolvePort, reject) => {
@@ -121,23 +128,33 @@ const ENTRY_PATHS = [
   ["mixed-case /V3 entry", `/V3${UPLOAD_PATH}`],
 ];
 
-/** Run `fn` against a fresh stub upstream and dashboard, stopping both afterwards. */
-async function withDashboard(env, fn) {
-  const upstream = await startUpstream();
-  let dash;
-  try {
-    dash = await startDashboard(env, upstream.port);
-    await fn(upstream, dash);
-  } finally {
-    await dash?.stop();
-    upstream.server.closeAllConnections();
-    await new Promise((r) => upstream.server.close(r));
-  }
+/** Start a stub upstream and a dashboard for the enclosing describe block. */
+function useDashboard(env) {
+  const ctx = {};
+  before(async () => {
+    ctx.upstream = await startUpstream();
+    ctx.dash = await startDashboard(env, ctx.upstream.port);
+  }, { timeout: SERVER_START_TIMEOUT_MS + 10_000 });
+  after(async () => {
+    await ctx.dash?.stop();
+    if (ctx.upstream) {
+      ctx.upstream.server.closeAllConnections();
+      await new Promise((r) => ctx.upstream.server.close(r));
+    }
+  });
+  return ctx;
 }
 
-describe("12.6 MB upload reaches the upstream byte-complete", () => {
-  test("auth off", { timeout: 240_000 }, () =>
-    withDashboard({ DASHBOARD_PASSWORD: "", DASHBOARD_SESSION_SECRET: "" }, async (upstream, dash) => {
+test("initialAuthStatus: no password means no question for the server", () => {
+  assert.deepEqual(initialAuthStatus(false), { enabled: false, authenticated: true });
+  assert.equal(initialAuthStatus(true), null);
+});
+
+describe("auth off", () => {
+  const ctx = useDashboard({ DASHBOARD_PASSWORD: "", DASHBOARD_SESSION_SECRET: "" });
+
+  test("a 12.6 MB upload reaches the upstream byte-complete on every entry path", { timeout: 120_000 }, async () => {
+    const { upstream, dash } = ctx;
     for (const [label, path] of ENTRY_PATHS) {
       upstream.received.length = 0;
       const res = await upload(dash.base, path);
@@ -147,11 +164,24 @@ describe("12.6 MB upload reaches the upstream byte-complete", () => {
       assert.equal(upstream.received[0].sha256, bodyHash, `${label}: upstream body hash`);
     }
     assert.doesNotMatch(dash.log(), /exceeded/i, "Next logged a body-size truncation warning");
-    }),
-  );
+  });
 
-  test("auth on: authenticated upload is byte-complete, anonymous upload is refused", { timeout: 240_000 }, () =>
-    withDashboard({ DASHBOARD_PASSWORD: PASSWORD, DASHBOARD_SESSION_SECRET: SECRET }, async (upstream, dash) => {
+  test("the page renders the app straight away, with no waiting state", async () => {
+    const html = await (await fetch(`${ctx.dash.base}/`)).text();
+    assert.doesNotMatch(html, new RegExp(WAITING), "must not show the session-check screen");
+    assert.doesNotMatch(html, /AUTH_ERROR/);
+    assert.match(html, /<main[ >]/, "the app shell is in the first response");
+    // The route still answers truthfully for anyone who asks.
+    const status = await (await fetch(`${ctx.dash.base}/api/auth/status`)).json();
+    assert.deepEqual(status, { enabled: false, authenticated: true });
+  });
+});
+
+describe("auth on", () => {
+  const ctx = useDashboard({ DASHBOARD_PASSWORD: PASSWORD, DASHBOARD_SESSION_SECRET: SECRET });
+
+  test("authenticated 12.6 MB uploads are byte-complete, anonymous ones are refused", { timeout: 120_000 }, async () => {
+    const { upstream, dash } = ctx;
     const login = await fetch(`${dash.base}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -175,14 +205,45 @@ describe("12.6 MB upload reaches the upstream byte-complete", () => {
       assert.equal(anon.headers.get("x-dashboard-auth"), "required", `${label}: guard marker`);
       assert.equal(upstream.received.length, 0, `${label}: anonymous request must not reach upstream`);
     }
-    // Other casings of the passthroughs must not skip the guard either.
+    assert.doesNotMatch(dash.log(), /exceeded/i, "Next logged a body-size truncation warning");
+  });
+
+  test("a cross-site write to the Honcho proxy is refused by the route handler", async () => {
+    const { upstream, dash } = ctx;
+    const login = await fetch(`${dash.base}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: PASSWORD }),
+    });
+    const cookie = login.headers.get("set-cookie").split(";")[0];
+    for (const path of [`/api/honcho/v3/workspaces/list`, `/v3/workspaces/list`, `/V3/workspaces/list`]) {
+      upstream.received.length = 0;
+      const res = await fetch(`${dash.base}${path}`, {
+        method: "POST",
+        headers: { cookie, origin: "https://evil.example", "content-type": "application/json" },
+        body: "{}",
+      });
+      assert.equal(res.status, 403, path);
+      assert.equal(upstream.received.length, 0, `${path}: must not reach upstream`);
+    }
+  });
+
+  test("other casings of the passthroughs do not skip the guard", async () => {
+    const { upstream, dash } = ctx;
     for (const path of ["/V3/workspaces/list", "/HEALTH", "/OpenAPI.json", "/API/honcho/v3/workspaces/list", "/Api/Honcho/v3/x"]) {
       upstream.received.length = 0;
       const res = await fetch(`${dash.base}${path}`, { method: path.includes("list") ? "POST" : "GET" });
       assert.notEqual(res.status, 200, `${path}: anonymous request must not succeed`);
       assert.equal(upstream.received.length, 0, `${path}: anonymous request must not reach upstream`);
     }
-    assert.doesNotMatch(dash.log(), /exceeded/i, "Next logged a body-size truncation warning");
-    }),
-  );
+  });
+
+  test("the page starts at the session check and never renders the app unauthenticated", async () => {
+    const html = await (await fetch(`${ctx.dash.base}/`)).text();
+    assert.match(html, new RegExp(WAITING));
+    assert.doesNotMatch(html, /<main[ >]/, "no app content before login");
+    assert.doesNotMatch(html, /AUTH_ERROR/);
+    const status = await (await fetch(`${ctx.dash.base}/api/auth/status`)).json();
+    assert.deepEqual(status, { enabled: true, authenticated: false });
+  });
 });
