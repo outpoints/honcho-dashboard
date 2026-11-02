@@ -58,3 +58,24 @@ test("empty headers yield empty headers", () => {
 test("HOP_BY_HOP includes content-encoding", () => {
   assert.ok(HOP_BY_HOP.has("content-encoding"));
 });
+
+test("drops the dashboard's x-dashboard-auth marker in any casing, keeps the rest of a 401", () => {
+  const raw = new Headers();
+  raw.append("X-Dashboard-Auth", "required");
+  raw.append("content-type", "application/json");
+  raw.append("www-authenticate", "Bearer");
+  const out = filterResponseHeaders(raw);
+  assert.equal(out.has("x-dashboard-auth"), false);
+  assert.equal(out.get("content-type"), "application/json");
+  assert.equal(out.get("www-authenticate"), "Bearer");
+  // Not a prefix match: similarly named headers are untouched.
+  assert.equal(filterResponseHeaders(new Headers({ "x-dashboard-auth-extra": "1" })).get("x-dashboard-auth-extra"), "1");
+});
+
+test("a proxied Honcho 401 carrying the marker is not an auth-required response", async () => {
+  const { isAuthRequiredResponse } = await import("../src/lib/auth/constants.ts");
+  const upstream = new Headers({ "x-dashboard-auth": "required" });
+  const proxied = { status: 401, headers: filterResponseHeaders(upstream) };
+  assert.equal(isAuthRequiredResponse({ status: 401, headers: upstream }), true, "the raw upstream response would have logged the user out");
+  assert.equal(isAuthRequiredResponse(proxied), false);
+});
