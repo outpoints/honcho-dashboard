@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, VT323 } from "next/font/google";
+import { headers } from "next/headers";
 import { connection } from "next/server";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme";
 import { serverAdvertisedBaseUrl } from "@/lib/honcho/allowlist";
 import { DEFAULT_BASE_URL_META } from "@/lib/honcho/defaultTarget";
+import { currentAuthConfig, hasValidSession } from "@/lib/auth/server";
+import { AuthRequiredProvider } from "@/components/AuthGate";
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
@@ -38,7 +41,12 @@ export default async function RootLayout({
   // Render per request so the default Honcho URL comes from the running
   // server's env, not the value frozen into the bundle by `next build`.
   await connection();
-  const defaultBaseUrl = serverAdvertisedBaseUrl();
+  // The page is served to unauthenticated visitors (it renders the login
+  // screen), so do not advertise the internal Honcho URL to them. AuthGate
+  // reloads after login, which re-renders this with a session.
+  const auth = currentAuthConfig();
+  const visible = !auth.enabled || (auth.ok && (await hasValidSession(await headers(), auth)));
+  const defaultBaseUrl = visible ? serverAdvertisedBaseUrl() : null;
   return (
     <html
       lang="en"
@@ -50,7 +58,9 @@ export default async function RootLayout({
         {defaultBaseUrl ? <meta name={DEFAULT_BASE_URL_META} content={defaultBaseUrl} /> : null}
       </head>
       <body className="min-h-screen antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <AuthRequiredProvider required={auth.enabled}>{children}</AuthRequiredProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
