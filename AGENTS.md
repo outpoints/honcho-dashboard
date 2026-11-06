@@ -103,7 +103,13 @@ free of Node-only imports. Its matcher must NOT cover `/api/honcho` or `/v3` (an
 Next buffers only the first 10 MB of the body of any proxy-matched path and truncates silently,
 which corrupts large Honcho uploads (`scripts/dashboard-server.test.mjs` pins this against a real
 server). So every route handler calls `requireSession(req)` from `src/lib/auth/server.ts`, which
-runs the cross-site write check and the session check and fails closed: new API routes must do the
+runs the cross-site write check and the session check and fails closed. The cross-site check
+accepts any request carrying a dashboard header (`X-Honcho-Dashboard`, `X-Honcho-Base-Url`,
+`X-Honcho-Token`; `hasDashboardRequestHeader` in `src/lib/auth/constants.ts`) and falls back to
+`Sec-Fetch-Site`, then `Origin` against `Host`/`X-Forwarded-Host`, only for header-less writes;
+new browser-side writes must send one of those headers, and `X-Honcho-Dashboard` is defined once
+in `constants.ts` for both the login guard and the operator write route. New API routes must do the
+same: new API routes must do the
 same (`scripts/auth-routes.test.mjs` fails when a route under `src/app/api` other than
 `auth/` and `healthz/` does not await it first). Keep `/api/healthz` and `/api/auth/*`
 unguarded; the Docker health check uses `/api/healthz`.
@@ -207,9 +213,18 @@ before replacing any image referenced by the README.
 
 Operator DB writes are server-gated. The only direct database writes are the queue retry
 `UPDATE`s in `src/lib/operator/db.ts`, reached via `POST /api/operator/db` (Honcho REST writes
-go through the separate `/api/honcho` proxy). That route calls `requireOperatorWrites()` and
-then `requireDashboardHeader()` (CSRF: the `X-Honcho-Dashboard: 1` header the UI sends; the route must never gain an OPTIONS handler or CORS headers, and no Origin/Host/Sec-Fetch-Site logic) from `src/lib/operator/writes.ts` before anything else;
-`HONCHO_OPERATOR_WRITES` defaults to off and the client write toggle is only UI. Any new
+go through the separate `/api/honcho` proxy). That route calls `requireSession()`, then `requireOperatorWrites()`, then
+`requireDashboardHeader()` from `src/lib/operator/writes.ts` before anything else. The header
+check is the CSRF guard: the UI sends `X-Honcho-Dashboard: 1`, a cross-origin page cannot add
+it without a preflight, and the route must never gain an OPTIONS handler, CORS headers, or any
+Origin/Host/Sec-Fetch-Site logic. `HONCHO_OPERATOR_WRITES` defaults to off and the client
+write toggle is only UI. Any new
 operator write must use the same guards, and `GET /api/operator/runtime` exposes
 `writes_enabled` so the UI never offers a refused action. Do not describe the operator DSN
-as strictly read-only. While writes are off the pool opens with `-c default_transaction_read_only=on` (`src/lib/operator/pool.ts`); pg lets values in the DSN override config, so that option is merged into the DSN's own `options`, never passed next to it.
+as strictly read-only. While writes are off the pool opens with `-c default_transaction_read_only=on`
+(`src/lib/operator/pool.ts`). pg lets values in the DSN override config, so that option is
+merged into the DSN's own `options`, never passed next to it. Poolers that refuse unknown startup
+options (PgBouncer before 1.26 answers `unsupported startup parameter`) would otherwise take
+every operator panel down on upgrade, so `withReadOnlyFallback` reopens the pool from the DSN
+as given on that error, once, with one warning; keep that fallback and keep the code gate as
+the guarantee.

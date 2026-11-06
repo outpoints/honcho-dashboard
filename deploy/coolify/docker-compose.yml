@@ -28,29 +28,34 @@ services:
       # Optional. Only needed for extra Honcho servers added under CONFIG: the
       # proxy already allows the HONCHO_BASE_URL above on its own. Comma-separated origins.
       HONCHO_PROXY_ALLOWED_BASES: ${HONCHO_PROXY_ALLOWED_BASES:-}
+      # dashboard 1.5.0+
+      # Optional bearer token the proxy sends to HONCHO_BASE_URL when a browser has
+      # none under CONFIG. Anyone who can reach the dashboard can use it, so set
+      # DASHBOARD_PASSWORD below whenever this is set.
+      HONCHO_PROXY_TOKEN: ${HONCHO_PROXY_TOKEN:-}
 
       # Optional read-only Postgres DSN for the operator modules. See the README
       # for a dashboard_ro role. With the networks block below this can be
       # postgresql://dashboard_ro:...@database:5432/postgres
       HONCHO_DATABASE_URL: ${HONCHO_DATABASE_URL:-}
 
-      # requires #16 (or a release that includes it)
+      # dashboard 1.5.0+
       # Set to true to allow the operator "retry reasoning" writes. Empty = read-only.
       HONCHO_OPERATOR_WRITES: ${HONCHO_OPERATOR_WRITES:-}
-      # requires #17 (or a release that includes it)
+      # dashboard 1.5.0+
       # Shared dashboard password. Empty = no login, so set one on a public domain.
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-      # requires #17 (or a release that includes it)
+      # dashboard 1.5.0+
       # Coolify: SERVICE_PASSWORD_64_<NAME> generates and stores a 64-character
       # secret on first deploy; it signs the session cookie. Rotate it to log everyone out.
       DASHBOARD_SESSION_SECRET: ${SERVICE_PASSWORD_64_DASHBOARDSESSION}
-      # requires #17 (or a release that includes it)
+      # dashboard 1.5.0+
       # Coolify's Traefik is exactly one proxy hop, so the login rate limiter keys
       # on the last X-Forwarded-For entry. Raise it if you put e.g. Cloudflare in front of Traefik.
       DASHBOARD_TRUSTED_PROXIES: "1"
     healthcheck:
-      # requires #17 (or a release that includes it): /api/healthz does not exist
-      # before it, and Coolify does not route traffic to an unhealthy container.
+      # dashboard 1.5.0+: /api/healthz does not exist on older images, and Coolify
+      # does not route traffic to an unhealthy container, so pin 1.5.0 or newer.
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
       interval: 30s
       timeout: 5s

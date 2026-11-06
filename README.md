@@ -68,11 +68,12 @@ Organized into four sections that mirror the sidebar.
 
 - **Webhooks** — register and remove webhook endpoints, queue a test event, and view event processing activity. Confirm delivery at your receiver; queue completion alone is not a delivery receipt. Honcho needs `WEBHOOK_SECRET` configured on its server and a reachable public receiver.
 - **Integrations** — reference guides for connecting agents (MCP, Claude Code, and others) to Honcho, with config examples pre-filled with your live endpoint.
-- **Config** — manage multiple Honcho connections (stored in `localStorage`), test a connection, switch the active instance, and flip the write-actions master toggle.
+- **Config** — manage multiple Honcho connections (stored in `localStorage`), test a connection, switch the active instance, flip the write-actions master toggle, and log out when a dashboard password is set.
 
 **Cross-cutting**
 
-- **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth.
+- **Multi-instance** — point the dashboard at several self-hosted Honcho servers and switch between them; optional bearer-token auth, entered per browser under **CONFIG** or held once on the server for the default instance (`HONCHO_PROXY_TOKEN`).
+- **Optional login** — one shared password (`DASHBOARD_PASSWORD`) in front of every data route and the Honcho proxy, with a signed cookie session; off by default, nothing changes without it. See [Authentication (optional)](#authentication-optional).
 - **Safe by default** — a master **write-actions** toggle (off by default) hides the create / update / delete controls on the workspace, peer, session, conclusion, reasoning, and webhook screens; each confirms before writing to the live instance. Reads never confirm.
 - **Operator DB layer** — richer views (throughput, heatmap, per-session / per-peer stats, webhook queue activity, log tail) come from an optional operator database connection, and degrade gracefully to the Honcho API when it isn't configured. Reads work with read-only credentials; retrying reasoning tasks is off by default and requires `HONCHO_OPERATOR_WRITES=true` plus queue update permission.
 - **Resilient UI** — loading / empty / error states on every data path, in a dark "Memory Console" theme. The sidebar and status bar show instance health and the workspace's queue progress with when it last refreshed (icons and words, not color alone), plus a SCHEDULE_DREAM shortcut when writes are enabled. With the operator DB, they also show how many queue items failed, linking to Reasoning filtered to the failed tasks; Honcho's API does not report failures, so without the DB nothing is shown.
@@ -112,18 +113,18 @@ Three layers, each with a single job:
    `site/src/lib/operator/*` + `site/src/app/api/operator/*` route handlers.
    These are the metrics Honcho's REST API does not expose (uptime, db size,
    pgvector status, throughput timeseries, log tail, etc.). They read the same
-   Postgres database Honcho uses and only read from it, except for one opt-in action:
-   retrying failed reasoning tasks runs `UPDATE` on Honcho's `queue` table. That
-   action is disabled unless `HONCHO_OPERATOR_WRITES=true` (enforced server-side)
-   and needs a DB role with `UPDATE` on `queue`; use a read-only role otherwise.
-   While writes are off, the connection is also opened with
-   `options=-c default_transaction_read_only=on` (merged with any `options` already in
-   your DSN), so Postgres itself refuses writes. A pooler that rejects the `options`
-   startup parameter (PgBouncer does by default) needs
-   `ignore_startup_parameters = options`, or point the DSN straight at Postgres.
-   (This is about the database connection only; the dashboard's Honcho REST
-   screens still create/update/delete through the `/api/honcho` proxy when the
-   in-app write toggle is on.)
+   Postgres database Honcho uses. The one write is opt-in: retrying failed
+   reasoning tasks runs `UPDATE` on Honcho's `queue` table, and only when
+   `HONCHO_OPERATOR_WRITES=true` (enforced server-side) with a DB role that has
+   `UPDATE` on `queue`. Use a read-only role otherwise. While writes are off the
+   connection also asks Postgres to enforce it (`default_transaction_read_only=on`
+   as a startup option, merged with any `options` already in your DSN). A pooler
+   that refuses unknown startup options (PgBouncer before 1.26) gets the DSN as
+   given instead, with one warning in the container log; writes stay refused in
+   code. To keep Postgres enforcing it through PgBouncer, upgrade to 1.26 or add
+   `default_transaction_read_only` to its `track_extra_parameters`. This is about
+   the database connection only: the Honcho REST screens still create, update and
+   delete through the `/api/honcho` proxy when the in-app write toggle is on.
    Every module degrades to `{ available: false, reason: ... }` when its
    configuration env var is not set, so the UI renders cleanly without them.
 
@@ -232,9 +233,9 @@ terminates TLS. `deploy/coolify/docker-compose.yml` is a ready-made Service for 
    environment to log everyone out.
 5. **Deploy.**
 
-The auth and write variables (`DASHBOARD_*`, `HONCHO_OPERATOR_WRITES`) and the `/api/healthz`
-health check need the operator-write-gate and dashboard-auth changes (PRs #16 and #17), or a
-release that includes them.
+The auth and write variables (`DASHBOARD_*`, `HONCHO_OPERATOR_WRITES`, `HONCHO_PROXY_TOKEN`)
+and the `/api/healthz` health check need dashboard 1.5.0 or later. On an older image the
+container stays unhealthy and Coolify never routes to it, so pin `1.5.0` or newer.
 
 ### Reaching a Honcho Service on the same server
 
@@ -273,9 +274,10 @@ GRANT UPDATE ON queue TO dashboard_ro;
   `X-Forwarded-For`; the login rate limiter reads the last entry, which is the one your proxy
   added. Anything to its left is client-supplied. Raise the number if another proxy sits in
   front of Traefik (`2` for Cloudflare). The session cookie is marked `Secure` from
-  `X-Forwarded-Proto`. Cross-site writes are rejected: the check trusts `Sec-Fetch-Site` when
-  the browser sends it, and otherwise compares `Origin` with `X-Forwarded-Host` (then `Host`).
-  Traefik sets both forwarded headers.
+  `X-Forwarded-Proto`. The dashboard's own writes carry a header that marks them as its own, so
+  the cross-site check does not depend on `Host`; for anything else it trusts `Sec-Fetch-Site`
+  when the browser sends it and otherwise compares `Origin` with `X-Forwarded-Host` (then
+  `Host`). Traefik sets both forwarded headers.
 - **Do not add basic auth in front.** The Honcho SDK in the browser sends
   `Authorization: Bearer <token>` to the dashboard's own origin; a Traefik `basicauth`
   middleware wants that same header for its own credentials and answers `401` to the Bearer
@@ -318,7 +320,7 @@ An Unraid Community Applications template is included at [`templates/honcho-dash
    - **WebUI Port:** Default is `3002` (mapped to container port `3000`).
    - **Honcho Proxy Base URL:** URL of your Honcho server (e.g. `http://honcho-aio:8000` or `http://192.168.1.5:8000`). New browsers start on this instance.
    - **Proxy Allowed Bases:** Optional. Add other Honcho servers you plan to use under **CONFIG**. The Proxy Base URL is always allowed.
-   - **Auth token:** If your Honcho server has `AUTH_USE_AUTH=true`, add the token to the instance under **CONFIG** in the dashboard.
+   - **Auth token:** If your Honcho server has `AUTH_USE_AUTH=true`, either set **Proxy Token** so every browser gets it for the Proxy Base URL (then also set **Dashboard Password**, since anyone who can reach the dashboard can use the token), or add the token to the instance under **CONFIG** in each browser.
 
 ### Pairing with `honcho-aio` (Advanced Diagnostics)
 To enable the database metrics (throughput heatmap, table sizes) and live log tailing when paired with `honcho-aio`:
@@ -327,14 +329,12 @@ To enable the database metrics (throughput heatmap, table sizes) and live log ta
   postgresql+psycopg://postgres:<PASSWORD>@honcho-aio:5432/honcho
   ```
   *(Ensure `honcho-aio` has `POSTGRES_ALLOW_REMOTE=true` enabled).*
-- **Retrying reasoning tasks (optional):** Set `HONCHO_OPERATOR_WRITES=true` to let the
-  dashboard re-queue failed tasks. This is the only direct database write the dashboard
-  performs: an `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave
-  it unset (and use a read-only role) if you only want to observe. Retry requests are
-  protected against cross-site requests by a required `X-Honcho-Dashboard: 1` header that the
-  dashboard sends itself; a cross-origin page cannot add it, and the route never answers a CORS
-  preflight. This works over plain HTTP and behind proxies that rewrite `Host`. To call the
-  endpoint yourself (for example with `curl -X POST`), send that header too.
+- **Retrying reasoning tasks (optional):** Set **Operator Writes** (`HONCHO_OPERATOR_WRITES=true`)
+  to let the dashboard re-queue failed tasks. This is the dashboard's only direct database write,
+  an `UPDATE` on Honcho's `queue` table, so the DSN's role needs `UPDATE` on `queue`. Leave it
+  unset (and use a read-only role) to only observe. Scripts calling `POST /api/operator/db`
+  themselves must send `X-Honcho-Dashboard: 1`, the header the dashboard uses to mark its own
+  writes.
 - **Live Logs:** Set host path for `Honcho Log File Mount` to your `honcho-aio` log directory:
   - Host Path: `/mnt/user/appdata/honcho-aio/logs/honcho.log`
   - Container Path: `/honcho.log` (Read-only)
@@ -348,7 +348,7 @@ tails and the redacted environment). Set a single shared password to protect all
 
 | Variable | Meaning |
 | --- | --- |
-| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behaviour. Changing it ends every existing session. |
+| `DASHBOARD_PASSWORD` | Enables authentication when non-empty. Unset or empty keeps the previous open behavior. Changing it ends every existing session. |
 | `DASHBOARD_SESSION_SECRET` | **Required** when the password is set, at least 32 characters. Signs the session cookie (together with the password). There is no default and it is never derived from the password. Rotating it ends every existing session. |
 | `DASHBOARD_SESSION_TTL_HOURS` | Optional session lifetime in hours. Default `168` (7 days); values below one minute are raised to one minute. Lowering it also shortens sessions that were issued under a longer value; raising it never extends them. |
 | `DASHBOARD_TRUSTED_PROXIES` | Optional number of reverse proxies in front of the dashboard (default `1`, max `10`). Only used to pick the client address for the login rate limiter; see below. |
@@ -383,18 +383,17 @@ What is protected when a password is set:
 Limits to know about:
 
 - **Rate limit.** Failed logins are limited to **10 per client address and 30 across all
-  clients, per rolling 15 minutes** (then `429` with `Retry-After`). The overall cap exists
-  because without a reverse proxy a client chooses its own `X-Forwarded-For` and could
-  otherwise rotate its "address" forever; with it, guessing is bounded to 30 attempts per
-  15 minutes (about 2,900 a day) whatever the headers say. Both limits are sliding windows
-  and lift on their own: each failure stops counting 15 minutes after it happened, and a
-  successful login does not count. The trade-off is that a sustained flood of wrong passwords
-  (30 per 15 minutes from any mix of addresses) keeps *new logins* blocked, yours included,
-  until it stops; sessions that already exist are not affected. A single client cannot do
-  this on its own: it is stopped at its 10, which leaves room under the 30. Attempts are
-  counted as soon as they arrive, so concurrent guesses cannot slip past the limits. The
-  limiter is **in memory and per process**: it resets on restart and is not shared between
-  replicas.
+  clients, per rolling 15 minutes** (then `429` with `Retry-After`). Both are sliding windows:
+  each failure stops counting 15 minutes after it happened, a successful login does not count,
+  and attempts are counted as they arrive so concurrent guesses cannot slip past. The limiter
+  is **in memory and per process**: it resets on restart and is not shared between replicas.
+- **Why the overall cap.** Without a reverse proxy a client chooses its own `X-Forwarded-For`
+  and could rotate its "address" forever. The cap bounds guessing to 30 attempts per 15 minutes
+  (about 2,900 a day) whatever the headers say.
+- **The trade-off.** A sustained flood of wrong passwords (30 per 15 minutes from any mix of
+  addresses) keeps *new logins* blocked, yours included, until it stops. Existing sessions keep
+  working. A single client cannot cause this alone: it is stopped at its own 10, which leaves
+  room under the 30.
 - **Which address is "the client".** The limiter keys on the **last** entry of
   `X-Forwarded-For` (the address your reverse proxy appended), or the n-th from the right when
   `DASHBOARD_TRUSTED_PROXIES=n` (use `2` for e.g. Cloudflare in front of Traefik). Everything
@@ -415,20 +414,21 @@ Limits to know about:
   `DASHBOARD_PASSWORD` or `DASHBOARD_SESSION_SECRET` and restart: the signing key is derived
   from both. A session is also refused when its expiry is further away than the current
   `DASHBOARD_SESSION_TTL_HOURS`, so lowering the lifetime cuts existing sessions down to it
-  (a 7-day session under a new 24 hour setting stays valid only for its last 24 hours).
+  (a 7-day session under a new 24-hour setting stays valid only for its last 24 hours).
 - **Expiry.** When a session expires while the app is open, the next request returns the
   guard's `401` (marked with an `x-dashboard-auth: required` header) and the dashboard shows
   the login screen again; a Honcho `401` (bad API key) is not affected.
 - **Cross-site writes.** While authentication is on, `POST`/`PUT`/`PATCH`/`DELETE` requests
-  that the browser marks cross-site (`Sec-Fetch-Site`, or an `Origin` that does not match
-  `Host` / `X-Forwarded-Host`) are rejected with `403`. Make sure your proxy forwards `Host`
-  or `X-Forwarded-Host` unchanged. Browsers only send `Sec-Fetch-Site` over HTTPS (and to
-  `localhost`), so on plain HTTP the `Origin`/`Host` comparison is the only check, and a
-  proxy that rewrites `Host` without setting `X-Forwarded-Host` makes **every** write fail
-  with `403`, the login itself included. nginx does this by default: a bare
-  `proxy_pass http://dashboard:3000;` sends `Host: dashboard:3000`. Add
-  `proxy_set_header Host $host;` (or `proxy_set_header X-Forwarded-Host $host;`) to the
-  `location` block. Traefik, Caddy and Cloudflare keep `Host`, so they need nothing.
+  are checked for cross-site origin. Every write the dashboard makes carries one of its own
+  headers (`X-Honcho-Base-Url`, `X-Honcho-Token` or `X-Honcho-Dashboard: 1`), which a page on
+  another site cannot add without a CORS preflight the dashboard never answers, so those pass
+  whatever `Host` your proxy sends. A write without any of them is rejected with `403` when the
+  browser marks it cross-site (`Sec-Fetch-Site`) or, on plain HTTP where browsers send no
+  `Sec-Fetch-Site`, when its `Origin` does not match `Host` / `X-Forwarded-Host`. Scripts that
+  post to the dashboard from another origin should send `X-Honcho-Dashboard: 1`.
+- **Container health check.** Compose files copied before 1.5.0 probe `/api/operator/runtime`,
+  which answers `401` once a password is set, so the container shows as unhealthy. Change the
+  path to `/api/healthz` (the image's own `HEALTHCHECK` already uses it).
 - The unauthenticated page does not include the default Honcho URL; it appears after login.
 - This is one shared password, not user accounts, roles or SSO. Serve the dashboard over
   HTTPS when it is reachable beyond a trusted network.
