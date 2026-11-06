@@ -2,29 +2,36 @@ import "server-only";
 import { Pool } from "pg";
 import { webhookQueueStatus, type WebhookQueueStatus } from "./webhookStatus";
 import { QUEUE_PENDING_INDEXES, type SchemaFacts } from "./schemaHealth";
-import { operatorPoolTarget } from "./pool";
+import { operatorPoolTarget, withReadOnlyFallback, type OperatorPool, type OperatorPoolTarget } from "./pool";
 import { operatorWritesEnabled } from "./writes";
 
-let pool: Pool | null = null;
+let pool: OperatorPool | null = null;
 let lastUrl: string | null = null;
 
-function getPool(): Pool | null {
-  const url = process.env.HONCHO_DATABASE_URL;
-  if (!url) return null;
-  // With writes off, Postgres itself enforces read-only (default_transaction_read_only),
-  // not just the route gate. Both inputs are read per call, so the pool is rebuilt
-  // if either changes.
-  const writes = operatorWritesEnabled();
-  const target = operatorPoolTarget(url, writes);
-  const key = `${writes ? "rw" : "ro"}|${target.connectionString}|${target.options ?? ""}`;
-  if (pool && lastUrl === key) return pool;
-  pool?.end().catch(() => undefined);
-  pool = new Pool({
+function openPool(target: OperatorPoolTarget): OperatorPool {
+  return new Pool({
     ...target,
     max: 4,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
   });
+}
+
+function getPool(): OperatorPool | null {
+  const url = process.env.HONCHO_DATABASE_URL;
+  if (!url) return null;
+  // With writes off, Postgres itself enforces read-only (default_transaction_read_only),
+  // not just the route gate. Both inputs are read per call, so the pool is rebuilt
+  // if either changes. A pooler that refuses the startup option (PgBouncer before
+  // 1.26) gets the DSN as given instead, with one warning; the route gate still holds.
+  const writes = operatorWritesEnabled();
+  const target = operatorPoolTarget(url, writes);
+  const key = `${writes ? "rw" : "ro"}|${target.connectionString}|${target.options ?? ""}`;
+  if (pool && lastUrl === key) return pool;
+  pool?.end().catch(() => undefined);
+  pool = writes
+    ? openPool(target)
+    : withReadOnlyFallback(openPool(target), () => openPool(operatorPoolTarget(url, true)));
   lastUrl = key;
   return pool;
 }
@@ -38,7 +45,7 @@ function getPool(): Pool | null {
  */
 const tableCache = new Map<string, boolean>();
 
-async function tableExists(p: Pool, table: string): Promise<boolean> {
+async function tableExists(p: OperatorPool, table: string): Promise<boolean> {
   if (tableCache.has(table)) return tableCache.get(table)!;
   try {
     const r = await p.query<{ exists: boolean }>(
@@ -59,7 +66,7 @@ async function tableExists(p: Pool, table: string): Promise<boolean> {
 
 /** First table that exists from the list, or null. Used to pick the right
  * activity source (e.g. conclusions vs documents) across Honcho versions. */
-async function firstExistingTable(p: Pool, candidates: string[]): Promise<string | null> {
+async function firstExistingTable(p: OperatorPool, candidates: string[]): Promise<string | null> {
   for (const t of candidates) {
     if (await tableExists(p, t)) return t;
   }
@@ -1152,7 +1159,7 @@ export async function dbPeerSummaries(
 const columnCache = new Map<string, boolean>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */
-async function pickColumn(p: Pool, table: string, candidates: string[]): Promise<string | null> {
+async function pickColumn(p: OperatorPool, table: string, candidates: string[]): Promise<string | null> {
   for (const c of candidates) {
     if (await columnExists(p, table, c)) return c;
   }
@@ -1166,11 +1173,11 @@ async function pickColumn(p: Pool, table: string, candidates: string[]): Promise
  * checks the row's own tombstone only. Honcho's reads also hide a message
  * whose session, peer or workspace is tombstoned; revisit when deletion ships.
  */
-async function liveRows(p: Pool, table: string): Promise<string> {
+async function liveRows(p: OperatorPool, table: string): Promise<string> {
   return (await columnExists(p, table, "deleted_at")) ? "deleted_at IS NULL" : "TRUE";
 }
 
-async function columnExists(p: Pool, table: string, column: string): Promise<boolean> {
+async function columnExists(p: OperatorPool, table: string, column: string): Promise<boolean> {
   const key = `${table}.${column}`;
   if (columnCache.has(key)) return columnCache.get(key)!;
   try {
