@@ -15,6 +15,7 @@ import {
   dbPeerSummaries,
   dbQueueFailures,
 } from "@/lib/operator/db";
+import { requireDashboardHeader, requireOperatorWrites } from "@/lib/operator/writes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,8 +89,17 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // Agreed order: dashboard session first, then the server write gate, then the
+  // dashboard header. The client-side write toggle is not a security boundary.
   const denied = await requireSession(req);
   if (denied) return denied;
+  const disabled = requireOperatorWrites();
+  if (disabled) return disabled;
+  // CSRF: require the custom header only the dashboard UI sends. A cross-origin
+  // page needs a preflight to add it, and this route never answers one: there is
+  // deliberately no OPTIONS handler and no Access-Control-* headers.
+  const missingHeader = requireDashboardHeader(req.headers);
+  if (missingHeader) return missingHeader;
   const action = req.nextUrl.searchParams.get("action");
   if (action === "retry_reasoning") {
     const ws = req.nextUrl.searchParams.get("workspace_id");

@@ -18,10 +18,12 @@ import { useWriteActions } from "@/lib/writeActions";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
+import type { RuntimeInfo } from "@/lib/operator/runtime-types";
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus } from "@/lib/honcho/adapters";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
 import { INSTRUCTION_MODULES } from "@/lib/honcho/workspaceConfig";
+import { OPERATOR_WRITE_HEADERS, serverWriteGate } from "@/lib/operator/writes";
 import { cn } from "@/lib/utils";
 
 type ChipTone = "blue" | "purple" | "yellow" | "orange" | "cyan" | "pink" | "muted";
@@ -70,6 +72,11 @@ export function ReasoningPage() {
   const { push } = useToast();
   const confirm = useConfirm();
   const { enabled: canWrite } = useWriteActions();
+  // The retry actions also need the server-side gate (HONCHO_OPERATOR_WRITES).
+  // Anything but a confirmed "on" (loading, probe failed, off) keeps them disabled
+  // so we never offer a write the server will refuse.
+  const runtime = useOperatorQuery<Pick<RuntimeInfo, "writes_enabled">>("/api/operator/runtime");
+  const { enabled: serverWrites, hint: serverWritesHint } = serverWriteGate(runtime);
   const metrics = useDeriverMetrics();
 
   const [statusFilter, setStatusFilter] = useState("all");
@@ -207,7 +214,7 @@ export function ReasoningPage() {
       const res = await fetch(
         `/api/operator/db?action=retry_reasoning&workspace_id=${encodeURIComponent(workspaceId)}` +
           `&id=${encodeURIComponent(target.id)}`,
-        { method: "POST" },
+        { method: "POST", headers: OPERATOR_WRITE_HEADERS },
       );
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
       if (!res.ok || !body.ok) throw new Error(body.reason || `HTTP ${res.status}`);
@@ -241,7 +248,7 @@ export function ReasoningPage() {
     try {
       const res = await fetch(
         `/api/operator/db?action=retry_all_failed_reasoning&workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST" },
+        { method: "POST", headers: OPERATOR_WRITE_HEADERS },
       );
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -283,6 +290,7 @@ export function ReasoningPage() {
                 queue.refetch();
                 conclusions.refetch();
                 metrics.refetch();
+                runtime.refetch();
               }}
             />
             {canWrite ? (
@@ -290,11 +298,20 @@ export function ReasoningPage() {
                 variant="warning"
                 icon="refresh"
                 onClick={doRetryAll}
-                disabled={!workspaceId || !counts?.failed || retryAllBusy}
-                title={counts?.failed ? `Retry all ${counts.failed} failed tasks` : "No failed tasks"}
+                disabled={!workspaceId || !counts?.failed || retryAllBusy || !serverWrites}
+                title={
+                  serverWritesHint
+                    ? serverWritesHint
+                    : counts?.failed
+                      ? `Retry all ${counts.failed} failed tasks`
+                      : "No failed tasks"
+                }
               >
                 RETRY_FAILED
               </Button>
+            ) : null}
+            {canWrite && serverWritesHint ? (
+              <span className="text-[10px] text-text-muted">{serverWritesHint}</span>
             ) : null}
             {canWrite ? (
               <Button icon="sparkles" onClick={openDream} disabled={!workspaceId}>
@@ -407,6 +424,7 @@ export function ReasoningPage() {
                           t={t}
                           index={i}
                           canRetry={canWrite}
+                          retryDisabledHint={serverWritesHint}
                           onRetry={() => doRetry(t)}
                         />
                       ))}
@@ -585,11 +603,14 @@ function ReasoningTaskItem({
   t,
   index,
   canRetry,
+  retryDisabledHint,
   onRetry,
 }: {
   t: ReasoningTaskRow;
   index: number;
   canRetry: boolean;
+  /** When set, the retry button is disabled and this explains why. */
+  retryDisabledHint?: string;
   onRetry: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -710,11 +731,18 @@ function ReasoningTaskItem({
 
               {failed && canRetry ? (
                 <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Button variant="primary" size="sm" icon="refresh" onClick={onRetry}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon="refresh"
+                    onClick={onRetry}
+                    disabled={!!retryDisabledHint}
+                    title={retryDisabledHint}
+                  >
                     RETRY_TASK
                   </Button>
                   <span className="text-[10px] text-text-muted">
-                    clears the error and re-queues this task for the deriver
+                    {retryDisabledHint ?? "clears the error and re-queues this task for the deriver"}
                   </span>
                 </div>
               ) : null}

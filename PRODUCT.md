@@ -19,8 +19,9 @@ to raw SQL or curl.
 
 A fast, privacy-first web control panel for a self-hosted Honcho memory server —
 a Next.js alternative to openconcho. Every screen talks to the live Honcho v3
-API through a same-origin, allowlisted proxy, and a read-only operator layer
-(runtime, db, logs, diagnostics) surfaces metrics the REST API doesn't expose.
+API through a same-origin, allowlisted proxy, and an operator layer (runtime, db, logs,
+diagnostics), read-only except an opt-in reasoning retry, surfaces metrics the REST API
+doesn't expose.
 Success: an operator runs their entire Honcho instance from this dashboard,
 trusts what it shows, and never needs SQL or curl for routine work.
 
