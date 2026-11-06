@@ -202,7 +202,7 @@ function SessionPanel() {
   };
 
   return (
-    <Panel title="SESSION">
+    <Panel title="SESSION" status="active">
       <p className="text-[11px] text-text-muted leading-relaxed">
         This dashboard is protected by a password. Logging out ends the session in this browser.
       </p>
@@ -210,6 +210,10 @@ function SessionPanel() {
         <Button variant="secondary" icon="power" onClick={onLogout} disabled={busy}>
           {busy ? "LOGGING_OUT…" : "LOGOUT"}
         </Button>
+      </div>
+      <div className="mt-3 flex justify-between gap-2 text-xs py-1.5 border-t border-border">
+        <span className="text-text-muted">login</span>
+        <span className="text-text-muted">shared password</span>
       </div>
     </Panel>
   );

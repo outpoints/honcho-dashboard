@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireSession, rejectCrossSiteWrite } from "../src/lib/auth/server.ts";
+import { authStatusBody, requireSession, rejectCrossSiteWrite } from "../src/lib/auth/server.ts";
 import { signSession } from "../src/lib/auth/session.ts";
 
 const SECRET = "k".repeat(48);
@@ -125,10 +125,34 @@ test("requireSession: a password change or a lowered TTL logs everyone out", asy
   });
 });
 
-test("rejectCrossSiteWrite: the login POST from behind a Host-rewriting proxy gets 403 unless X-Forwarded-Host is set", () => {
-  const login = { origin: "http://dash.example", host: "127.0.0.1:3000" };
-  const refused = rejectCrossSiteWrite(req("POST", login));
-  assert.equal(refused?.status, 403);
-  assert.equal(rejectCrossSiteWrite(req("POST", { ...login, "x-forwarded-host": "dash.example" })), null);
-  assert.equal(rejectCrossSiteWrite(req("POST", { ...login, host: "dash.example" })), null);
+test("rejectCrossSiteWrite: behind a Host-rewriting proxy, a dashboard header lets the write through; a bare one needs X-Forwarded-Host", () => {
+  const bare = { origin: "http://dash.example", host: "127.0.0.1:3000" };
+  assert.equal(rejectCrossSiteWrite(req("POST", bare))?.status, 403, "no dashboard header, Origin differs from Host");
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...bare, "x-forwarded-host": "dash.example" })), null);
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...bare, host: "dash.example" })), null);
+  // What the dashboard actually sends: the login client adds X-Honcho-Dashboard,
+  // the SDK and raw client add X-Honcho-Base-Url, and tokened calls X-Honcho-Token.
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...bare, "x-honcho-dashboard": "1" })), null, "login/logout");
+  assert.equal(rejectCrossSiteWrite(req("POST", { ...bare, "x-honcho-base-url": "http://honcho:8000" })), null, "SDK/raw client");
+  assert.equal(rejectCrossSiteWrite(req("DELETE", { ...bare, "x-honcho-token": "t" })), null, "tokened call");
+  // A cross-site page cannot add those headers, so the plain cross-site shapes still fail.
+  assert.equal(rejectCrossSiteWrite(req("POST", { "sec-fetch-site": "cross-site" }))?.status, 403);
+  assert.equal(rejectCrossSiteWrite(req("POST", { origin: "https://evil.test", host: "dash.example" }))?.status, 403);
+});
+
+test("authStatusBody: off, misconfigured (with the reason, never the secret), and on with or without a session", async () => {
+  await withEnv({}, async () => {
+    assert.deepEqual(await authStatusBody(new Headers()), { enabled: false, authenticated: true });
+  });
+  await withEnv({ DASHBOARD_PASSWORD: "pw", DASHBOARD_SESSION_SECRET: "short" }, async () => {
+    const body = await authStatusBody(new Headers());
+    assert.equal(body.enabled, true);
+    assert.equal(body.authenticated, false);
+    assert.match(body.error, /DASHBOARD_SESSION_SECRET must be set/);
+    assert.doesNotMatch(JSON.stringify(body), /short|"pw"/);
+  });
+  await withEnv(ON, async () => {
+    assert.deepEqual(await authStatusBody(new Headers()), { enabled: true, authenticated: false });
+    assert.deepEqual(await authStatusBody(new Headers({ cookie: await sessionCookie() })), { enabled: true, authenticated: true });
+  });
 });

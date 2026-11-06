@@ -4,7 +4,7 @@
  * so it stays free of Node-only imports (`node:crypto`, `fs`, `pg`).
  */
 import { readAuthConfig, type AuthConfig } from "./config.ts";
-import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE } from "./constants.ts";
+import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE, hasDashboardRequestHeader } from "./constants.ts";
 import { isCrossSiteWrite } from "./guard.ts";
 import { SESSION_COOKIE_NAME, parseCookie, verifySession, type SessionParams } from "./session.ts";
 
@@ -34,6 +34,27 @@ export async function hasValidSession(
 
 export const NO_STORE = { "cache-control": "no-store" } as const;
 
+/** What `/api/auth/status` reports; `error` only when a password is set but sessions cannot be issued. */
+export interface AuthStatusBody {
+  enabled: boolean;
+  authenticated: boolean;
+  error?: string;
+}
+
+/**
+ * Body of `GET /api/auth/status`. With auth disabled everyone is effectively
+ * allowed, so `authenticated` is true. A misconfigured server (password set,
+ * secret missing or short) reports `authenticated: false` plus the `error` a
+ * login would fail with, so the login screen can say so before anyone types.
+ * Never includes the secret or the password.
+ */
+export async function authStatusBody(headers: { get(name: string): string | null }): Promise<AuthStatusBody> {
+  const config = currentAuthConfig();
+  if (!config.enabled) return { enabled: false, authenticated: true };
+  if (!config.ok) return { enabled: true, authenticated: false, error: config.error };
+  return { enabled: true, authenticated: await hasValidSession(headers, config) };
+}
+
 export function authRequiredResponse(): Response {
   return Response.json(
     { error: "authentication required" },
@@ -60,6 +81,7 @@ export function rejectCrossSiteWrite(request: GuardedRequest): Response | null {
       origin: h.get("origin"),
       host: h.get("host"),
       forwardedHost: h.get("x-forwarded-host"),
+      dashboardHeader: hasDashboardRequestHeader(h),
     })
   ) {
     return null;

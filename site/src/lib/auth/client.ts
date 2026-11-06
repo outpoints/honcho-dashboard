@@ -1,19 +1,32 @@
 "use client";
 
-import { AUTH_REQUIRED_EVENT, isAuthRequiredResponse } from "./constants";
+import { AUTH_REQUIRED_EVENT, DASHBOARD_HEADER, DASHBOARD_HEADER_VALUE, isAuthRequiredResponse } from "./constants";
 
 /** Browser helpers for the optional dashboard login. Cookies ride along on same-origin fetches. */
+
+/**
+ * Login and logout carry no Honcho header, so they send the dashboard marker
+ * the cross-site check accepts (see `isCrossSiteWrite`). Without it, a proxy
+ * that rewrites `Host` would 403 the login itself on plain HTTP.
+ */
+const DASHBOARD_WRITE_HEADERS: Record<string, string> = { [DASHBOARD_HEADER]: DASHBOARD_HEADER_VALUE };
 
 export interface AuthStatus {
   enabled: boolean;
   authenticated: boolean;
+  /** Set when a password is configured but the server cannot issue sessions (bad secret). */
+  error?: string;
 }
 
 export async function fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatus> {
   const res = await fetch("/api/auth/status", { cache: "no-store", signal });
   if (!res.ok) throw new Error(`Auth status check failed (HTTP ${res.status})`);
   const body = (await res.json()) as Partial<AuthStatus>;
-  return { enabled: body.enabled === true, authenticated: body.authenticated === true };
+  return {
+    enabled: body.enabled === true,
+    authenticated: body.authenticated === true,
+    ...(typeof body.error === "string" && body.error ? { error: body.error } : {}),
+  };
 }
 
 /** Resolves on success; rejects with a user-presentable message otherwise. */
@@ -22,7 +35,7 @@ export async function login(password: string): Promise<void> {
   try {
     res = await fetch("/api/auth/login", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...DASHBOARD_WRITE_HEADERS },
       body: JSON.stringify({ password }),
     });
   } catch {
@@ -40,7 +53,7 @@ export async function login(password: string): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  const res = await fetch("/api/auth/logout", { method: "POST" });
+  const res = await fetch("/api/auth/logout", { method: "POST", headers: DASHBOARD_WRITE_HEADERS });
   if (!res.ok) throw new Error(`Logout failed (HTTP ${res.status})`);
 }
 

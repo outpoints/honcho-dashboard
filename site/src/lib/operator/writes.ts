@@ -4,6 +4,8 @@
  * Pure and dependency-free so it can be unit-tested outside Next. Default is
  * disabled: writes run only when HONCHO_OPERATOR_WRITES is explicitly truthy.
  */
+import { DASHBOARD_HEADER, DASHBOARD_HEADER_VALUE } from "../auth/constants.ts";
+
 export const OPERATOR_WRITES_ENV = "HONCHO_OPERATOR_WRITES";
 
 export const OPERATOR_WRITES_DISABLED_REASON =
@@ -25,10 +27,11 @@ export function operatorWritesEnabled(
  * preflight, and /api/operator/db never approves one (no OPTIONS handler, no
  * Access-Control-Allow-* headers), so requiring it blocks CSRF. It does not
  * depend on Origin, Host or Sec-Fetch-Site, so it also works on plain-HTTP
- * installs and behind proxies that rewrite Host.
+ * installs and behind proxies that rewrite Host. The name lives in
+ * `src/lib/auth/constants.ts` because the dashboard login guard honours the
+ * same header.
  */
-export const DASHBOARD_HEADER = "X-Honcho-Dashboard";
-export const DASHBOARD_HEADER_VALUE = "1";
+export { DASHBOARD_HEADER, DASHBOARD_HEADER_VALUE };
 
 /** Headers the dashboard UI must send on every operator write. */
 export const OPERATOR_WRITE_HEADERS: Record<string, string> = {

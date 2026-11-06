@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Button, Field, TextInput } from "@/components/atoms";
+import { GridCanvas } from "@/components/GridCanvas";
 import { Panel } from "@/components/Panel";
 import { fetchAuthStatus, installAuthFetchInterceptor, login, logout, type AuthStatus } from "@/lib/auth/client";
 import { AUTH_REQUIRED_EVENT } from "@/lib/auth/constants";
@@ -138,7 +139,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (state.status.enabled && !state.status.authenticated) {
     return (
       <CenteredScreen>
-        <LoginForm onLoggedIn={onLoggedIn} />
+        <LoginForm onLoggedIn={onLoggedIn} configError={state.status.error} />
       </CenteredScreen>
     );
   }
@@ -146,18 +147,32 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/**
+ * The gate screens sit on the same animated grid as the app (AppShell mounts
+ * GridCanvas inside the shell, which is not rendered yet), so the login does
+ * not land on a flat page. The canvas is `fixed` and `z-0`; the card sits above.
+ */
 function CenteredScreen({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">{children}</div>
+      <GridCanvas />
+      <div className="relative z-10 w-full max-w-sm">{children}</div>
     </div>
   );
 }
 
-function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
+function LoginForm({
+  onLoggedIn,
+  configError,
+}: {
+  onLoggedIn: () => void;
+  /** Server-side auth misconfiguration (bad secret): shown up front, login disabled. */
+  configError?: string;
+}) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const blocked = !!configError;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,7 +189,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
   };
 
   return (
-    <Panel title="LOGIN" status={busy ? "processing" : "active"}>
+    <Panel title="LOGIN" status={blocked ? "idle" : busy ? "processing" : "active"}>
       <form onSubmit={submit} className="space-y-3">
         <p className="text-[11px] text-text-muted">
           This dashboard is password protected. Enter the dashboard password to continue.
@@ -188,12 +203,23 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
             autoComplete="current-password"
             aria-label="Dashboard password"
             aria-invalid={error ? true : undefined}
+            disabled={blocked}
           />
         </Field>
-        {error ? (
+        {configError ? (
+          <p role="alert" className="text-xs text-red-400 break-words">
+            Login is unavailable until the server is fixed: {configError}
+          </p>
+        ) : error ? (
           <p role="alert" className="text-xs text-red-400 break-words">{error}</p>
         ) : null}
-        <Button type="submit" variant="solid" icon="key" disabled={busy || password === ""} className="w-full">
+        <Button
+          type="submit"
+          variant="solid"
+          icon="key"
+          disabled={blocked || busy || password === ""}
+          className="w-full"
+        >
           {busy ? "SIGNING_IN…" : "LOGIN"}
         </Button>
       </form>

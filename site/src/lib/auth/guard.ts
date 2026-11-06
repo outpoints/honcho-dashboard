@@ -53,14 +53,25 @@ export interface CrossSiteInput {
   origin?: string | null;
   host?: string | null;
   forwardedHost?: string | null;
+  /**
+   * The request carries a header only the dashboard sends (`X-Honcho-Dashboard`,
+   * `X-Honcho-Base-Url` or `X-Honcho-Token`; see `hasDashboardRequestHeader` in
+   * `constants.ts`). A page on another site cannot add one without a CORS
+   * preflight the dashboard never answers.
+   */
+  dashboardHeader?: boolean;
 }
 
 /**
  * CSRF check for state-changing methods. Returns true when the request should
  * be rejected as cross-site.
  *
- * - `Sec-Fetch-Site` present: only `same-origin` and `none` pass (`same-site`
- *   is a different origin and is rejected).
+ * - `dashboardHeader`: the request proves it came from the dashboard, so it
+ *   passes whatever `Origin` and `Host` say. This is what keeps the dashboard
+ *   working on plain HTTP behind a proxy that rewrites `Host` (nginx's default
+ *   `proxy_pass`), where browsers send no `Sec-Fetch-Site`.
+ * - Else `Sec-Fetch-Site` present: only `same-origin` and `none` pass
+ *   (`same-site` is a different origin and is rejected).
  * - Else `Origin` present: its host must equal `X-Forwarded-Host` (first
  *   value) or `Host`.
  * - Neither header (curl, server-to-server): passes. The cookie is
@@ -69,6 +80,7 @@ export interface CrossSiteInput {
  */
 export function isCrossSiteWrite(input: CrossSiteInput): boolean {
   if (!UNSAFE_METHODS.has(input.method.toUpperCase())) return false;
+  if (input.dashboardHeader) return false;
   const site = input.secFetchSite?.trim().toLowerCase();
   if (site) return site !== "same-origin" && site !== "none";
   const origin = input.origin?.trim();

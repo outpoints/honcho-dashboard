@@ -228,7 +228,7 @@ describe("auth on", () => {
     }
   });
 
-  test("login from a browser whose Origin does not match Host is refused unless X-Forwarded-Host matches", async () => {
+  test("login behind a Host-rewriting proxy: the dashboard's own header passes, a bare mismatching Origin needs X-Forwarded-Host", async () => {
     // Same shape as plain HTTP behind an nginx that rewrites Host and sends no
     // X-Forwarded-Host: Origin is the public name, Host is the upstream address.
     const attempt = (extra) =>
@@ -237,8 +237,9 @@ describe("auth on", () => {
         headers: { "content-type": "application/json", origin: "http://dash.example", ...extra },
         body: JSON.stringify({ password: PASSWORD }),
       });
-    assert.equal((await attempt({})).status, 403);
+    assert.equal((await attempt({})).status, 403, "no dashboard header");
     assert.equal((await attempt({ "x-forwarded-host": "dash.example" })).status, 204);
+    assert.equal((await attempt({ "x-honcho-dashboard": "1" })).status, 204, "what the login form sends");
   });
 
   test("other casings of the passthroughs do not skip the guard", async () => {

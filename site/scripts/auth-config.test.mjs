@@ -12,6 +12,8 @@ import {
   readAuthConfig,
 } from "../src/lib/auth/config.ts";
 import { isCrossSiteWrite, isExemptPath, isGuardedPath } from "../src/lib/auth/guard.ts";
+import { DASHBOARD_HEADER, DASHBOARD_REQUEST_HEADERS, hasDashboardRequestHeader } from "../src/lib/auth/constants.ts";
+import { DASHBOARD_HEADER as OPERATOR_DASHBOARD_HEADER, OPERATOR_WRITE_HEADERS } from "../src/lib/operator/writes.ts";
 
 const SECRET = "s".repeat(48);
 
@@ -205,20 +207,53 @@ test("CSRF: requests without browser headers (curl, server-to-server) pass", () 
   assert.equal(isCrossSiteWrite(w({ secFetchSite: "", host: "dash.test" })), false);
 });
 
-test("CSRF: behind a proxy that rewrites Host without X-Forwarded-Host, plain-HTTP writes are rejected", () => {
+test("CSRF: behind a proxy that rewrites Host without X-Forwarded-Host, header-less plain-HTTP writes are rejected", () => {
   // nginx `proxy_pass http://127.0.0.1:3000;` with no proxy_set_header sends
   // Host: 127.0.0.1:3000 and no X-Forwarded-Host. A browser on plain HTTP sends
-  // Origin but no Sec-Fetch-Site (only sent to HTTPS or localhost), so the
-  // Origin/Host comparison is all there is, and it fails, login POST included.
-  const login = { method: "POST", origin: "http://dash.example", host: "127.0.0.1:3000" };
-  assert.equal(isCrossSiteWrite(login), true, "documented limitation: keep Host or set X-Forwarded-Host");
-  // The two documented remedies.
-  assert.equal(isCrossSiteWrite({ ...login, host: "dash.example" }), false, "proxy_set_header Host $host");
-  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "dash.example" }), false, "X-Forwarded-Host");
-  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "dash.example, 10.0.0.1" }), false, "first X-Forwarded-Host value");
-  assert.equal(isCrossSiteWrite({ ...login, forwardedHost: "10.0.0.1, dash.example" }), true, "only the first value counts");
+  // Origin but no Sec-Fetch-Site (only sent to HTTPS or localhost), so for a
+  // request without a dashboard header the Origin/Host comparison is all there is.
+  const bare = { method: "POST", origin: "http://dash.example", host: "127.0.0.1:3000" };
+  assert.equal(isCrossSiteWrite(bare), true, "no dashboard header: Origin must match Host");
+  // Keeping Host or setting X-Forwarded-Host still works for such requests.
+  assert.equal(isCrossSiteWrite({ ...bare, host: "dash.example" }), false, "proxy_set_header Host $host");
+  assert.equal(isCrossSiteWrite({ ...bare, forwardedHost: "dash.example" }), false, "X-Forwarded-Host");
+  assert.equal(isCrossSiteWrite({ ...bare, forwardedHost: "dash.example, 10.0.0.1" }), false, "first X-Forwarded-Host value");
+  assert.equal(isCrossSiteWrite({ ...bare, forwardedHost: "10.0.0.1, dash.example" }), true, "only the first value counts");
   // Over HTTPS the browser sends Sec-Fetch-Site, which decides on its own.
-  assert.equal(isCrossSiteWrite({ ...login, origin: "https://dash.example", secFetchSite: "same-origin" }), false);
+  assert.equal(isCrossSiteWrite({ ...bare, origin: "https://dash.example", secFetchSite: "same-origin" }), false);
   // Without an Origin (curl, health checks, server-to-server) the Host is not consulted.
   assert.equal(isCrossSiteWrite({ method: "POST", host: "127.0.0.1:3000" }), false);
+});
+
+test("CSRF: a dashboard header proves the request came from the dashboard, whatever Origin and Host say", () => {
+  // Every dashboard write carries X-Honcho-Base-Url, X-Honcho-Token or
+  // X-Honcho-Dashboard; a cross-origin page cannot add any of them without a
+  // CORS preflight the dashboard never answers. So the rewritten-Host case passes.
+  const rewritten = { method: "POST", origin: "http://dash.example", host: "127.0.0.1:3000", dashboardHeader: true };
+  assert.equal(isCrossSiteWrite(rewritten), false, "nginx default proxy_pass, login POST included");
+  assert.equal(isCrossSiteWrite({ ...rewritten, origin: "https://evil.test" }), false, "Origin is not consulted");
+  assert.equal(isCrossSiteWrite({ ...rewritten, origin: "null" }), false);
+  assert.equal(isCrossSiteWrite({ ...rewritten, secFetchSite: "cross-site" }), false, "the header wins (a browser cannot produce this pair)");
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal(isCrossSiteWrite({ method, dashboardHeader: true, secFetchSite: "cross-site" }), false, method);
+  }
+  // The flag only matters for unsafe methods, and only when true.
+  assert.equal(isCrossSiteWrite({ method: "GET", secFetchSite: "cross-site", dashboardHeader: false }), false);
+  assert.equal(isCrossSiteWrite({ method: "POST", secFetchSite: "cross-site", dashboardHeader: false }), true);
+});
+
+test("hasDashboardRequestHeader: any dashboard header with a value counts, in any casing; blanks do not", () => {
+  const h = (init) => new Headers(init);
+  assert.equal(hasDashboardRequestHeader(h({})), false);
+  assert.equal(hasDashboardRequestHeader(h({ "content-type": "application/json", origin: "https://evil.test" })), false);
+  for (const name of DASHBOARD_REQUEST_HEADERS) {
+    assert.equal(hasDashboardRequestHeader(h({ [name]: "x" })), true, name);
+    assert.equal(hasDashboardRequestHeader(h({ [name.toLowerCase()]: "x" })), true, name.toLowerCase());
+    assert.equal(hasDashboardRequestHeader(h({ [name]: "   " })), false, `${name} blank`);
+  }
+  assert.equal(hasDashboardRequestHeader(h({ "x-honcho-dashboard-extra": "1" })), false, "exact names only");
+  // The operator write route requires the same header the login guard honours,
+  // so one constant serves both and the UI's write headers satisfy the guard.
+  assert.equal(OPERATOR_DASHBOARD_HEADER, DASHBOARD_HEADER);
+  assert.equal(hasDashboardRequestHeader(h(OPERATOR_WRITE_HEADERS)), true);
 });

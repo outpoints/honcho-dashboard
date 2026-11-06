@@ -33,7 +33,7 @@ export async function processLogin(
   const reservation = limiter.reserve(clientKey(req.headers, config.trustedProxies), now());
   if (reservation.limited) {
     return Response.json(
-      { error: "too many failed attempts, try again later" },
+      { error: "Too many failed attempts. Try again later" },
       { status: 429, headers: { ...NO_STORE, "retry-after": String(reservation.retryAfterSeconds) } },
     );
   }
@@ -46,7 +46,7 @@ export async function processLogin(
   }
 
   if (typeof password !== "string" || !(await constantTimeEqual(password, config.password))) {
-    return Response.json({ error: "invalid password" }, { status: 401, headers: NO_STORE });
+    return Response.json({ error: "Invalid password" }, { status: 401, headers: NO_STORE });
   }
 
   reservation.release();
