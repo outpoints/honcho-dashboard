@@ -17,6 +17,21 @@ function proxyOrigin(): string {
   return "http://localhost";
 }
 
+/**
+ * Headers every SDK call carries to the same-origin proxy. A saved browser
+ * token travels as `X-Honcho-Token`, the only header the proxy reads to decide
+ * whether the user's token or the server's `HONCHO_PROXY_TOKEN` applies (the
+ * SDK's own `Authorization` is ignored for that decision). Without a token no
+ * credential header is sent, so the server token can apply.
+ */
+export function sdkDefaultHeaders(opts: HonchoClientOptions): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-Honcho-Base-Url": opts.baseUrl.replace(/\/+$/, ""),
+  };
+  if (opts.token) headers["X-Honcho-Token"] = opts.token;
+  return headers;
+}
+
 export function getSdk(opts: HonchoClientOptions, workspaceId: string): Honcho {
   const key = cacheKey(opts, workspaceId);
   let client = cache.get(key);
@@ -25,9 +40,7 @@ export function getSdk(opts: HonchoClientOptions, workspaceId: string): Honcho {
       baseURL: proxyOrigin(),
       apiKey: opts.token ?? "unused-token-please-server-ignore",
       workspaceId,
-      defaultHeaders: {
-        "X-Honcho-Base-Url": opts.baseUrl.replace(/\/+$/, ""),
-      },
+      defaultHeaders: sdkDefaultHeaders(opts),
       maxRetries: 1,
       timeout: 30000,
     });

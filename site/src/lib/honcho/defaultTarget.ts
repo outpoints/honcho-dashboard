@@ -16,6 +16,11 @@
 
 export const LEGACY_DEFAULT_BASE_URL = "http://localhost:8000";
 export const DEFAULT_BASE_URL_META = "honcho-dashboard:default-base-url";
+/**
+ * Present (content "1") when the server holds a bearer token for the default
+ * target (`HONCHO_PROXY_TOKEN`). Carries the fact only, never the token.
+ */
+export const DEFAULT_TOKEN_MANAGED_META = "honcho-dashboard:default-token-managed";
 export const SEED_INSTANCE_ID = "default";
 export const SEED_INSTANCE_NAME = "local";
 
@@ -92,6 +97,76 @@ export function implicitAllowedBases(sources: DefaultTargetSources): string[] {
 export function advertisedBaseUrl(sources: DefaultTargetSources): string | null {
   const url = defaultBaseUrl(sources);
   return url ? canonicalize(url) : null;
+}
+
+/** Visible ASCII, space and tab: what a header value may safely hold when sent as `Bearer <token>`. */
+const HEADER_SAFE = /^[\t\x20-\x7e]*$/;
+
+let warnedInvalidToken = false;
+
+/** Lets a test see the invalid-token warning again; the warning is otherwise once per process. */
+export function resetInvalidTokenWarning(): void {
+  warnedInvalidToken = false;
+}
+
+/**
+ * The server-managed token (`HONCHO_PROXY_TOKEN`), trimmed; undefined when the
+ * env is unset or blank. A value that cannot be an HTTP header value (a newline
+ * or other control or non-ASCII character in the middle) counts as unset, with
+ * one warning that never includes the value: left in, it would make every
+ * request that injects it fail inside `Headers`, and that error echoes the value.
+ */
+export function serverManagedToken(envToken: string | undefined): string | undefined {
+  const token = present(envToken);
+  if (token === undefined) return undefined;
+  if (HEADER_SAFE.test(token)) return token;
+  if (!warnedInvalidToken) {
+    warnedInvalidToken = true;
+    console.warn(
+      "HONCHO_PROXY_TOKEN contains characters that are not valid in an HTTP header value " +
+        "(for example a line break); it is ignored until that is fixed.",
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The server-managed token to use for `origin`, or undefined. It applies only
+ * when `origin` is the canonicalized default base URL, so it is never sent to
+ * any other allowlisted instance.
+ */
+export function serverDefaultToken(
+  origin: string,
+  sources: DefaultTargetSources,
+  envToken: string | undefined,
+): string | undefined {
+  const token = serverManagedToken(envToken);
+  if (!token) return undefined;
+  const defaultOrigin = advertisedBaseUrl(sources);
+  return defaultOrigin && defaultOrigin === origin ? token : undefined;
+}
+
+/**
+ * The bearer token for a proxied request: an explicit `X-Honcho-Token` header
+ * always wins (a blank header counts as absent), else the server default for
+ * the default target.
+ *
+ * The server default applies only when the request named its target with
+ * `X-Honcho-Base-Url` (`baseUrlSent`). Every dashboard call sends it, and a
+ * page on another site cannot add a custom header without a CORS preflight the
+ * proxy never answers. Without that gate a cross-site `text/plain` form POST,
+ * which needs no preflight, would reach Honcho carrying the token.
+ */
+export function resolveRequestToken(
+  headerToken: string | null,
+  origin: string,
+  sources: DefaultTargetSources,
+  envToken: string | undefined,
+  baseUrlSent: boolean,
+): string | undefined {
+  if (headerToken && headerToken.trim()) return headerToken;
+  if (!baseUrlSent) return undefined;
+  return serverDefaultToken(origin, sources, envToken);
 }
 
 export interface StoredInstance {

@@ -114,6 +114,15 @@ image cannot get runtime config that way. The default target comes from
 `src/lib/honcho/defaultTarget.ts`: the server reads it at request time and `app/layout.tsx`
 passes it to the browser in a meta tag. Keep that module's compatibility rules: the implicit
 allowlist only grows, and only the untouched `default`/`local` seed is ever rewritten.
+`HONCHO_PROXY_TOKEN` is a server-only bearer token for that default target: the proxy adds it
+only when the request has no `X-Honcho-Token`, carries `X-Honcho-Base-Url` (so a cross-site
+form post cannot borrow it), and the origin is the default; the layout advertises just a
+`default-token-managed` flag. Never render or return its value. A value that is not a valid
+header value counts as unset (one warning, never the value). Every browser-to-proxy call must
+send `X-Honcho-Base-Url`, and send the saved token as `X-Honcho-Token`: the proxy ignores
+`Authorization` when choosing between the user's token and the server's, so `getSdk` sets it in
+`defaultHeaders`. Server-side probes that follow a redirect (`lib/operator/safeFetch.ts`) must
+drop credential headers when it leaves the origin.
 
 Use `@honcho-ai/sdk` 2.5.1+ for scopes, scope-aware search/context, peer scope
 recall, and workspace chat. The raw scope-list call is reserved for the

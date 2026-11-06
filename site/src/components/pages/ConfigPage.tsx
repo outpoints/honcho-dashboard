@@ -8,7 +8,7 @@ import { Button, Checkbox, Field, TextInput } from "@/components/atoms";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { honcho } from "@/lib/honcho/client";
-import { defaultHonchoBaseUrl, useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
+import { defaultHonchoBaseUrl, hasServerManagedToken, useHonchoInstances, type HonchoInstance } from "@/lib/honcho/config";
 import { formatApiError, invalidate } from "@/lib/honcho/useQuery";
 import { TITLE_BASE, sectionTitle, useAppendSectionToTitle } from "@/lib/title";
 import { useNav } from "@/lib/nav";
@@ -108,7 +108,9 @@ export function ConfigPage() {
                         <div className="text-[10px] text-text-muted truncate font-mono">{inst.baseUrl}</div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {inst.token ? <Icon name="key" size={11} className="text-text-muted" /> : null}
+                        {inst.token || hasServerManagedToken(inst.baseUrl) ? (
+                          <Icon name="key" size={11} className="text-text-muted" />
+                        ) : null}
                         <Icon name="chevron-right" size={12} className="text-text-muted" />
                       </div>
                     </button>
@@ -127,7 +129,7 @@ export function ConfigPage() {
               const rows: [string, string][] = [
                 ["name", a.name],
                 ["base_url", a.baseUrl],
-                ["auth", a.token ? "Bearer token" : "none"],
+                ["auth", a.token ? "Bearer token" : hasServerManagedToken(a.baseUrl) ? "Server token" : "none"],
               ];
               return (
                 <div className="space-y-1.5 text-xs">
@@ -354,7 +356,14 @@ function InstanceEditor({
         </Field>
       </div>
       <div className="mt-3">
-        <Field label="BEARER_TOKEN" hint="Leave blank if the server has AUTH_USE_AUTH=false">
+        <Field
+          label="BEARER_TOKEN"
+          hint={
+            hasServerManagedToken(baseUrl)
+              ? "The server supplies a token for this URL, so this may stay blank. A token entered here overrides it"
+              : "Leave blank if the server has AUTH_USE_AUTH=false"
+          }
+        >
           <TextInput
             value={token}
             onChange={(e) => setToken(e.target.value)}
