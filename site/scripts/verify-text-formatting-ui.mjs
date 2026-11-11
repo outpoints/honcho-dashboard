@@ -379,7 +379,7 @@ try {
     // Session previews flatten markdown into a clamped line of text, latest first.
     await page.goto(`${base}/#/sessions`);
     await page.getByRole('button', { name: /planning-notes/ }).first().click();
-    await page.getByText('CONVERSATION', { exact: false }).waitFor();
+    await page.getByTestId('session-transcript').waitFor();
     await page.locator('.md-inline strong', { hasText: 'v2 importer' }).first().waitFor();
     await shot(page, `${label}-sessions`);
     if (asserting) {

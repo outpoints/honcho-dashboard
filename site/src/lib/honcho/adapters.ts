@@ -51,12 +51,33 @@ export function toApiPeer(p: Peer): ApiPeer {
   }, p.uid);
 }
 
+/**
+ * The SDK hands back a session's configuration in camelCase, with every known
+ * section present (often undefined) and unknown keys dropped. Put it back in
+ * the API's snake_case shape without the empty entries, so code that reads
+ * stored settings (`sessionSettings.ts`) sees what Honcho stores. Legacy keys
+ * (`deriver`, `skip_deriver`) are already gone; read the raw session for those.
+ */
+export function apiSessionConfiguration(config: unknown): Record<string, unknown> {
+  const convert = (value: unknown): unknown => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === undefined || entry === null) continue;
+      out[key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] = convert(entry);
+    }
+    return out;
+  };
+  const converted = convert(config);
+  return converted && typeof converted === "object" ? (converted as Record<string, unknown>) : {};
+}
+
 export function toApiSession(s: Session): ApiSession {
   return withUid({
     id: s.id,
     workspace_id: s.workspaceId,
     metadata: s.metadata ?? {},
-    configuration: (s.configuration as Record<string, unknown> | undefined) ?? {},
+    configuration: apiSessionConfiguration(s.configuration),
     is_active: s.isActive ?? true,
     created_at: s.createdAt ?? "",
     // SDK 2.8 sets `scopes` only on sessions listed with `includeScopes`.

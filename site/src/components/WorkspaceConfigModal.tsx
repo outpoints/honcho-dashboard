@@ -256,6 +256,9 @@ export function WorkspaceConfigModal({
         <div className="text-[11px] text-text-muted">
           editing config for{" "}
           <span className="text-accent font-mono">{workspace?.id}</span>
+          <span className="block text-[10px] mt-0.5">
+            Sessions inherit these unless they set their own. See a session&apos;s LEARNING tab on the Sessions page.
+          </span>
         </div>
         <PillTabs
           items={[
@@ -291,7 +294,7 @@ export function WorkspaceConfigModal({
               <Panel title="SHARED_INSTRUCTIONS" status="idle">
                 <InstructionsField
                   label="CUSTOM_INSTRUCTIONS"
-                  hint="Used by the deriver, summaries, dialectic chat, and dreams unless a section sets its own. Session settings override these."
+                  hint="Used by the deriver, summaries, dialectic chat, and dreams unless a section sets its own. A session can override any of these: open it on the Sessions page and choose LEARNING."
                   value={form.sharedInstructions}
                   onChange={(value) => update({ sharedInstructions: value })}
                   placeholder="(none)"

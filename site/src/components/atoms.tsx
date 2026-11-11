@@ -182,22 +182,28 @@ export function ToggleButton({
   children,
   onClick,
   className,
+  disabled,
+  title,
 }: {
   active?: boolean;
   children: React.ReactNode;
   onClick?: () => void;
   className?: string;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      disabled={disabled}
+      title={title}
       className={cn(
-        "px-2.5 h-7 text-[10px] uppercase tracking-wider transition-colors border",
+        "px-2.5 h-7 text-[10px] uppercase tracking-wider transition-colors border focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:opacity-40 disabled:cursor-not-allowed",
         active
           ? "bg-accent text-void border-accent"
-          : "bg-transparent text-text-muted border-border hover:text-text-primary hover:border-border-light",
+          : "bg-transparent text-text-muted border-border enabled:hover:text-text-primary enabled:hover:border-border-light",
         className,
       )}
     >

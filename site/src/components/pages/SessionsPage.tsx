@@ -15,6 +15,7 @@ import { SessionFileUploadModal } from "@/components/SessionFileUploadModal";
 import { ServerUid } from "@/components/ServerUid";
 import type { PeerKind } from "@/components/MessageLine";
 import { SessionTranscript } from "@/components/SessionTranscript";
+import { SessionLearning } from "@/components/SessionLearning";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
@@ -29,6 +30,7 @@ import { listAllSessions } from "@/lib/honcho/sessionListing";
 import { toApiSession, toApiPeer } from "@/lib/honcho/adapters";
 import type { ApiSession } from "@/lib/honcho/types";
 import type { HonchoClientOptions } from "@/lib/honcho/client";
+import { hasSessionOverrides, learningOff, resolveIntervals, resolveSwitches } from "@/lib/honcho/sessionSettings";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "active" | "idle" | "archived";
@@ -87,6 +89,14 @@ function deriveStatus(active: boolean, lastMessageAt: string | null): StatusFilt
 /** Scope filter value for sessions that belong to no scope. */
 const NO_SCOPE = "__no_scope__";
 
+type LearningFilter = "any" | "off" | "overrides";
+const LEARNING_OPTIONS: { value: LearningFilter; label: string }[] = [
+  { value: "any", label: "any" },
+  { value: "off", label: "conclusions off" },
+  { value: "overrides", label: "has session settings" },
+];
+type RowTab = "conversation" | "learning";
+
 export function SessionsPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
@@ -100,6 +110,7 @@ export function SessionsPage() {
   /** "all", NO_SCOPE, or a scope name (3.5+). */
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("recent");
+  const [learningFilter, setLearningFilter] = useState<LearningFilter>("any");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("__active__");
   const [open, setOpen] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
@@ -108,6 +119,13 @@ export function SessionsPage() {
   const wsList = useHonchoQuery("workspaces/list?size=100", (o) =>
     raw.workspaces.list(o, { size: 100 }),
   );
+
+  // Stored workspace settings, for what a session inherits. Undefined: unread.
+  const workspaceConfig = useMemo(() => {
+    const items = wsList.data?.items;
+    const map = new Map((items ?? []).map((w) => [w.id, w.configuration ?? {}] as const));
+    return (workspaceId: string): unknown | undefined => (items ? map.get(workspaceId) : undefined);
+  }, [wsList.data]);
 
   const targetWorkspaces = useMemo(() => {
     if (workspaceFilter === "all") return (wsList.data?.items ?? []).map((w) => w.id);
@@ -185,9 +203,11 @@ export function SessionsPage() {
         session: s,
         stat,
         status: deriveStatus(s.is_active, stat?.last_message_at ?? null),
+        learningOff: learningOff(s.configuration, workspaceConfig(s.workspace_id)),
+        overrides: hasSessionOverrides(s.configuration),
       };
     });
-  }, [data?.items, statsMap]);
+  }, [data?.items, statsMap, workspaceConfig]);
 
   // Scope names seen on the loaded sessions. Only sessions listed with
   // `include_scopes` carry `scopes`, so an empty list hides the filter.
@@ -203,6 +223,8 @@ export function SessionsPage() {
     const q = query.trim().toLowerCase();
     const list = decorated.filter((d) => {
       if (statusFilter !== "all" && d.status !== statusFilter) return false;
+      if (learningFilter === "off" && !d.learningOff) return false;
+      if (learningFilter === "overrides" && !d.overrides) return false;
       if (activeScopeFilter === NO_SCOPE && (d.session.scopes?.length ?? 0) > 0) return false;
       if (activeScopeFilter !== "all" && activeScopeFilter !== NO_SCOPE && !d.session.scopes?.includes(activeScopeFilter)) return false;
       if (q) {
@@ -238,7 +260,7 @@ export function SessionsPage() {
       }
     });
     return list;
-  }, [decorated, statusFilter, activeScopeFilter, query, sort]);
+  }, [decorated, statusFilter, learningFilter, activeScopeFilter, query, sort]);
 
   const remove = async (workspaceId: string, sid: string) => {
     if (!apiOpts) return;
@@ -327,6 +349,16 @@ export function SessionsPage() {
           </div>
         ) : null}
         <div className="flex items-center gap-2 text-xs">
+          <span className="text-text-muted">learning:</span>
+          <Select
+            value={learningFilter}
+            onChange={(v) => setLearningFilter(v as LearningFilter)}
+            options={LEARNING_OPTIONS}
+            className="min-w-[180px]"
+            triggerClassName="py-1.5"
+          />
+        </div>
+        <div className="flex items-center gap-2 text-xs">
           <span className="text-text-muted">sort:</span>
           <Select
             value={sort}
@@ -377,7 +409,7 @@ export function SessionsPage() {
       ) : filtered.length === 0 ? (
         <Panel title="NO_SESSIONS">
           <div className="text-xs text-text-muted py-4">
-            {query || statusFilter !== "all" || activeScopeFilter !== "all"
+            {query || statusFilter !== "all" || activeScopeFilter !== "all" || learningFilter !== "any"
               ? "No sessions match the filter."
               : "No sessions in this workspace yet."}
           </div>
@@ -399,6 +431,9 @@ export function SessionsPage() {
                   session={d.session}
                   stat={d.stat}
                   status={d.status}
+                  workspaceConfig={workspaceConfig(d.session.workspace_id)}
+                  learningOffSource={d.learningOff ? d.learningOff.source : null}
+                  overrides={d.overrides}
                   open={open === d.session.id}
                   onToggle={() => setOpen(open === d.session.id ? null : d.session.id)}
                   resolvePeerType={resolvePeerType}
@@ -450,6 +485,9 @@ function SessionRow({
   session,
   stat,
   status,
+  workspaceConfig,
+  learningOffSource,
+  overrides,
   open,
   onToggle,
   resolvePeerType,
@@ -463,6 +501,12 @@ function SessionRow({
   session: ApiSession;
   stat?: SessionStatRow;
   status: StatusFilter;
+  /** The workspace's stored settings, or undefined when unread. */
+  workspaceConfig: unknown | undefined;
+  /** Where "conclusions off" comes from, or null when they are on. */
+  learningOffSource: string | null;
+  /** The session stores settings of its own. */
+  overrides: boolean;
   open: boolean;
   onToggle: () => void;
   resolvePeerType: (workspaceId: string, peerId: string) => PeerType;
@@ -499,6 +543,7 @@ function SessionRow({
   const { enabled: canWrite } = useWriteActions();
   const [newPeer, setNewPeer] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  const [tab, setTab] = useState<RowTab>("conversation");
 
   // Dedupe by session key and depend ONLY on stable primitives. `useActiveHonchoOptions`
   // returns a fresh object every render, so depending on apiOpts re-runs this effect each
@@ -523,18 +568,18 @@ function SessionRow({
       setDetail((d) => ({ ...d, loading: true, error: undefined }));
       (async () => {
         try {
-          const ses = await getSdk(opts, session.workspace_id).session(session.id);
+          // Plain reads: the SDK's session(id) get-or-creates, and opening a row must never do that.
           // The conversation itself loads in SessionTranscript.
           const [summaries, sessionPeers] = await Promise.all([
-            ses.summaries().catch(() => null),
-            ses
-              .peers()
-              .then((items) => items.map((peer) => peer.id))
+            raw.sessions.summaries(opts, session.workspace_id, session.id).catch(() => null),
+            raw.sessions
+              .peers(opts, session.workspace_id, session.id, { size: 100 })
+              .then((page) => page.items.map((peer) => peer.id))
               .catch(() => fallbackPeersRef.current),
           ]);
           if (cancelled) return;
-          const short = summaries?.shortSummary ?? null;
-          const long = summaries?.longSummary ?? null;
+          const short = summaries?.short_summary ?? null;
+          const long = summaries?.long_summary ?? null;
           setDetail({
             loading: false,
             loaded: true,
@@ -542,10 +587,10 @@ function SessionRow({
             hasSummary: !!(short || long),
             summary: short?.content ?? long?.content ?? null,
             shortSummary: short
-              ? { content: short.content, tokenCount: short.tokenCount, createdAt: short.createdAt }
+              ? { content: short.content, tokenCount: short.token_count, createdAt: short.created_at }
               : null,
             longSummary: long
-              ? { content: long.content, tokenCount: long.tokenCount, createdAt: long.createdAt }
+              ? { content: long.content, tokenCount: long.token_count, createdAt: long.created_at }
               : null,
             error: undefined,
           });
@@ -561,7 +606,15 @@ function SessionRow({
   }, [detailVersion, open, session.id, session.workspace_id]);
 
   const peers = detail.loaded ? detail.peers : stat?.peers ?? [];
-  const configKeys = Object.keys(session.configuration ?? {}).length;
+  const summaryCadence = (() => {
+    const summaries = resolveSwitches(session.configuration, workspaceConfig).find((row) => row.key === "summary")!;
+    if (summaries.effective === false) {
+      return `Summaries are off for this session (set on the ${summaries.source === "session" ? "session" : "workspace"}). Change it on the LEARNING tab.`;
+    }
+    const { short, long } = resolveIntervals(session.configuration, workspaceConfig);
+    const every = (n: number | null, fallback: number) => (n === null ? `${fallback} (the shipped default)` : String(n));
+    return `Honcho writes a short summary every ${every(short.effective, 20)} messages and a long one every ${every(long.effective, 60)}. The LEARNING tab shows where these come from.`;
+  })();
   const created = new Date(session.created_at).toLocaleString();
   const lastMessage = stat?.last_message_at ? new Date(stat.last_message_at).toLocaleString() : "—";
   const statusTone = status === "active" ? "accent" : status === "idle" ? "yellow" : "muted";
@@ -679,6 +732,15 @@ function SessionRow({
                 SUMMARY
               </Chip>
             ) : null}
+            {learningOffSource ? (
+              <span title={`Honcho draws no conclusions from new messages here (set on the ${learningOffSource === "session" ? "session" : "workspace"}).`}>
+                <Chip tone="warn" icon="brain">LEARNING_OFF</Chip>
+              </span>
+            ) : overrides ? (
+              <span title="This session stores settings of its own. Open it and choose LEARNING.">
+                <Chip tone="muted" icon="settings">SESSION_SETTINGS</Chip>
+              </span>
+            ) : null}
             {/* Honcho 3.5+: the scopes this session is an active member of. */}
             {(session.scopes ?? []).map((name) => (
               <Chip key={name} tone="muted" icon="focus">
@@ -733,6 +795,25 @@ function SessionRow({
           >
             <div className="p-3 space-y-3">
               <ServerUid uid={session.uid} className="justify-start gap-3" />
+              <Tabs<RowTab>
+                items={[
+                  { key: "conversation", label: "CONVERSATION", icon: "message-square" },
+                  { key: "learning", label: "LEARNING", icon: "brain" },
+                ]}
+                current={tab}
+                onChange={setTab}
+                layoutId={`session-tab-${session.workspace_id}-${session.id}`}
+                ariaLabel={`Session ${session.id} view`}
+              />
+              {tab === "learning" ? (
+                <SessionLearning
+                  workspaceId={session.workspace_id}
+                  sessionId={session.id}
+                  workspaceConfig={workspaceConfig}
+                  onSaved={onDataChanged}
+                />
+              ) : (
+              <>
               <div>
                 <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">
                   SESSION_PEERS ({peers.length})
@@ -804,19 +885,14 @@ function SessionRow({
                   </div>
                 </div>
               ) : null}
+              </>
+              )}
 
               <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted pt-2 border-t border-border">
                 <span>
                   state:{" "}
                   <span className={session.is_active ? "text-accent" : "text-text-muted"}>
                     {session.is_active ? "active" : "inactive"}
-                  </span>
-                </span>
-                <span>|</span>
-                <span>
-                  config:{" "}
-                  <span className="text-text-primary">
-                    {configKeys ? `${configKeys} keys` : "default"}
                   </span>
                 </span>
                 <span>|</span>
@@ -917,8 +993,7 @@ function SessionRow({
           </div>
         ) : (
           <div className="mt-3 text-xs text-text-muted italic">
-            No summaries generated for this session yet. Summaries appear once the deriver runs summary
-            passes (controlled by the workspace summary config).
+            No summaries for this session yet. {summaryCadence}
           </div>
         )}
       </Modal>

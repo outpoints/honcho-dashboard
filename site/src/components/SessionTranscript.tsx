@@ -105,7 +105,7 @@ export function SessionTranscript({
     <div>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">
-          CONVERSATION{state.status === "ready" ? ` (${shown === state.total ? shown : `${shown} of ${state.total}`})` : ""}
+          MESSAGES{state.status === "ready" ? ` (${shown === state.total ? shown : `${shown} of ${state.total}`})` : ""}
         </span>
         {state.status === "ready" && shown > 0 ? (
           <span className="text-[10px] text-text-muted">Latest first. Select a line to read the whole message.</span>

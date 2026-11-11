@@ -23,6 +23,7 @@ import {
   type ApiPeer,
   type ApiQueueStatus,
   type ApiSession,
+  type ApiSessionSummaries,
   type ApiScope,
   type ApiWebhookEndpoint,
   type ApiWorkspace,
@@ -260,8 +261,36 @@ export const honcho = {
     list(opts: HonchoClientOptions, workspaceId: string, params: ListParams = {}) {
       return request<Page<ApiSession>>(opts, "POST", `${ws(workspaceId)}/sessions/list${listQuery(params)}`, listBody(params));
     },
+    /** Non-creating read of one session. Null when Honcho lists no active session by that id. */
+    async get(opts: HonchoClientOptions, workspaceId: string, sessionId: string): Promise<ApiSession | null> {
+      const page = await request<Page<ApiSession>>(opts, "POST", `${ws(workspaceId)}/sessions/list?page=1&size=2`, { filters: { id: sessionId } });
+      const matches = (page?.items ?? []).filter((item) => item?.id === sessionId);
+      return matches.length === 1 ? matches[0] : null;
+    },
+    /**
+     * `PUT /sessions/{id}` get-or-creates and merges top-level configuration
+     * keys. Callers confirm the session still exists first (`get`) and send
+     * whole sections (see `sessionSettings.ts`).
+     */
+    update(opts: HonchoClientOptions, workspaceId: string, sessionId: string, body: { configuration: Record<string, unknown> }) {
+      return request<ApiSession>(opts, "PUT", `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`, body);
+    },
+    /** Merges the flags sent. Adds the peer to the session if it isn't a member, so callers check membership. */
+    setPeerConfig(
+      opts: HonchoClientOptions,
+      workspaceId: string,
+      sessionId: string,
+      peerId: string,
+      body: { observe_me?: boolean; observe_others?: boolean },
+    ) {
+      return request<void>(opts, "PUT",
+        `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/peers/${encodeURIComponent(peerId)}/config`, body);
+    },
     peers(opts: HonchoClientOptions, workspaceId: string, sessionId: string, params: ListParams = {}) {
       return request<Page<ApiPeer>>(opts, "GET", `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/peers${listQuery(params)}`);
+    },
+    summaries(opts: HonchoClientOptions, workspaceId: string, sessionId: string) {
+      return request<ApiSessionSummaries>(opts, "GET", `${ws(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/summaries`);
     },
     peerConfig(opts: HonchoClientOptions, workspaceId: string, sessionId: string, peerId: string) {
       return request<{ observe_me?: boolean | null; observe_others?: boolean | null }>(opts, "GET",
@@ -301,8 +330,9 @@ export const honcho = {
 
   /** Keep the always-mounted shell from recreating a deleted active workspace. */
   queue: {
-    status(opts: HonchoClientOptions, workspaceId: string) {
-      return request<ApiQueueStatus>(opts, "GET", `${ws(workspaceId)}/queue/status`);
+    status(opts: HonchoClientOptions, workspaceId: string, filter: { sessionId?: string } = {}) {
+      const query = filter.sessionId ? `?session_id=${encodeURIComponent(filter.sessionId)}` : "";
+      return request<ApiQueueStatus>(opts, "GET", `${ws(workspaceId)}/queue/status${query}`);
     },
   },
 

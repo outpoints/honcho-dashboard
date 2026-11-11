@@ -165,6 +165,18 @@ section and keep keys the form does not show, then send `workspaceConfigBody`, w
 leaves cleared keys out on a replacing server and clears with `{}` or `""` otherwise
 (the `workspaceConfigReplace` capability decides). Shared and
 per-agent `custom_instructions` (3.3.0+) are gated by the `customInstructions` capability.
+Session settings and members' session flags go through `sessionSettings.ts` (pure, tested by
+`scripts/session-settings.test.mjs`). `PUT /sessions/{id}` get-or-creates and, on every supported
+version, merges top-level keys while replacing each section sent: send only changed sections rebuilt
+from the stored ones, re-read the session through the non-creating list read right before writing,
+and refuse the save when anything changed since the form loaded. A session's top-level
+`custom_instructions` cannot return to inherit once set. `PUT .../peers/{peer}/config` adds a
+non-member to the session and cannot clear a flag, so offer it only for current members, on or off.
+Never reach a session through the SDK's `session(id)` for reads or settings. The SDK's session list
+returns camelCase configuration without legacy keys; `toApiSession` converts it back, and anything
+that must see stored keys exactly reads the raw session. `DERIVED_ELSEWHERE` starts from a session's
+current conclusions, and Honcho keeps premise IDs after a premise is deleted, so it finds nothing once
+those are gone.
 Operator SQL skips rows whose `deleted_at` is set wherever the column exists (`liveRows`
 in `db.ts`). Failed deriver queue items exist only in the operator database: Honcho's
 queue status counts them as completed, so never show a failed count without the DB.

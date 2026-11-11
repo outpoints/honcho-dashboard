@@ -394,7 +394,8 @@ function PeerEditModal({ peer, open, onClose, onSaved }: { peer: ApiPeer; open: 
     if (!ok) return;
     setSaving(true);
     try {
-      // Peer-level config only meaningfully supports observe_me; reasoning is workspace-level.
+      // Peer-level config holds only observe_me. Sessions can override it per member, and
+      // whether Honcho draws conclusions at all is set per workspace and per session.
       const peerObj = await getSdk(apiOpts, peer.workspace_id).peer(peer.id);
       await peerObj.setConfiguration({ observeMe });
       await peerObj.setMetadata(parsed);
@@ -428,7 +429,7 @@ function PeerEditModal({ peer, open, onClose, onSaved }: { peer: ApiPeer; open: 
           checked={observeMe}
           onChange={setObserveMe}
           label="Observe me (enable reasoning about this peer)"
-          hint="When enabled, Honcho will reason over this peer's messages and build a representation (observe_me). Reasoning itself is configured at the workspace level."
+          hint="Honcho draws conclusions about this peer from its messages in every session (observe_me). A session can override this for one session on its LEARNING tab, and conclusions can be turned off for a whole workspace or a single session."
         />
         <div className="border-t border-border pt-4">
           <Field label="METADATA (JSON)" hint="Stored on the peer. Must be a JSON object.">
