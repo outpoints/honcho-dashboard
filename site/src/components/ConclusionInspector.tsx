@@ -7,6 +7,7 @@ import { Modal } from "@/components/Modal";
 import { Panel } from "@/components/Panel";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import { useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { getSdk } from "@/lib/honcho/sdk";
@@ -88,7 +89,7 @@ export function ConclusionInspector({ id, onClose, workspaceId: workspaceOverrid
                 : derived.error ? <ReadError error={derived.error} retry={derived.refetch} />
                 : derived.data?.items.length ? <div className="divide-y divide-border">{derived.data.items.map((item) => <ConclusionLink key={item.id} conclusion={item} onOpen={open} />)}</div>
                 : <p className="text-xs text-text-primary">No derived conclusions found.</p>}
-              <Pagination page={derivedPage} pages={derived.data?.pages ?? 1} onChange={setDerivedPage} />
+              <Pagination page={derivedPage} pages={derived.data?.pages ?? 1} total={derived.data?.total} onChange={setDerivedPage} />
             </Panel>
           </> : null}
       </div>
@@ -149,10 +150,12 @@ function ConclusionLink({ conclusion, onOpen }: { conclusion: ApiConclusion; onO
   </div>;
 }
 
-function Pagination({ page, pages, onChange }: { page: number; pages: number; onChange: (page: number) => void }) {
+/** `total` is the server's list total when the pages come from one (see `listTotals.ts`). */
+function Pagination({ page, pages, total, onChange }: { page: number; pages: number; total?: number; onChange: (page: number) => void }) {
+  const listTotal = useListTotal();
   return pages > 1 ? <div className="flex items-center justify-between gap-2 pt-3 text-[11px] text-text-primary">
     <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => onChange(page - 1)}>PREV</Button>
-    <span>page {page} / {pages}</span>
+    <span>page {page} / {total === undefined ? pages : listTotal.pages(page, pages, total)}</span>
     <Button size="sm" variant="ghost" disabled={page >= pages} onClick={() => onChange(page + 1)}>NEXT</Button>
   </div> : null;
 }

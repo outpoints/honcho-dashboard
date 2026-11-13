@@ -6,6 +6,8 @@ import {
   capabilityAtVersion,
   honcho35Capability,
   type Honcho35Feature,
+  honcho36Capability,
+  type Honcho36Feature,
   honcho31FromVersion,
   normalizeHonchoVersion,
   shouldProbeHoncho31,
@@ -58,6 +60,9 @@ export interface HonchoCapabilities {
   scopeSessionCounts: HonchoCapabilityState;
   scopeBulkRemove: HonchoCapabilityState;
   workspaceConfigReplace: HonchoCapabilityState;
+  /** 3.6.0 features, each detected from `/openapi.json` first (see HONCHO_36_FEATURES). */
+  dreamHistory: HonchoCapabilityState;
+  cappedListTotals: HonchoCapabilityState;
 }
 
 export function useHonchoCapabilities(): HonchoCapabilities {
@@ -106,9 +111,15 @@ export function useHonchoCapabilities(): HonchoCapabilities {
     scopeSessionCounts: at35("scopeSessionCounts"),
     scopeBulkRemove: at35("scopeBulkRemove"),
     workspaceConfigReplace: at35("workspaceConfigReplace"),
+    dreamHistory: at36("dreamHistory"),
+    cappedListTotals: at36("cappedListTotals"),
   };
 
   function at35(feature: Honcho35Feature): HonchoCapabilityState {
     return version.isLoading ? "checking" : honcho35Capability(version.data, version.rawVersion, feature);
+  }
+
+  function at36(feature: Honcho36Feature): HonchoCapabilityState {
+    return version.isLoading ? "checking" : honcho36Capability(version.data, version.rawVersion, feature);
   }
 }

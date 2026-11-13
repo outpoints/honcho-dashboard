@@ -13,6 +13,8 @@ import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { getSdk } from "@/lib/honcho/sdk";
 import { formatApiError, invalidate, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
+import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import type { ApiPeer } from "@/lib/honcho/types";
 import { cardWarnings, readsInline, structureCard, type CardGroup, type StructuredCard } from "@/lib/peerCard";
 import { useWriteActions } from "@/lib/writeActions";
@@ -101,6 +103,8 @@ function usePeerOverview(peer: ApiPeer): PeerOverview {
 
 function PeerActions({ peer, overview, onEdit }: { peer: ApiPeer; overview: PeerOverview; onEdit?: () => void }) {
   const { setWorkspaceId } = useActiveWorkspace();
+  const listTotal = useListTotal();
+  const { dreamHistory } = useHonchoCapabilities();
   const go = (route: string) => {
     setWorkspaceId(peer.workspace_id);
     window.location.hash = `#/${route}?peer=${encodeURIComponent(peer.id)}`;
@@ -108,13 +112,17 @@ function PeerActions({ peer, overview, onEdit }: { peer: ApiPeer; overview: Peer
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <Button variant="outline" size="sm" icon="git-branch" onClick={() => go("sessions")}>
-        SESSIONS{overview.sessions !== undefined ? <>{" "}<span className="text-text-muted ml-1 tabular-nums">{overview.sessions.toLocaleString()}</span></> : null}
+        SESSIONS{overview.sessions !== undefined ? <>{" "}<span className="text-text-muted ml-1 tabular-nums">{listTotal.format(overview.sessions)}</span></> : null}
       </Button>
       <Button variant="outline" size="sm" icon="message-square" onClick={() => go("messages")}>
         MESSAGES{overview.messages != null ? <>{" "}<span className="text-text-muted ml-1 tabular-nums">{overview.messages.toLocaleString()}</span></> : null}
       </Button>
       <Button variant="outline" size="sm" icon="file-search" onClick={() => go("context")}>CONTEXT</Button>
       <Button variant="outline" size="sm" icon="bot" onClick={() => go("chat")}>CHAT</Button>
+      {/* Representation History (Honcho 3.6+): the dreams about this peer. */}
+      {dreamHistory === "available" ? (
+        <Button variant="outline" size="sm" icon="history" onClick={() => go("dreams")}>DREAMS</Button>
+      ) : null}
       {onEdit ? <Button variant="ghost" size="sm" icon="settings" onClick={onEdit}>EDIT_PEER</Button> : null}
     </div>
   );

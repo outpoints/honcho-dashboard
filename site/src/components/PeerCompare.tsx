@@ -9,6 +9,7 @@ import { ServerUid } from "@/components/ServerUid";
 import { Icon } from "@/components/icons";
 import { honcho } from "@/lib/honcho/client";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import type { ApiPeer } from "@/lib/honcho/types";
 
 interface PeerRef {
@@ -52,6 +53,7 @@ function PeerColumn({ peer, uid }: { peer: PeerRef; uid?: string }) {
   const sessions = useHonchoQuery(`${base}/sessions`, (o) => honcho.peers.sessions(o, peer.workspaceId, peer.peerId, { size: 1 }));
   const about = useHonchoQuery(`${base}/about`, (o) =>
     honcho.conclusions.list(o, peer.workspaceId, { size: 1, filters: { observed_id: peer.peerId } }));
+  const listTotal = useListTotal();
 
   return (
     <div className="min-w-0 space-y-3 border border-border bg-void/30 p-3">
@@ -64,11 +66,11 @@ function PeerColumn({ peer, uid }: { peer: PeerRef; uid?: string }) {
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-text-muted tabular-nums">
           <span className="flex items-center gap-1">
             <Icon name="git-branch" size={10} />
-            {sessions.error ? "—" : sessions.data ? sessions.data.total.toLocaleString() : "…"} sessions
+            {sessions.error ? "—" : sessions.data ? listTotal.format(sessions.data.total) : "…"} sessions
           </span>
           <span className="flex items-center gap-1">
             <Icon name="brain" size={10} />
-            {about.error ? "—" : about.data ? about.data.total.toLocaleString() : "…"} conclusions about
+            {about.error ? "—" : about.data ? listTotal.format(about.data.total) : "…"} conclusions about
           </span>
         </div>
       </div>

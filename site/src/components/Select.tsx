@@ -21,6 +21,8 @@ export interface SelectProps<T extends string = string> {
   className?: string;
   triggerClassName?: string;
   panelClassName?: string;
+  /** Accessible name for the trigger when no visible label names it. */
+  ariaLabel?: string;
 }
 
 const panelVariants = {
@@ -49,6 +51,7 @@ export function Select<T extends string = string>({
   className,
   triggerClassName,
   panelClassName,
+  ariaLabel,
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false);
   const mounted = useIsClient();
@@ -114,6 +117,7 @@ export function Select<T extends string = string>({
         )}
         aria-haspopup="listbox"
         aria-expanded={effectiveOpen}
+        aria-label={ariaLabel}
       >
         <span
           className={cn(

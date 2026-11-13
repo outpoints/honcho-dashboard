@@ -61,6 +61,7 @@ Organized into four sections that mirror the sidebar.
 **Memory**
 
 - **Reasoning** — the deriver queue that builds peer representations: queued / processing / completed / failed tiles, expandable tasks with parsed and raw payloads, a task-type breakdown, and a config readout; filter by status / type, retry failed tasks, or schedule a dream.
+- **Dreams** — Honcho 3.6's Representation History, read as a diff. A summary line above the list says what needs a look on the loaded page (failed, possibly stuck, forgotten conclusions, changed peer cards, runs new since your last visit), and each count filters the list (`#/dreams?show=forgotten`). Runs that started together are grouped under their start time, one line each with `+added ~rewritten −forgotten` counts, so a conclusion lost outright never looks like a routine rewrite. A run shows its status only when it needs attention: failed, interrupted, running, or running far longer than the others (flagged as possibly stuck, with polling slowed), and changes of state are announced to screen readers. Open a run for its changes in risk order, FORGOTTEN, REWRITTEN, then ADDED (folded after five): a rewrite shows the new text over the old, each conclusion carries its level icon, its sources and INSPECT, and peer-card lines that changed value read as one change. A conclusion a later dream removed opens that dream with the conclusion marked, and every run has a copyable link (`#/dreams?run=<id>`). Filter by observer and observed peer. HOW_TO_READ explains the markers, levels, card, pruned and the stuck rule. A peer row's **DREAMS** opens its history. Requires Honcho 3.6.0+ and a workspace- or admin-level key.
 - **Context** — assemble LLM-ready context from a peer's card, conclusions, summaries, and messages, with a token budget, per-layer toggles, a live preview, and optional scope-backed representation/card recall.
 - **Chat** — memory-augmented dialectic chat with peer and workspace-wide modes, a mutually exclusive session/scope recall boundary, and a chosen reasoning level. Answers stream, with a typing indicator until the first words arrive (from Honcho 3.5 the answer usually arrives in one piece once Honcho has gathered its context); requested evidence arrives when the answer finishes. Opt into Honcho 3.2 evidence to inspect accessed conclusions, messages, tool calls, and the reasoning trace ID for each answer.
 
@@ -491,7 +492,7 @@ Limits to know about:
 
 Hash-based router inside `AppShell`, in sidebar order: `#/fleet`, `#/overview`, `#/instance`,
 `#/diagnostics`, `#/workspaces`, `#/peers`, `#/sessions`, `#/scopes`, `#/messages`, `#/search`, `#/conclusions`,
-`#/reasoning`, `#/context`, `#/chat`, `#/webhooks`, `#/integrations`, `#/config`.
+`#/reasoning`, `#/dreams`, `#/context`, `#/chat`, `#/webhooks`, `#/integrations`, `#/config`.
 `#/fleet` is the default landing route.
 
 ## Honcho version compatibility
@@ -513,7 +514,7 @@ Features introduced by Honcho 3.1 are capability-gated:
 - Network failures and other ambiguous responses fail conservatively: 3.1-only
   controls remain disabled without affecting older dashboard workflows.
 
-The dashboard uses `@honcho-ai/sdk` 2.8.0 for **Honcho 3.2.1–3.5.0** while
+The dashboard uses `@honcho-ai/sdk` 2.9.0 for **Honcho 3.2.1–3.6.1** while
 retaining the existing 3.0.x/3.1 workflows and 3.2.0 evidence/provenance. Conclusion responses retain optional
 `source_ids` (parent conclusion IDs) and `times_derived` attribution, including
 semantic-search results. On verified 3.2+ servers, **INCLUDE_EVIDENCE** collects
@@ -594,6 +595,21 @@ are left out instead of being sent as empty values. Sessions show their scopes a
 filter by scope, the Scopes registry counts sessions and removes members in bulk,
 and conclusions link to the messages they cite in both directions. Diagnostics knows
 the 3.5.0 schema head. Both 3.5.0 migrations only add a table and nullable columns.
+
+Honcho 3.6.1 support is covered by the
+[3.6.1 compatibility and upgrade guide](docs/HONCHO_3_6_1_VALIDATION.md). The
+dashboard moves to `@honcho-ai/sdk` 2.9.0 and adds **Dreams**, a page for 3.6's
+Representation History, detected from the server's schema like the 3.5 features.
+From 3.6, Honcho counts list totals only up to `PAGINATION_COUNT_LIMIT` (100,000 by
+default), so a larger total shows as **100,000+**. Deleting a conclusion or session
+on 3.6 also deletes its copy in dream history, and the confirmations say so.
+Diagnostics knows the 3.6 schema head, tells a stopped upgrade from a main-branch
+build, and checks the deriver's new `queue_item_batches` table and triggers (3.6
+refuses to start without them), the tenant-scoped message search indexes and their
+`btree_gin` dependency, and whether the operator database role can see every
+tenant's rows. The Reasoning page's token totals join messages by tenant and id,
+because 3.6 drops the index on message id alone. Upgrading from 3.5 runs 14
+migrations. Use 3.6.1, whose tenant migration no longer blocks reads and writes.
 
 For the **server upgrade**, apply Honcho's Alembic migrations using its deployment
 procedure before starting the upgraded services. The 3.2 tag adds the

@@ -8,14 +8,14 @@ import { Panel } from "@/components/Panel";
 import { DeriverBacklog } from "@/components/DeriverBacklog";
 import { useDeriverMetrics } from "@/lib/honcho/useDeriverMetrics";
 import { StatusBar } from "@/components/StatusBar";
-import { Button, Chip, Field, StatTile, TextInput, RefreshButton } from "@/components/atoms";
-import { Modal } from "@/components/Modal";
+import { Button, Chip, StatTile, RefreshButton } from "@/components/atoms";
+import { ScheduleDreamModal } from "@/components/ScheduleDreamModal";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { useConfirm } from "@/components/confirm";
 import { useWriteActions } from "@/lib/writeActions";
-import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
+import { useActiveWorkspace } from "@/lib/honcho/config";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import { useOperatorQuery } from "@/lib/operator/client";
 import type { RuntimeInfo } from "@/lib/operator/runtime-types";
@@ -67,7 +67,6 @@ interface ConclusionsResp {
 }
 
 export function ReasoningPage() {
-  const apiOpts = useActiveHonchoOptions();
   const { workspaceId } = useActiveWorkspace();
   const { push } = useToast();
   const confirm = useConfirm();
@@ -82,12 +81,9 @@ export function ReasoningPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
-  // Schedule-dream modal.
+  // Schedule-dream modal. A new key on each open starts it from blank fields.
   const [dreamOpen, setDreamOpen] = useState(false);
-  const [dreamObserver, setDreamObserver] = useState("");
-  const [dreamObserved, setDreamObserved] = useState("");
-  const [dreamSession, setDreamSession] = useState("");
-  const [dreamBusy, setDreamBusy] = useState(false);
+  const [dreamKey, setDreamKey] = useState(0);
 
   // Retry (re-queue) a failed task via the operator DB write path.
   const [retryBusy, setRetryBusy] = useState(false);
@@ -126,9 +122,7 @@ export function ReasoningPage() {
   );
 
   const openDream = () => {
-    setDreamObserver("");
-    setDreamObserved("");
-    setDreamSession("");
+    setDreamKey((k) => k + 1);
     setDreamOpen(true);
   };
 
@@ -151,48 +145,9 @@ export function ReasoningPage() {
   useEffect(() => {
     if (!canWrite || !workspaceId || !/[?&]dream=1(?:&|$)/.test(window.location.hash)) return;
     window.history.replaceState(null, "", "#/reasoning");
-    setDreamObserver("");
-    setDreamObserved("");
-    setDreamSession("");
+    setDreamKey((k) => k + 1);
     setDreamOpen(true);
   }, [canWrite, workspaceId]);
-
-  const submitDream = async () => {
-    if (!apiOpts || !workspaceId) return;
-    const observer = dreamObserver.trim();
-    if (!observer) {
-      push({ type: "error", message: "Observer peer id is required" });
-      return;
-    }
-    const ok = await confirm({
-      title: "SCHEDULE_DREAM",
-      confirmLabel: "SCHEDULE",
-      body: (
-        <>
-          Queue a dream consolidation pass for{" "}
-          <span className="text-accent font-mono">{observer}</span> in{" "}
-          <span className="text-accent font-mono">{workspaceId}</span> on the live instance?
-        </>
-      ),
-    });
-    if (!ok) return;
-    setDreamBusy(true);
-    try {
-      await getSdk(apiOpts, workspaceId).scheduleDream({
-        observer,
-        ...(dreamObserved.trim() ? { observed: dreamObserved.trim() } : {}),
-        ...(dreamSession.trim() ? { session: dreamSession.trim() } : {}),
-      });
-      push({ type: "success", message: `Dream scheduled for ${observer}` });
-      setDreamOpen(false);
-      reasoning.refetch();
-      queue.refetch();
-    } catch (err) {
-      push({ type: "error", message: formatApiError(err) });
-    } finally {
-      setDreamBusy(false);
-    }
-  };
 
   const doRetry = async (target: ReasoningTaskRow) => {
     if (!workspaceId || retryBusy) return;
@@ -498,51 +453,15 @@ export function ReasoningPage() {
 
       <StatusBar />
 
-      <Modal
-        title="SCHEDULE_DREAM"
+      <ScheduleDreamModal
+        key={dreamKey}
         open={dreamOpen}
         onClose={() => setDreamOpen(false)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setDreamOpen(false)} disabled={dreamBusy}>
-              CANCEL
-            </Button>
-            <Button variant="primary" onClick={submitDream} disabled={dreamBusy}>
-              {dreamBusy ? "SCHEDULING…" : "SCHEDULE"}
-            </Button>
-          </>
-        }
-      >
-        <div className="text-[11px] text-text-muted">
-          Queues a consolidation pass over a peer&apos;s representation in{" "}
-          <span className="text-accent font-mono">{workspaceId}</span>.
-        </div>
-        <Field label="OBSERVER" hint="Peer whose representation gets dreamed on. Required.">
-          <TextInput
-            autoFocus
-            placeholder="e.g., peer_alice_001"
-            value={dreamObserver}
-            onChange={(e) => setDreamObserver(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !dreamBusy) submitDream();
-            }}
-          />
-        </Field>
-        <Field label="OBSERVED" hint="Optional — dream on this peer's representation from the observer's perspective.">
-          <TextInput
-            placeholder="(optional)"
-            value={dreamObserved}
-            onChange={(e) => setDreamObserved(e.target.value)}
-          />
-        </Field>
-        <Field label="SESSION" hint="Optional — scope the dream to a single session.">
-          <TextInput
-            placeholder="(optional)"
-            value={dreamSession}
-            onChange={(e) => setDreamSession(e.target.value)}
-          />
-        </Field>
-      </Modal>
+        onScheduled={() => {
+          reasoning.refetch();
+          queue.refetch();
+        }}
+      />
     </div>
   );
 }

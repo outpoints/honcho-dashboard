@@ -14,8 +14,9 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "messages", label: "MESSAGES", icon: "message-square", section: "explore" },
   { key: "search", label: "SEARCH", icon: "search", section: "explore" },
   { key: "conclusions", label: "CONCLUSIONS", icon: "sparkles", section: "explore" },
-  // The memory pipeline: derive → assemble → query.
+  // The memory pipeline: derive → consolidate → assemble → query.
   { key: "reasoning", label: "REASONING", icon: "brain", section: "memory" },
+  { key: "dreams", label: "DREAMS", icon: "history", section: "memory" },
   { key: "context", label: "CONTEXT", icon: "file-search", section: "memory" },
   { key: "chat", label: "CHAT", icon: "bot", section: "memory" },
   // Configuration & integration.

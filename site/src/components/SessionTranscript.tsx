@@ -6,6 +6,7 @@ import { MessageLine, MessageLineHeader, type PeerKind } from "@/components/Mess
 import { honcho, type HonchoClientOptions } from "@/lib/honcho/client";
 import type { ApiMessage } from "@/lib/honcho/types";
 import { formatApiError } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import { peerColumnWidth } from "@/lib/messageStream";
 import { appendOlder, TRANSCRIPT_PAGE } from "@/lib/sessionTranscript";
 
@@ -46,6 +47,7 @@ export function SessionTranscript({
   const [state, setState] = useState<TranscriptState>({ status: "loading", newestFirst: [], total: 0, nextPage: null });
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
+  const listTotal = useListTotal();
 
   useEffect(() => {
     if (!apiOpts) return;
@@ -105,7 +107,7 @@ export function SessionTranscript({
     <div>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">
-          MESSAGES{state.status === "ready" ? ` (${shown === state.total ? shown : `${shown} of ${state.total}`})` : ""}
+          MESSAGES{state.status === "ready" ? ` (${shown === state.total ? shown : `${shown} of ${listTotal.format(state.total)}`})` : ""}
         </span>
         {state.status === "ready" && shown > 0 ? (
           <span className="text-[10px] text-text-muted">Latest first. Select a line to read the whole message.</span>
@@ -152,7 +154,7 @@ export function SessionTranscript({
           {older > 0 ? (
             <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-t border-border">
               <Button size="sm" variant="ghost" icon="chevron-down" onClick={loadOlder} disabled={loadingOlder}>
-                {loadingOlder ? "LOADING…" : `LOAD_MORE (${older})`}
+                {loadingOlder ? "LOADING…" : listTotal.isLowerBound(state.total) ? "LOAD_MORE" : `LOAD_MORE (${older})`}
               </Button>
               {olderError ? (
                 <span role="alert" className="text-[10px] text-red-400 break-words">{olderError}</span>

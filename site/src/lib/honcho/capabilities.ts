@@ -114,3 +114,22 @@ export function honcho35Capability(openapi: unknown, rawVersion: string | undefi
   if (schemaHas(openapi, HONCHO_35_FEATURES[feature])) return "available";
   return capabilityAtVersion(rawVersion, [3, 5, 0]);
 }
+
+/**
+ * Honcho 3.6.0 features, detected the same way as HONCHO_35_FEATURES: schema
+ * evidence first (a main-branch build reports the last tag), then a released
+ * 3.6.0 or later. 3.6.1 changes no API.
+ */
+export const HONCHO_36_FEATURES = {
+  /** Representation History: `POST /dreams/list` and `GET /dreams/{run_id}` (#1542). */
+  dreamHistory: { model: "DreamRunDetail" },
+  /** List totals counted up to `PAGINATION_COUNT_LIMIT`, then reported as that limit plus one (#1500). */
+  cappedListTotals: { model: "Page_Conclusion_", property: "total", description: /PAGINATION_COUNT_LIMIT/ },
+} as const;
+
+export type Honcho36Feature = keyof typeof HONCHO_36_FEATURES;
+
+export function honcho36Capability(openapi: unknown, rawVersion: string | undefined, feature: Honcho36Feature): HonchoCapabilityState {
+  if (schemaHas(openapi, HONCHO_36_FEATURES[feature])) return "available";
+  return capabilityAtVersion(rawVersion, [3, 6, 0]);
+}

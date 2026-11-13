@@ -130,9 +130,9 @@ test("server versions map to the release migration heads", () => {
   assert.equal(expectedHeadIndex("3.3.0"), 3);
   assert.equal(expectedHeadIndex("3.4.0"), 4);
   assert.equal(expectedHeadIndex("3.4.2"), 4);
-  // 3.5.0 is mapped now (honcho35.test.mjs); a later minor is still unknown.
+  // 3.5.0 and 3.6.0 are mapped now (honcho35/36 tests); a later minor is still unknown.
   assert.equal(expectedHeadIndex("3.5.0"), 5);
-  assert.equal(expectedHeadIndex("3.6.0"), null);
+  assert.equal(expectedHeadIndex("3.7.0"), null);
   assert.equal(expectedHeadIndex("garbage"), null);
 });
 
@@ -148,7 +148,7 @@ test("revision probe separates current, pending, compatible rollback, and unknow
   assert.equal(revisionProbe(facts({ revision: "3e7a1c9d5b20" }), "3.2.2").status, "warn");
   assert.equal(revisionProbe(facts({ revision: "ffffffffffff" }), "3.4.0").status, "skip");
   assert.equal(revisionProbe(facts({ revision: null }), "3.4.0").status, "skip");
-  assert.match(revisionProbe(facts(), "3.6.0").message, /Honcho 3\.4\.0–3\.4\.1 schema/);
+  assert.match(revisionProbe(facts(), "3.7.0").message, /Honcho 3\.4\.0–3\.4\.1 schema/);
   assert.match(revisionProbe(facts({ revision: "e4eba9cfaa6f" }), null).message, /3\.0\.12–3\.1\.2/);
 });
 

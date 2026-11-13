@@ -1,7 +1,12 @@
 import "server-only";
 import { Pool } from "pg";
 import { webhookQueueStatus, type WebhookQueueStatus } from "./webhookStatus";
-import { QUEUE_PENDING_INDEXES, type SchemaFacts } from "./schemaHealth";
+import {
+  MESSAGE_SEARCH_INDEX_NAMES,
+  QUEUE_BATCH_TRIGGERS,
+  QUEUE_PENDING_INDEXES,
+  type SchemaFacts,
+} from "./schemaHealth";
 import { operatorPoolTarget, withReadOnlyFallback, type OperatorPool, type OperatorPoolTarget } from "./pool";
 import { operatorWritesEnabled } from "./writes";
 
@@ -43,10 +48,24 @@ function getPool(): OperatorPool | null {
  * live in `documents`. Query writers should call `tableExists()` and degrade
  * gracefully when a table is missing.
  */
-const tableCache = new Map<string, boolean>();
+/**
+ * Table and column checks are cached for a few minutes, not forever: Honcho
+ * upgrades add columns (3.5 `deleted_at`, 3.6 `tenant_id`) while the dashboard
+ * keeps running, and a stale miss would keep the pre-upgrade query.
+ */
+const SCHEMA_CACHE_MS = 5 * 60_000;
+type SchemaCacheEntry = { value: boolean; at: number };
+
+function cachedFact(cache: Map<string, SchemaCacheEntry>, key: string): boolean | undefined {
+  const hit = cache.get(key);
+  return hit && Date.now() - hit.at < SCHEMA_CACHE_MS ? hit.value : undefined;
+}
+
+const tableCache = new Map<string, SchemaCacheEntry>();
 
 async function tableExists(p: OperatorPool, table: string): Promise<boolean> {
-  if (tableCache.has(table)) return tableCache.get(table)!;
+  const hit = cachedFact(tableCache, table);
+  if (hit !== undefined) return hit;
   try {
     const r = await p.query<{ exists: boolean }>(
       `SELECT EXISTS (
@@ -57,7 +76,7 @@ async function tableExists(p: OperatorPool, table: string): Promise<boolean> {
       [table],
     );
     const exists = !!r.rows[0]?.exists;
-    tableCache.set(table, exists);
+    tableCache.set(table, { value: exists, at: Date.now() });
     return exists;
   } catch {
     return false;
@@ -179,7 +198,8 @@ export async function dbStats(): Promise<DbStats> {
 /**
  * Catalog facts for the migration probes (`schemaHealth.ts`). Read-only: the
  * alembic revision, indexes Postgres marks INVALID, the 3.4.0 partial queue
- * indexes, and whether `btree_gin` is installed.
+ * indexes, the 3.6.0 message search indexes, the deriver's claim table and
+ * triggers, the extensions they need, and how many tenants this role sees.
  */
 export async function dbSchemaFacts(): Promise<
   ({ available: true } & SchemaFacts) | { available: false; reason: string }
@@ -194,7 +214,7 @@ export async function dbSchemaFacts(): Promise<
         LIMIT 1`,
     );
     const schema = versionTable.rows[0]?.schema;
-    const [revision, invalid, queueIndexes, btreeGin] = await Promise.all([
+    const [revision, invalid, indexes, extensions, tenantColumn, batchTable, batchTriggers] = await Promise.all([
       schema
         ? p.query<{ version_num: string }>(
             `SELECT version_num FROM "${schema.replaceAll('"', '""')}".alembic_version LIMIT 1`,
@@ -209,20 +229,63 @@ export async function dbSchemaFacts(): Promise<
             AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
           ORDER BY c.relname`,
       ),
+      // Partitioned parents are relkind 'I'.
       p.query<{ name: string }>(
         `SELECT c.relname AS name
            FROM pg_class c
-          WHERE c.relkind = 'i' AND c.relname = ANY($1::text[])`,
-        [[...QUEUE_PENDING_INDEXES]],
+          WHERE c.relkind IN ('i', 'I') AND c.relname = ANY($1::text[])`,
+        [[...QUEUE_PENDING_INDEXES, ...MESSAGE_SEARCH_INDEX_NAMES]],
       ),
-      p.query(`SELECT 1 FROM pg_extension WHERE extname = 'btree_gin'`),
+      p.query<{ extname: string }>(`SELECT extname FROM pg_extension WHERE extname IN ('btree_gin', 'pg_trgm')`),
+      // Read directly, not through columnExists: its cache would outlive an upgrade.
+      p.query(
+        `SELECT 1 FROM information_schema.columns
+          WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+            AND table_name = 'workspaces' AND column_name = 'tenant_id'`,
+      ),
+      p.query(`SELECT 1 FROM pg_class WHERE relname = 'queue_item_batches' AND relkind IN ('r', 'p')`),
+      p.query<{ name: string }>(
+        `SELECT t.tgname AS name
+           FROM pg_trigger t
+           JOIN pg_class c ON c.oid = t.tgrelid
+          WHERE c.relname = 'queue' AND NOT t.tgisinternal AND t.tgname = ANY($1::text[])`,
+        [[...QUEUE_BATCH_TRIGGERS]],
+      ),
     ]);
+    const indexNames = indexes.rows.map((row) => row.name);
+    const installed = new Set(extensions.rows.map((row) => row.extname));
+    const tenantIdColumn = (tenantColumn.rowCount ?? 0) > 0;
+    let tenantCount: number | null = null;
+    let rowSecurityHidesRows = false;
+    if (tenantIdColumn) {
+      // An owner bypasses its own table's RLS unless it is forced.
+      const [tenants, rls] = await Promise.all([
+        p.query<{ n: string }>(`SELECT count(DISTINCT tenant_id)::bigint AS n FROM workspaces`),
+        p.query<{ hidden: boolean }>(
+          `SELECT c.relrowsecurity
+                  AND NOT (r.rolbypassrls OR r.rolsuper)
+                  AND (c.relforcerowsecurity OR c.relowner <> r.oid) AS hidden
+             FROM pg_class c, pg_roles r
+            WHERE c.relname = 'workspaces' AND c.relkind IN ('r', 'p') AND r.rolname = current_user
+            LIMIT 1`,
+        ),
+      ]);
+      tenantCount = Number(tenants.rows[0]?.n ?? 0);
+      rowSecurityHidesRows = rls.rows[0]?.hidden === true;
+    }
     return {
       available: true,
       revision: revision.rows[0]?.version_num ?? null,
       invalidIndexes: invalid.rows.map((row) => row.name),
-      presentQueueIndexes: queueIndexes.rows.map((row) => row.name),
-      btreeGin: (btreeGin.rowCount ?? 0) > 0,
+      presentQueueIndexes: indexNames.filter((name) => (QUEUE_PENDING_INDEXES as readonly string[]).includes(name)),
+      btreeGin: installed.has("btree_gin"),
+      pgTrgm: installed.has("pg_trgm"),
+      presentMessageSearchIndexes: indexNames.filter((name) => MESSAGE_SEARCH_INDEX_NAMES.includes(name)),
+      tenantIdColumn,
+      queueBatchTable: (batchTable.rowCount ?? 0) > 0,
+      queueBatchTriggers: batchTriggers.rows.map((row) => row.name),
+      tenantCount,
+      rowSecurityHidesRows,
     };
   } catch (err) {
     return { available: false, reason: err instanceof Error ? err.message : String(err) };
@@ -661,7 +724,22 @@ export async function dbReasoningTasks(
     const hasWorkUnitKey = await columnExists(p, "queue", "work_unit_key");
     const canJoinTokens =
       hasMsgId && (await tableExists(p, "messages")) && (await columnExists(p, "messages", "token_count"));
-    const join = canJoinTokens ? "LEFT JOIN messages m ON m.id = q.message_id" : "";
+    // Honcho 3.6 keys messages by (tenant_id, id) and drops the index on id
+    // alone, so an id-only join reads every message on each poll. Single-tenant
+    // queue rows carry no tenant; their messages carry the workspace's.
+    const tenantKeyed =
+      canJoinTokens &&
+      qWs === "workspace_name" &&
+      (await columnExists(p, "messages", "tenant_id")) &&
+      (await columnExists(p, "queue", "tenant_id")) &&
+      (await columnExists(p, "workspaces", "tenant_id"));
+    const join = !canJoinTokens
+      ? ""
+      : tenantKeyed
+        ? `LEFT JOIN messages m
+             ON m.tenant_id = coalesce(q.tenant_id, (SELECT w.tenant_id FROM workspaces w WHERE w.name = $1 LIMIT 1))
+            AND m.id = q.message_id`
+        : "LEFT JOIN messages m ON m.id = q.message_id";
     const tokExpr = canJoinTokens ? "coalesce(m.token_count, 0)" : "0";
     const processedCol = hasProcessed ? "q.processed" : "false";
     const errorCol = hasError ? "q.error" : "NULL::text";
@@ -1156,7 +1234,7 @@ export async function dbPeerSummaries(
   }
 }
 
-const columnCache = new Map<string, boolean>();
+const columnCache = new Map<string, SchemaCacheEntry>();
 
 /** Return the first column from `candidates` that exists on `table`, else null. */
 async function pickColumn(p: OperatorPool, table: string, candidates: string[]): Promise<string | null> {
@@ -1169,9 +1247,10 @@ async function pickColumn(p: OperatorPool, table: string, candidates: string[]):
 /**
  * `deleted_at IS NULL` where the table has Honcho's tombstone column, else
  * `TRUE`. Conclusions (documents) have had it for a while; 3.5.0 adds it to
- * workspaces, peers, sessions and messages, though nothing sets it yet. This
- * checks the row's own tombstone only. Honcho's reads also hide a message
- * whose session, peer or workspace is tombstoned; revisit when deletion ships.
+ * workspaces, peers, sessions and messages, though nothing sets it yet (3.6
+ * still doesn't). This checks the row's own tombstone only. Honcho's reads
+ * (3.6 for conclusions and dream history too) also hide a row whose session,
+ * peer or workspace is tombstoned; revisit when deletion ships.
  */
 async function liveRows(p: OperatorPool, table: string): Promise<string> {
   return (await columnExists(p, table, "deleted_at")) ? "deleted_at IS NULL" : "TRUE";
@@ -1179,7 +1258,8 @@ async function liveRows(p: OperatorPool, table: string): Promise<string> {
 
 async function columnExists(p: OperatorPool, table: string, column: string): Promise<boolean> {
   const key = `${table}.${column}`;
-  if (columnCache.has(key)) return columnCache.get(key)!;
+  const hit = cachedFact(columnCache, key);
+  if (hit !== undefined) return hit;
   try {
     const r = await p.query<{ exists: boolean }>(
       `SELECT EXISTS (
@@ -1190,7 +1270,7 @@ async function columnExists(p: OperatorPool, table: string, column: string): Pro
       [table, column],
     );
     const exists = !!r.rows[0]?.exists;
-    columnCache.set(key, exists);
+    columnCache.set(key, { value: exists, at: Date.now() });
     return exists;
   } catch {
     return false;

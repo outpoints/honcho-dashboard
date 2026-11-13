@@ -14,6 +14,7 @@ import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config"
 import { getSdk } from "@/lib/honcho/sdk";
 import { toApiQueueStatus, toApiSession } from "@/lib/honcho/adapters";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import { useOperatorQuery } from "@/lib/operator/client";
 import { buildHeatmapDays, HEATMAP_WEEKS } from "@/lib/heatmap";
 import type { ApiQueueStatus, ApiSession } from "@/lib/honcho/types";
@@ -67,6 +68,7 @@ export function OverviewPage() {
   const { navigate } = useNav();
   const { workspaceId } = useActiveWorkspace();
   const apiOpts = useActiveHonchoOptions();
+  const listTotal = useListTotal();
   const [timeframe, setTimeframe] = useState<Timeframe>("24H");
   const [visible, setVisible] = useState({ reads: true, writes: true, deletes: false });
   const [updated, setUpdated] = useState<string>("");
@@ -160,13 +162,13 @@ export function OverviewPage() {
         <StatTile
           delay={0}
           label="peers"
-          value={aggLoading ? "…" : peersAgg.data?.total?.toLocaleString() ?? "—"}
+          value={aggLoading ? "…" : (peersAgg.data?.total !== undefined ? listTotal.format(peersAgg.data.total) : "—")}
           hint={<><Icon name="users" size={10} /> in {workspaceId ?? "—"}</>}
         />
         <StatTile
           delay={0.05}
           label="sessions"
-          value={aggLoading ? "…" : sessionsAgg.data?.total?.toLocaleString() ?? "—"}
+          value={aggLoading ? "…" : (sessionsAgg.data?.total !== undefined ? listTotal.format(sessionsAgg.data.total) : "—")}
           hint={<><Icon name="git-branch" size={10} /> in workspace</>}
         />
         <StatTile
@@ -178,7 +180,7 @@ export function OverviewPage() {
         <StatTile
           delay={0.15}
           label="conclusions"
-          value={aggLoading ? "…" : conclusionsAgg.data?.total?.toLocaleString() ?? "—"}
+          value={aggLoading ? "…" : (conclusionsAgg.data?.total !== undefined ? listTotal.format(conclusionsAgg.data.total) : "—")}
           hint={<><Icon name="file-search" size={10} /> in workspace</>}
         />
       </div>
@@ -261,7 +263,7 @@ export function OverviewPage() {
               onClick={() => navigate("workspaces")}
             />
             <SmallStat
-              value={peersAgg.data?.total?.toLocaleString() ?? "—"}
+              value={(peersAgg.data?.total !== undefined ? listTotal.format(peersAgg.data.total) : "—")}
               label="PEERS"
               delay={0.28}
               onClick={() => navigate("peers")}

@@ -9,6 +9,7 @@ export type RouteKey =
   | "search"
   | "conclusions"
   | "reasoning"
+  | "dreams"
   | "context"
   | "chat"
   | "webhooks"

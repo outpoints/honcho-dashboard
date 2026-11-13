@@ -101,7 +101,7 @@ export function SessionsPage() {
   const apiOpts = useActiveHonchoOptions();
   const { workspaceId: activeWorkspaceId } = useActiveWorkspace();
   const { push } = useToast();
-  const { scopedSessionClone, sessionScopes } = useHonchoCapabilities();
+  const { scopedSessionClone, sessionScopes, dreamHistory } = useHonchoCapabilities();
   // Honcho 3.5+: the session list reports each session's scopes in the same query.
   const includeScopes = sessionScopes === "available";
 
@@ -462,6 +462,12 @@ export function SessionsPage() {
           <>
             This will remove <span className="text-accent">{removeTargetEntry?.session.id}</span> and
             all its associated messages. This cannot be undone.
+            {dreamHistory === "available" ? (
+              <span className="block mt-2">
+                Dream history keeps no copy of this session&apos;s conclusions: dreams that created or removed them will
+                list them as unavailable.
+              </span>
+            ) : null}
           </>
         }
         confirmLabel="REMOVE_SESSION"

@@ -10,6 +10,7 @@ import { honcho } from "@/lib/honcho/client";
 import { useActiveHonchoOptions, useActiveWorkspace } from "@/lib/honcho/config";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import type { ApiQueueStatus } from "@/lib/honcho/types";
 import type { InstructionKey, Instructions } from "@/lib/honcho/workspaceConfig";
 import {
@@ -103,6 +104,7 @@ export function SessionLearning({
     (o) => honcho.queue.status(o, workspaceId, { sessionId }),
     { refreshInterval: (d) => (d && d.pending_work_units + d.in_progress_work_units > 0 ? 5000 : undefined) },
   );
+  const listTotal = useListTotal();
   const stored = useHonchoQuery(
     `conclusions/list/${workspaceId}/session/${sessionId}/count`,
     (o) => honcho.conclusions.list(o, workspaceId, { page: 1, size: 1, filters: { session_id: sessionId } }),
@@ -462,7 +464,7 @@ export function SessionLearning({
             <div className="h-4 w-40 bg-border/40 animate-pulse" />
           ) : (
             <div className="text-[11px] text-text-primary tabular-nums">
-              {(stored.data.total ?? stored.data.items.length).toLocaleString()} filed under this session
+              {listTotal.format(stored.data.total ?? stored.data.items.length)} filed under this session
             </div>
           )}
           <p className="text-[10px] text-text-muted leading-relaxed">

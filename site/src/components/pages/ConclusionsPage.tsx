@@ -14,6 +14,7 @@ import { ConclusionTrashPanel } from "@/components/ConclusionTrashPanel";
 import { TRASH_LIMIT, trashScope, useConclusionTrash } from "@/lib/conclusionTrash";
 import { HonchoFeatureNotice } from "@/components/HonchoFeatureNotice";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import { Select } from "@/components/Select";
 import { Icon } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -84,7 +85,8 @@ function ConclusionsSession() {
   const [createOpen, setCreateOpen] = useState(false);
   const [inspected, setInspected] = useState<string | null>(null);
   const [source, setSource] = useState<ConclusionSource>("all");
-  const { provenance, scopes: scopesCapability } = useHonchoCapabilities();
+  const { provenance, scopes: scopesCapability, dreamHistory } = useHonchoCapabilities();
+  const listTotal = useListTotal();
   const trash = useConclusionTrash(apiOpts && workspaceId ? trashScope(apiOpts.baseUrl, workspaceId) : null);
 
   // Scope copies only exist on 3.1+ servers with scopes; the list key matches ScopesPage's.
@@ -169,6 +171,12 @@ function ConclusionsSession() {
           <span className="text-accent font-mono">{c.observed_id}</span> on the live instance? Honcho
           deletes it permanently. A copy stays in this tab&apos;s TRASH so you can recreate it as a new
           explicit conclusion.
+          {dreamHistory === "available" ? (
+            <span className="block mt-2">
+              Honcho also deletes its copy in dream history, so a dream that created or removed it lists it as unavailable.
+              A restored copy is a new conclusion and is not linked back.
+            </span>
+          ) : null}
         </>
       ),
     });
@@ -230,6 +238,12 @@ function ConclusionsSession() {
           them permanently, one at a time. This tab&apos;s TRASH keeps a copy of each
           {list.length > TRASH_LIMIT ? `, up to the newest ${TRASH_LIMIT}` : ""} so you can recreate it as a new explicit
           conclusion. Derived conclusions that cite these are not deleted with them.
+          {dreamHistory === "available" ? (
+            <span className="block mt-2">
+              Honcho also deletes their copies in dream history, so dreams that created or removed them list them as
+              unavailable.
+            </span>
+          ) : null}
           {sessionFilter && provenance === "available" && derivedFor !== sessionFilter ? (
             <span className="block mt-2 text-yellow-400">
               Run FIND_DERIVED first. It starts from this session&apos;s conclusions, so once they are deleted it can&apos;t
@@ -374,7 +388,7 @@ function ConclusionsSession() {
         actions={
           !searching && results.data ? (
             <span className="text-[10px] text-text-muted">
-              {(results.data.total ?? items.length).toLocaleString()} total
+              {listTotal.format(results.data.total ?? items.length)} total
             </span>
           ) : undefined
         }
@@ -419,7 +433,7 @@ function ConclusionsSession() {
             />
             {sessionFilter && !searching ? (
               <Button variant="ghost" size="sm" onClick={selectAllInSession} disabled={selectingAll || !!bulk}>
-                {selectingAll ? "SELECTING…" : `SELECT_ALL_IN_SESSION (${(results.data?.total ?? items.length).toLocaleString()})`}
+                {selectingAll ? "SELECTING…" : `SELECT_ALL_IN_SESSION (${listTotal.format(results.data?.total ?? items.length)})`}
               </Button>
             ) : null}
             {selected.size ? (
@@ -477,7 +491,7 @@ function ConclusionsSession() {
               PREV
             </Button>
             <span className="text-text-muted tabular-nums">
-              page {results.data.page ?? page} / {pages}
+              page {results.data.page ?? page} / {listTotal.pages(results.data.page ?? page, pages, results.data.total ?? items.length)}
             </span>
             <Button
               variant="ghost"

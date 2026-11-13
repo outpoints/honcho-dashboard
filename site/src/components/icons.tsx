@@ -54,7 +54,9 @@ import {
   Moon,
   Monitor,
   Focus,
+  History,
   type LucideIcon,
+  GitMerge,
 } from "lucide-react";
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -70,6 +72,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "file-search": FileSearch,
   filter: Filter,
   "git-branch": GitBranch,
+  merge: GitMerge,
   "hard-drive": HardDrive,
   key: Key,
   layers: Layers,
@@ -113,6 +116,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   moon: Moon,
   monitor: Monitor,
   focus: Focus,
+  history: History,
 };
 
 export interface IconProps {

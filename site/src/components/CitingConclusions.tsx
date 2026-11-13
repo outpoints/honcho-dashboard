@@ -10,6 +10,7 @@ import { useActiveWorkspace } from "@/lib/honcho/config";
 import { getSdk } from "@/lib/honcho/sdk";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
 import { useHonchoQuery } from "@/lib/honcho/useQuery";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 
 /**
  * Honcho 3.5+: the conclusions that cite a message. The button shows only when
@@ -32,6 +33,7 @@ export function CitingConclusionsPanel({ messageId }: { messageId: string }) {
 
 function CitingConclusions({ workspaceId, messageId }: { workspaceId: string; messageId: string }) {
   const { messageCitations } = useHonchoCapabilities();
+  const listTotal = useListTotal();
   const [page, setPage] = useState(1);
   const [inspected, setInspected] = useState<string | null>(null);
   const result = useHonchoQuery(`citations/${workspaceId}/${messageId}/${page}`,
@@ -48,7 +50,7 @@ function CitingConclusions({ workspaceId, messageId }: { workspaceId: string; me
       : result.error ? <ReadError error={result.error} retry={result.refetch} />
       : data && data.total > 0 ? <>
         <p>
-          {data.total.toLocaleString()} {data.total === 1 ? "conclusion cites" : "conclusions cite"} this message.
+          {listTotal.format(data.total)} {data.total === 1 ? "conclusion cites" : "conclusions cite"} this message.
           {data.items.some((item) => item.observer_id.startsWith(SCOPE_OBSERVER_PREFIX))
             ? " Scope copies keep their citations, so a scope can repeat a conclusion."
             : null}
@@ -65,7 +67,7 @@ function CitingConclusions({ workspaceId, messageId }: { workspaceId: string; me
         </ul>
         {data.pages > 1 ? <div className="flex items-center justify-between gap-2">
           <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>PREV</Button>
-          <span className="text-text-muted">page {page} / {data.pages}</span>
+          <span className="text-text-muted">page {page} / {listTotal.pages(page, data.pages, data.total)}</span>
           <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(page + 1)}>NEXT</Button>
         </div> : null}
       </>

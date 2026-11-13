@@ -20,6 +20,7 @@ import { MessagesPage } from "@/components/pages/MessagesPage";
 import { SearchPage } from "@/components/pages/SearchPage";
 import { ConclusionsPage } from "@/components/pages/ConclusionsPage";
 import { ReasoningPage } from "@/components/pages/ReasoningPage";
+import { DreamsPage } from "@/components/pages/DreamsPage";
 import { ContextPage } from "@/components/pages/ContextPage";
 import { ChatPage } from "@/components/pages/ChatPage";
 import { WebhooksPage } from "@/components/pages/WebhooksPage";
@@ -44,6 +45,7 @@ const RENDER: Record<RouteKey, React.ComponentType> = {
   search: SearchPage,
   conclusions: ConclusionsPage,
   reasoning: ReasoningPage,
+  dreams: DreamsPage,
   context: ContextPage,
   chat: ChatPage,
   webhooks: WebhooksPage,

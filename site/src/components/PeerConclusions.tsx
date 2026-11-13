@@ -3,12 +3,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button, Tabs, TextInput } from "@/components/atoms";
 import { ConclusionInspector } from "@/components/ConclusionInspector";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
 import { Markdown } from "@/components/Markdown";
 import { Select } from "@/components/Select";
 import { honcho as raw } from "@/lib/honcho/client";
 import { useActiveHonchoOptions } from "@/lib/honcho/config";
 import { useHonchoCapabilities } from "@/lib/honcho/useCapabilities";
+import { useListTotal } from "@/lib/honcho/useListTotal";
 import { formatApiError, useHonchoQuery } from "@/lib/honcho/useQuery";
 import type { ApiConclusion, ApiMessage } from "@/lib/honcho/types";
 import {
@@ -22,22 +23,12 @@ import {
   type Perspective,
 } from "@/lib/peerMemory";
 import { cn } from "@/lib/utils";
+import { LEVEL_META, levelMeta } from "@/lib/conclusionLevels";
 import { useNow } from "@/lib/useNow";
 
 const PAGE = 10;
 const LONG_TEXT = 280;
 const DAY_MS = 86_400_000;
-
-const LEVEL_META: Record<LevelTab, { label: string; icon?: IconName; tone: string; noun: string }> = {
-  all: { label: "ALL", tone: "text-text-muted", noun: "" },
-  inductive: { label: "INDUCTIVE", icon: "trending-up", tone: "text-pink-400", noun: "inductive " },
-  deductive: { label: "DEDUCTIVE", icon: "arrow-right", tone: "text-blue-400", noun: "deductive " },
-  explicit: { label: "EXPLICIT", icon: "eye", tone: "text-accent", noun: "explicit " },
-};
-
-function levelMeta(level: string | null | undefined) {
-  return LEVEL_META[(level ?? "") as LevelTab] ?? { label: (level ?? "unknown").toUpperCase(), tone: "text-purple-400", noun: "" };
-}
 
 // The header and every row share one grid through subgrid, so the detail columns
 // can size to their widest content (peer names are short) and still line up.
@@ -148,12 +139,13 @@ export function PeerConclusions({ workspaceId, peerId }: { workspaceId: string; 
   };
 
   const now = useNow(60_000);
+  const listTotal = useListTotal();
   const counts = levelCounts.data;
   const views = viewCounts.data;
   const shown = list.key === listKey ? list.items.length : 0;
   const withLevel = level === "all";
   const cols = withLevel ? TABLE_COLS.withLevel : TABLE_COLS.plain;
-  const viewLabel = (label: string, n: number | undefined) => (n === undefined ? label : `${label} · ${n.toLocaleString()}`);
+  const viewLabel = (label: string, n: number | undefined) => (n === undefined ? label : `${label} · ${listTotal.format(n)}`);
   const emptyLabel = text
     ? <>No {LEVEL_META[level].noun}conclusions about {peerId} contain &ldquo;{text}&rdquo;.</>
     : <>No {LEVEL_META[level].noun}conclusions about {peerId} {perspective === "own" ? "held by itself" : perspective === "others" ? "held by other peers" : ""} yet.</>;
@@ -165,7 +157,7 @@ export function PeerConclusions({ workspaceId, peerId }: { workspaceId: string; 
         <h3 className="text-[10px] text-accent uppercase tracking-wider font-normal">conclusions</h3>
         <span className="text-[10px] text-text-muted tabular-nums">
           {overall.error ? "counts unavailable" : overall.data
-            ? `${overall.data.total.toLocaleString()} about ${peerId} · ${overall.data.recent.toLocaleString()} new in the last 30 days`
+            ? `${listTotal.format(overall.data.total)} about ${peerId} · ${overall.data.recent.toLocaleString()} new in the last 30 days`
             : "counting…"}
         </span>
       </div>
@@ -347,7 +339,7 @@ export function PeerConclusions({ workspaceId, peerId }: { workspaceId: string; 
               </ul>
             </div>
               <div className="flex items-center justify-between gap-3 pt-2.5 text-[10px] text-text-muted">
-                <span className="tabular-nums">newest first · {shown.toLocaleString()} of {list.total.toLocaleString()}</span>
+                <span className="tabular-nums">newest first · {shown.toLocaleString()} of {listTotal.format(list.total)}</span>
                 {shown < list.total ? (
                   <Button variant="ghost" size="sm" onClick={() => listKey && void loadPage(listKey, list.page + 1)} disabled={list.loading}>
                     {list.loading ? "LOADING…" : "LOAD_MORE"}

@@ -5,9 +5,10 @@ import { toApiConclusion, toApiPeer } from "../src/lib/honcho/adapters.ts";
 import { honcho } from "../src/lib/honcho/client.ts";
 import { HonchoApiError } from "../src/lib/honcho/types.ts";
 
-// Response contracts from plastic-labs/honcho v3.1.0, v3.2.0–v3.2.2, v3.3.0, and
-// v3.4.0, src/schemas/api.py (Conclusion, Workspace, Peer) and the chat routes.
-// 3.4.0 adds a server-assigned `uid` beside the client-chosen `id`.
+// Response contracts from plastic-labs/honcho v3.1.0, v3.2.0–v3.2.2, v3.3.0,
+// v3.4.0, v3.5.0 and v3.6.1, src/schemas/api.py (Conclusion, Workspace, Peer) and
+// the chat routes. 3.4.0 adds a server-assigned `uid` beside the client-chosen
+// `id`; 3.5 and 3.6 leave these shapes unchanged.
 const baseConclusion = {
   id: "conclusion-1",
   content: "Prefers morning meetings",
@@ -23,11 +24,11 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
   headers: { "content-type": "application/json" },
 });
 
-for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2", "3.3.0", "3.4.0"]) {
+for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2", "3.3.0", "3.4.0", "3.5.0", "3.6.1"]) {
   test(`dashboard SDK and raw client preserve Honcho ${version} contracts`, async (t) => {
     invalidateSdk();
     t.after(invalidateSdk);
-    const withUid = version === "3.4.0";
+    const withUid = ["3.4.0", "3.5.0", "3.6.1"].includes(version);
     const attributed = !version.startsWith("3.0.") && !version.startsWith("3.1.");
     const conclusion = attributed
       ? { ...baseConclusion, source_ids: ["source-1", "source-2"], times_derived: 4 }
@@ -75,7 +76,7 @@ for (const version of ["3.0.12", "3.1.0", "3.1.2", "3.2.0", "3.2.1", "3.2.2", "3
     assert.ok(calls.every(({ headers }) => headers.get("X-Honcho-Base-Url") === opts.baseUrl));
     const sdkCalls = calls.filter(({ path }) => !path.endsWith("/conclusions/list"));
     assert.ok(sdkCalls.every(({ headers }) => headers.get("authorization") === `Bearer ${opts.token}`));
-    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.8.0")));
+    assert.ok(sdkCalls.every(({ headers }) => headers.get("X-Honcho-Host")?.startsWith("honcho-typescript/2.9.0")));
     const query = calls.find(({ path }) => path.endsWith("/conclusions/query"));
     assert.deepEqual(query.body, {
       query: "meetings", top_k: 50,
